@@ -1,0 +1,10 @@
+fn main() -> int {
+    let total: int = 0;
+    for (let i: int = 0; i < 5; i = i + 1) {
+        let temp: int = alloc(int, 10);
+        temp[0] = i * 100;
+        total = total + temp[0];
+    }
+    print(total);
+    return 0;
+}

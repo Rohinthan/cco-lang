@@ -1,0 +1,13 @@
+fn main() -> int {
+    let mode: int = 1;
+    if (mode == 1) {
+        let b1: int = alloc(int, 4);
+        b1[0] = 100;
+        print(b1[0]);
+    } else {
+        let b2: int = alloc(int, 4);
+        b2[0] = 200;
+        print(b2[0]);
+    }
+    return 0;
+}

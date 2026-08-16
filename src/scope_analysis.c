@@ -17,6 +17,8 @@ typedef struct {
     Scope scopes[128];
     int depth;
     AstArena *arena;
+    AstNode *program;
+    AstNode *current_function;
 } ScopeStack;
 
 static void push_scope(ScopeStack *stack, AstNode *block_node, bool is_loop) {
@@ -75,7 +77,6 @@ static int find_owned_in_stack(ScopeStack *stack, const char *name, int *out_sco
 }
 
 static void add_free_to_node(ScopeStack *stack, AstNode *node, const char *var_name) {
-    // Avoid duplicates in frees_to_emit list for a single node
     for (int i = 0; i < node->frees_count; i++) {
         if (strcmp(node->frees_to_emit[i], var_name) == 0) return;
     }
@@ -90,6 +91,15 @@ static void add_free_to_node(ScopeStack *stack, AstNode *node, const char *var_n
     node->frees_count++;
 }
 
+static AstNode *find_function(AstNode *program, const char *name) {
+    if (!program || program->type != NODE_PROGRAM) return NULL;
+    for (int i = 0; i < program->as.program.count; i++) {
+        AstNode *fn = program->as.program.functions[i];
+        if (strcmp(fn->as.function.name, name) == 0) return fn;
+    }
+    return NULL;
+}
+
 static void analyze_node(ScopeStack *stack, AstNode *node);
 
 static void analyze_block(ScopeStack *stack, AstNode *block_node, bool is_loop) {
@@ -101,20 +111,22 @@ static void analyze_block(ScopeStack *stack, AstNode *block_node, bool is_loop) 
 
         if (stmt->type == NODE_LET) {
             analyze_node(stack, stmt->as.let.value);
-            if (stmt->as.let.value->type == NODE_ALLOC) {
+            bool is_alloc = (stmt->as.let.value->type == NODE_ALLOC);
+            if (!is_alloc && stmt->as.let.value->type == NODE_CALL) {
+                const char *callee = stmt->as.let.value->as.call.callee;
+                AstNode *fn = find_function(stack->program, callee);
+                if (fn && fn->as.function.returns_heap_pointer) {
+                    is_alloc = true;
+                }
+            }
+
+            if (is_alloc) {
                 stmt->is_heap_owner = true;
                 scope_add_owned(stack, s, stmt->as.let.name);
             }
         } else if (stmt->type == NODE_ASSIGN) {
             analyze_node(stack, stmt->as.assign.value);
 
-            /*
-             * EDGE CASE 3 HANDLING:
-             * Reassigning an owned pointer variable (e.g. p = alloc(...))
-             * If p already holds an allocation in the current or outer scope,
-             * we must emit free(p) BEFORE assigning the new allocation so the
-             * previous memory block is not leaked.
-             */
             int scope_idx = -1;
             int owned_idx = find_owned_in_stack(stack, stmt->as.assign.name, &scope_idx);
             if (owned_idx != -1 && stmt->as.assign.value->type == NODE_ALLOC) {
@@ -122,19 +134,12 @@ static void analyze_block(ScopeStack *stack, AstNode *block_node, bool is_loop) 
                 add_free_to_node(stack, stmt, stmt->as.assign.name);
             }
 
-            /*
-             * OWNERSHIP TRANSFER (stmt = outer_var = inner_owned_var):
-             * If assigning an owned pointer to an outer-scope variable or param,
-             * transfer ownership so the inner scope doesn't double-free it.
-             */
             if (stmt->as.assign.value->type == NODE_IDENT) {
                 const char *rhs_name = stmt->as.assign.value->as.ident.name;
                 int rhs_scope_idx = -1;
                 int rhs_owned_idx = find_owned_in_stack(stack, rhs_name, &rhs_scope_idx);
                 if (rhs_owned_idx != -1) {
-                    // Mark RHS as transferred in its scope
                     stack->scopes[rhs_scope_idx].transferred[rhs_owned_idx] = true;
-                    // If target LHS is in an outer scope, LHS becomes the new owner
                     int lhs_scope_idx = -1;
                     int lhs_owned_idx = find_owned_in_stack(stack, stmt->as.assign.name, &lhs_scope_idx);
                     if (lhs_scope_idx != -1 && lhs_scope_idx < rhs_scope_idx) {
@@ -147,20 +152,12 @@ static void analyze_block(ScopeStack *stack, AstNode *block_node, bool is_loop) 
         }
     }
 
-    /*
-     * BLOCK FALLTHROUGH EXIT:
-     * Emit free() for all non-transferred variables owned by THIS block.
-     * EDGE CASE 2 HANDLING:
-     * Allocations inside a loop body are bound to the loop body's block scope
-     * and freed here at the end of each iteration.
-     */
     for (int i = 0; i < s->count; i++) {
         if (!s->transferred[i]) {
             add_free_to_node(stack, block_node, s->owned_vars[i]);
         }
     }
 
-    // Attach owned vars summary to AST node
     if (s->count > 0) {
         block_node->as.block.owned_vars = (char **)arena_alloc_array(stack->arena, s->count, sizeof(char *));
         for (int i = 0; i < s->count; i++) {
@@ -182,9 +179,13 @@ static void analyze_node(ScopeStack *stack, AstNode *node) {
             }
             break;
 
-        case NODE_FUNCTION:
+        case NODE_FUNCTION: {
+            AstNode *prev_fn = stack->current_function;
+            stack->current_function = node;
             analyze_block(stack, node->as.function.body, false);
+            stack->current_function = prev_fn;
             break;
+        }
 
         case NODE_BLOCK:
             analyze_block(stack, node, false);
@@ -214,7 +215,6 @@ static void analyze_node(ScopeStack *stack, AstNode *node) {
             break;
 
         case NODE_FOR:
-            // For loop introduces a scope for init let statement + body
             push_scope(stack, node, true);
             if (node->as.for_stmt.init) analyze_node(stack, node->as.for_stmt.init);
             if (node->as.for_stmt.cond) analyze_node(stack, node->as.for_stmt.cond);
@@ -226,7 +226,6 @@ static void analyze_node(ScopeStack *stack, AstNode *node) {
                     analyze_node(stack, node->as.for_stmt.body);
                 }
             }
-            // Free any variables owned directly by for loop header scope
             Scope *fs = current_scope(stack);
             for (int i = 0; i < fs->count; i++) {
                 if (!fs->transferred[i]) {
@@ -241,14 +240,6 @@ static void analyze_node(ScopeStack *stack, AstNode *node) {
                 analyze_node(stack, node->as.return_stmt.value);
             }
 
-            /*
-             * EDGE CASE 1 & 4 HANDLING:
-             * Early return inside nested scopes/loops/ifs:
-             * Collect all non-transferred owned pointers across ALL enclosing scopes
-             * of the current function.
-             * If returning a variable (e.g. return x;), skip freeing x (ownership transfer to caller),
-             * but free all other owned pointers!
-             */
             const char *ret_var = NULL;
             if (node->as.return_stmt.value && node->as.return_stmt.value->type == NODE_IDENT) {
                 ret_var = node->as.return_stmt.value->as.ident.name;
@@ -256,6 +247,13 @@ static void analyze_node(ScopeStack *stack, AstNode *node) {
                 int r_owned_idx = find_owned_in_stack(stack, ret_var, &r_scope_idx);
                 if (r_owned_idx != -1) {
                     stack->scopes[r_scope_idx].transferred[r_owned_idx] = true;
+                    if (stack->current_function) {
+                        stack->current_function->as.function.returns_heap_pointer = true;
+                    }
+                }
+            } else if (node->as.return_stmt.value && node->as.return_stmt.value->type == NODE_ALLOC) {
+                if (stack->current_function) {
+                    stack->current_function->as.function.returns_heap_pointer = true;
                 }
             }
 
@@ -274,11 +272,6 @@ static void analyze_node(ScopeStack *stack, AstNode *node) {
 
         case NODE_BREAK:
         case NODE_CONTINUE: {
-            /*
-             * JUMP OUT OF LOOP (break / continue):
-             * Gather all non-transferred owned pointers from current scope up to
-             * the nearest enclosing loop scope and emit free() for them.
-             */
             for (int s_idx = stack->depth - 1; s_idx >= 0; s_idx--) {
                 Scope *s = &stack->scopes[s_idx];
                 for (int i = 0; i < s->count; i++) {
@@ -286,7 +279,7 @@ static void analyze_node(ScopeStack *stack, AstNode *node) {
                         add_free_to_node(stack, node, s->owned_vars[i]);
                     }
                 }
-                if (s->is_loop_scope) break; // Reached loop boundary
+                if (s->is_loop_scope) break;
             }
             break;
         }
@@ -325,5 +318,14 @@ void analyze_scopes(AstNode *program, AstArena *arena) {
     ScopeStack stack;
     stack.depth = 0;
     stack.arena = arena;
+    stack.program = program;
+    stack.current_function = NULL;
+
+    // Pass 1: analyze functions to compute returns_heap_pointer flags
+    analyze_node(&stack, program);
+
+    // Pass 2: analyze full AST with returns_heap_pointer signatures available
+    stack.depth = 0;
+    stack.current_function = NULL;
     analyze_node(&stack, program);
 }

@@ -1,0 +1,21 @@
+// CMM (C--) Demonstration Program
+// Demonstrates automatic scope-exit memory management with alloc()
+
+fn find_max_subsegment(n: int, target: int) -> int {
+    let buf: int = alloc(int, n);
+    for (let i: int = 0; i < n; i = i + 1) {
+        buf[i] = (i + 1) * 3;
+        if (buf[i] == target) {
+            print(buf[i]);
+            return i; // Early return: CMM auto-frees 'buf' before returning!
+        }
+    }
+    return -1;
+}
+
+fn main() -> int {
+    print("--- CMM Scope-Exit Auto-Free Demo ---");
+    let idx: int = find_max_subsegment(10, 12);
+    print(idx);
+    return 0;
+}

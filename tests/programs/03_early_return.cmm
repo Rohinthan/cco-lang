@@ -1,0 +1,16 @@
+fn find_first_even(count: int) -> int {
+    let nums: int = alloc(int, count);
+    for (let i: int = 0; i < count; i = i + 1) {
+        nums[i] = i;
+        if (i == 4) {
+            return nums[i];
+        }
+    }
+    return -1;
+}
+
+fn main() -> int {
+    let result: int = find_first_even(10);
+    print(result);
+    return 0;
+}

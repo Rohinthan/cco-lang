@@ -1,0 +1,11 @@
+fn main() -> int {
+    let p: int = alloc(int, 5);
+    p[0] = 50;
+    print(p[0]);
+
+    p = alloc(int, 10);
+    p[0] = 99;
+    print(p[0]);
+
+    return 0;
+}

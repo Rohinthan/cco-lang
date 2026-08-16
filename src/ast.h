@@ -62,6 +62,7 @@ struct AstNode {
             Type *param_types;
             int param_count;
             Type return_type;
+            bool returns_heap_pointer;
             AstNode *body;
         } function;
 

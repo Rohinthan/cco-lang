@@ -1,0 +1,15 @@
+fn create_sequence(n: int) -> int {
+    let buf: int = alloc(int, n);
+    for (let i: int = 0; i < n; i = i + 1) {
+        buf[i] = (i + 1) * 7;
+    }
+    return buf;
+}
+
+fn main() -> int {
+    let arr: int = create_sequence(3);
+    print(arr[0]);
+    print(arr[1]);
+    print(arr[2]);
+    return 0;
+}

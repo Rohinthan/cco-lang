@@ -1,0 +1,16 @@
+fn main() -> int {
+    let sum: int = 0;
+    for (let i: int = 0; i < 10; i = i + 1) {
+        let temp: int = alloc(int, 5);
+        temp[0] = i;
+        if (i % 2 == 0) {
+            continue;
+        }
+        if (i == 7) {
+            break;
+        }
+        sum = sum + temp[0];
+    }
+    print(sum);
+    return 0;
+}
