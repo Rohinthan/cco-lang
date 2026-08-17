@@ -1,101 +1,105 @@
-# CMM (C--) Compiler: A C-like Language with Automatic Memory Management
+# CMM (C--) Compiler: A C-like Language with Automatic Memory Management and C++-Style Objects
 
-**CMM (C--)** is a lightweight, systems programming language with explicit C-like syntax and **compiler-enforced, scope-exit automatic memory management**. It compiles CMM source code (`.cmm`) into portable, standard C11 source code (`.c`), which is then compiled to native machine binaries using `gcc` or `clang`.
+**CMM (C--)** is a lightweight, systems programming language with explicit C-like syntax, **scope-exit auto-free for raw allocations**, and **deterministic reference-counted memory management for classes and objects**. It compiles CMM source code (`.cmm`) into portable, standard C11 source code (`.c`), which is then compiled to native machine binaries using `gcc` or `clang`.
+
+> **Write it like Python's class syntax reads. Compile it and it runs like C. No garbage collector pause, no manual free(), no header files.**
+
+---
+
+## 🏛️ The Three Pillars of CMM
+
+1. **RUNS LIKE C**  
+   CMM is a source-to-source transpiler, not an interpreter and not a VM. Every `.cmm` file becomes real, flat C11 source, compiled by `gcc` to a native binary. There is no runtime interpreter loop, no bytecode dispatch, no hidden VM overhead. A CMM program's speed ceiling is C's speed ceiling, full stop.
+
+2. **HAS OBJECTS LIKE C++**  
+   CMM provides `class`, fields, methods, and `obj.method(args)` call syntax—the actual ergonomic win of C++ over plain C, placing verbs next to their nouns instead of `distance(&a, &b)` scattered functions. Under the hood it translates to C structs and functions taking a `self` pointer—no vtables, no multiple inheritance, no operator overloading, no templates, no name-mangling maze.
+
+3. **WRITTEN LIKE IT'S EASY**  
+   No manual `malloc`/`free`. No header files to keep in sync with `.c` files. No `->` vs `.` decision (member access is always `.`). Memory is managed automatically via scope-exit auto-free (v1, for raw allocations) and reference counting (v2, for objects)—both deterministic, both zero-runtime-pause.
 
 ---
 
 ## 🌟 Key Language Features
 
+- **Classes & Methods**: Declare classes with typed fields and methods taking explicit `self`.
+- **Automatic Reference Counting (ARC)**: Objects carry an internal `__rc` count. Retains are automatically injected on assignment/aliasing, releases on scope exit, reassignment, or early return. Objects are freed immediately when `__rc == 0`.
 - **Scope-Exit Auto-Free (`alloc`)**: Memory allocated via `alloc(type, count)` returns a managed heap pointer that is **automatically freed by the compiler** when its enclosing scope exits—including early `return`, `break`, `continue`, or normal block fallthrough.
-- **Ownership Transfer Semantics**: Returning a heap-allocated pointer from a function or assigning it to an outer scope transfers ownership seamlessly, preventing double-free defects while freeing unreturned allocations.
-- **Reassignment Safety**: Reassigning an existing managed variable (e.g. `p = alloc(...)`) automatically frees the previous buffer before binding the new allocation, eliminating iteration leaks.
-- **Zero-Runtime Overhead**: Transpiles directly to deterministic `malloc` / `free` calls in standard C. No garbage collector pauses, reference counting overhead, or external runtime libraries.
+- **Ownership Transfer Semantics**: Returning an object or heap-allocated pointer from a function transfers ownership seamlessly to the caller.
 - **Valgrind Validated**: Passes full leak checking (`--leak-check=full --error-exitcode=1`) with **0 memory leaks and 0 errors**.
 
 ---
 
-## 🏗️ Compiler Architecture Overview
+## 💡 Transpilation Example: Classes & Refcounting
 
-```
-    +-------------------+
-    |  .cmm Source File |
-    +---------+---------+
-              |
-              v
-     +-----------------+
-     |  LEXICAL ANALYZER |  -> Stream of tokens (line & column tracking)
-     +--------+--------+
-              |
-              v
-     +-----------------+
-     | RECURSIVE PARSER|  -> Abstract Syntax Tree (AST) with Arena Allocator
-     +--------+--------+
-              |
-              v
-     +-----------------+
-     | SCOPE ANALYZER  |  -> Two-Pass Scope Analysis & Exit Path Computation
-     +--------+--------+     Annotates AST with auto-free injection points
-              |
-              v
-     +-----------------+
-     | CODE GENERATOR  |  -> Emits C11 source with injected free() calls
-     +--------+--------+
-              |
-              v
-     +-----------------+
-     | GCC / CLANG     |  -> Native Executable Binary
-     +-----------------+
-```
-
-### Module Breakdown
-- `src/lexer.c` & `src/lexer.h`: Tokenizer tracking line/column position, comments, string literals with escape codes, keywords, and double-char operators.
-- `src/ast.c` & `src/ast.h`: AST node definitions paired with a high-performance **AstArena** compiler memory allocator.
-- `src/parser.c` & `src/parser.h`: Precedence-climbing recursive-descent parser.
-- `src/scope_analysis.c` & `src/scope_analysis.h`: Two-pass scope tracking engine that tracks heap ownership, ownership transfers, and computes exact `free()` placement for every exit path.
-- `src/codegen.c` & `src/codegen.h`: Emits formatted C11 code, automatically evaluating return expressions into temporary registers before releasing scope resources.
-- `src/main.c`: Driver CLI for reading `.cmm` files, generating `.c` code, and invoking `gcc`.
-
----
-
-## 💡 Transpilation Example: Before and After
-
-### CMM Source (`examples/demo.cmm`)
+### CMM Source (`examples/points_demo.cmm`)
 ```cmm
-fn find_max_subsegment(n: int, target: int) -> int {
-    let buf: int = alloc(int, n);
-    for (let i: int = 0; i < n; i = i + 1) {
-        buf[i] = (i + 1) * 3;
-        if (buf[i] == target) {
-            print(buf[i]);
-            return i; // Early return: CMM auto-frees 'buf' before returning!
-        }
+class Point {
+    x: int;
+    y: int;
+
+    fn sum(self) -> int {
+        return self.x + self.y;
     }
-    return -1; // Normal exit: CMM auto-frees 'buf' here too!
+}
+
+fn main() -> int {
+    let a: Point = Point { x: 3, y: 4 };
+    let b: Point = a;              // alias, __rc becomes 2
+    print(a.sum());
+    print(b.sum());
+    let c: Point = Point { x: 10, y: 20 };
+    c = Point { x: 1, y: 1 };      // old c released, freed immediately
+    print(c.sum());
+    return 0;
 }
 ```
 
-### Transpiled Standard C (`build/demo.c`)
+### Transpiled Standard C
 ```c
-/* Generated by CMM (C--) Compiler */
-#define _POSIX_C_SOURCE 200809L
-#include <stdio.h>
-#include <stdlib.h>
-#include <stdbool.h>
-#include <string.h>
+typedef struct Point Point;
+struct Point {
+    int __rc;
+    int x;
+    int y;
+};
 
-int find_max_subsegment(int n, int target) {
-    int * buf = (int *)malloc((n) * sizeof(int));
-    for (int i = 0; (i < n); i = (i + 1)) {
-        buf[i] = ((i + 1) * 3);
-        if ((buf[i] == target)) {
-            printf("%d\n", (int)(buf[i]));
-            __typeof__(i) __cmm_ret_val = i;
-            free(buf); // Auto-injected free before early return!
-            return __cmm_ret_val;
-        }
+static inline Point *Point_retain(Point *p) {
+    if (p) p->__rc++;
+    return p;
+}
+
+static inline void Point_release(Point *p) {
+    if (p && --p->__rc == 0) {
+        free(p);
     }
-    __typeof__((-1)) __cmm_ret_val = (-1);
-    free(buf); // Auto-injected free before fallthrough return!
+}
+
+static inline Point *Point_new(int x, int y) {
+    Point *__obj = (Point *)malloc(sizeof(Point));
+    __obj->__rc = 1;
+    __obj->x = x;
+    __obj->y = y;
+    return __obj;
+}
+
+int Point_sum(Point * self) {
+    __typeof__((self->x + self->y)) __cmm_ret_val = (self->x + self->y);
+    return __cmm_ret_val;
+}
+
+int main(void) {
+    Point * a = Point_new(3, 4);
+    Point * b = Point_retain(a);
+    printf("%d\n", (int)(Point_sum(a)));
+    printf("%d\n", (int)(Point_sum(b)));
+    Point * c = Point_new(10, 20);
+    Point_release(c);
+    c = Point_new(1, 1);
+    printf("%d\n", (int)(Point_sum(c)));
+    __typeof__(0) __cmm_ret_val = 0;
+    Point_release(c);
+    Point_release(b);
+    Point_release(a);
     return __cmm_ret_val;
 }
 ```
@@ -115,9 +119,6 @@ int find_max_subsegment(int n, int target) {
 # Clone and build the CMM compiler executable
 make cmm
 
-# Transpile and execute a CMM program
-./cmm examples/demo.cmm --emit-c --run
-
 # Run full Unit and Integration Test Suite under Valgrind
 make test
 ```
@@ -128,9 +129,9 @@ make test
 
 | Test Case | Description | Result | Valgrind Leak Status |
 | :--- | :--- | :---: | :---: |
-| `test_lexer` | Unit tests for tokenizer line/column & token types | **PASS** | 0 Bytes Leaked |
-| `test_parser` | Unit tests for AST node construction & precedence | **PASS** | 0 Bytes Leaked |
-| `test_scope` | Unit tests for scope analysis pass & free injection | **PASS** | 0 Bytes Leaked |
+| `test_lexer` | Unit tests for tokenizer line/column, keywords (`class`, `self`) & tokens | **PASS** | 0 Bytes Leaked |
+| `test_parser` | Unit tests for AST node construction & class/method parsing | **PASS** | 0 Bytes Leaked |
+| `test_scope` | Unit tests for scope analysis pass, free & release injection | **PASS** | 0 Bytes Leaked |
 | `01_hello` | Basic printing, strings, arithmetic operations | **PASS** | 0 Bytes Leaked |
 | `02_alloc_basic` | Basic array allocation, indexing, & block exit free | **PASS** | 0 Bytes Leaked |
 | `03_early_return` | Early return inside nested loop with heap alloc | **PASS** | 0 Bytes Leaked |
@@ -139,6 +140,11 @@ make test
 | `06_nested_scopes` | Allocations in conditional `if`/`else` branches | **PASS** | 0 Bytes Leaked |
 | `07_break_continue` | `break` and `continue` statements inside loops | **PASS** | 0 Bytes Leaked |
 | `08_reassign_alloc` | Reassigning managed variable to new allocation | **PASS** | 0 Bytes Leaked |
+| `09_basic_class` | Basic class creation and method call | **PASS** | 0 Bytes Leaked |
+| `10_method_call` | Method calls with object parameters | **PASS** | 0 Bytes Leaked |
+| `11_aliasing_refcount` | Object aliasing, `__rc` retain tracking & single free | **PASS** | 0 Bytes Leaked |
+| `12_reassign_object` | Reassigning object variables with automatic release | **PASS** | 0 Bytes Leaked |
+| `13_object_early_return` | Object lifetime inside loops with early returns | **PASS** | 0 Bytes Leaked |
 
 ---
 
