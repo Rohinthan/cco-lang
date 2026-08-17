@@ -3,6 +3,8 @@
 
 typedef enum {
     // Keywords
+    TOKEN_CLASS,
+    TOKEN_SELF,
     TOKEN_FN,
     TOKEN_LET,
     TOKEN_IF,

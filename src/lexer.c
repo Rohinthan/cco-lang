@@ -33,6 +33,8 @@ void free_tokens(TokenArray *array) {
 }
 
 static TokenType check_keyword(const char *str) {
+    if (strcmp(str, "class") == 0) return TOKEN_CLASS;
+    if (strcmp(str, "self") == 0) return TOKEN_SELF;
     if (strcmp(str, "fn") == 0) return TOKEN_FN;
     if (strcmp(str, "let") == 0) return TOKEN_LET;
     if (strcmp(str, "if") == 0) return TOKEN_IF;
@@ -262,6 +264,8 @@ TokenArray lex_source(const char *source) {
 
 const char *token_type_to_string(TokenType type) {
     switch (type) {
+        case TOKEN_CLASS: return "class";
+        case TOKEN_SELF: return "self";
         case TOKEN_FN: return "fn";
         case TOKEN_LET: return "let";
         case TOKEN_IF: return "if";

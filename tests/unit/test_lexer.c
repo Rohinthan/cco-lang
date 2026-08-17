@@ -35,10 +35,26 @@ void test_string_and_comments() {
     printf("[PASS] test_string_and_comments\n");
 }
 
+void test_class_tokens() {
+    const char *src = "class Point { self }";
+    TokenArray arr = lex_source(src);
+    assert(arr.count == 6); // 5 tokens + EOF
+    assert(arr.tokens[0].type == TOKEN_CLASS);
+    assert(arr.tokens[1].type == TOKEN_IDENT);
+    assert(strcmp(arr.tokens[1].lexeme, "Point") == 0);
+    assert(arr.tokens[2].type == TOKEN_LBRACE);
+    assert(arr.tokens[3].type == TOKEN_SELF);
+    assert(arr.tokens[4].type == TOKEN_RBRACE);
+    assert(arr.tokens[5].type == TOKEN_EOF);
+    free_tokens(&arr);
+    printf("[PASS] test_class_tokens\n");
+}
+
 int main() {
     printf("Running Lexer Unit Tests...\n");
     test_basic_tokens();
     test_string_and_comments();
+    test_class_tokens();
     printf("All Lexer tests passed!\n");
     return 0;
 }
