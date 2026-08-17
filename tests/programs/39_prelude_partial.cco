@@ -1,0 +1,5 @@
+fn main() -> int {
+    let msg: string = concat("hello ", "world");
+    print(msg);
+    return 0;
+}

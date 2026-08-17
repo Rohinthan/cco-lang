@@ -1,8 +1,8 @@
-# Cco (C--) Compiler: A C-like Language with Compile-Time Single Ownership, Lightweight Structs, Minimal Module/Import System & Standard Library (v7.0)
+# Cco (C--) Compiler: A C-like Language with Compile-Time Single Ownership, Selective Prelude Emission, Lightweight Structs, Minimal Module/Import System & Standard Library (v8.0)
 
-**Cco (C--)** is a lightweight, systems programming language with explicit C-like syntax, **scope-exit auto-free for raw allocations**, **compile-time single ownership with move semantics**, **Lightweight Structs (Value Types)** (`struct Point2D { x: int; y: int; }`), **Arrays of Objects with for-each iteration** (`alloc(Point, n)`, `for p in pts`), **Minimal Multi-file Module/Import System** (`import "file.cco";`), and a **built-in Standard Library** (Strings, Math, File I/O). It transpiles Cco source code (`.cco`) into portable, standard C11 source code (`.c`), which is compiled to native machine binaries using `gcc` or `clang`.
+**Cco (C--)** is a lightweight, systems programming language with explicit C-like syntax, **scope-exit auto-free for raw allocations**, **compile-time single ownership with move semantics**, **Selective Prelude Emission** (only emitting used stdlib helpers for clean generated C), **Lightweight Structs (Value Types)** (`struct Point2D { x: int; y: int; }`), **Arrays of Objects with for-each iteration** (`alloc(Point, n)`, `for p in pts`), **Minimal Multi-file Module/Import System** (`import "file.cco";`), and a **built-in Standard Library** (Strings, Math, File I/O). It transpiles Cco source code (`.cco`) into portable, standard C11 source code (`.c`), which is compiled to native machine binaries using `gcc` or `clang`.
 
-> **Write it like Python's class/struct syntax reads. Compile it and it runs like C with zero runtime reference counting overhead, zero GC pauses, stack-allocated value structs with zero heap allocation, Rust-like compile-time ownership safety across multi-file programs, and GCC/Rust-style diagnostic error messages.**
+> **Write it like Python's class/struct syntax reads. Compile it and it runs like C with zero runtime reference counting overhead, zero GC pauses, clean inspectable generated C via selective prelude emission, stack-allocated value structs, Rust-like compile-time ownership safety across multi-file programs, and GCC/Rust-style diagnostic error messages.**
 
 ---
 
@@ -15,11 +15,23 @@
    Cco provides heap `class` instances, stack-allocated `struct` value types, fields, methods, `obj.method(args)` call syntax, and **Arrays of Objects** (`Point[] = alloc(Point, 3)`). Under the hood it translates to C pointers and C structs—no vtables, no multiple inheritance, no operator overloading, no templates, no name-mangling maze.
 
 3. **WRITTEN LIKE IT'S EASY**  
-   No manual `malloc`/`free`. No header files to keep in sync with `.c` files. Memory is managed automatically via scope-exit auto-free, **single ownership release cascades**, **zero-allocation stack structs**, and a **Resolve-Then-Merge multi-file import system** (`import "file.cco";`)—both deterministic, zero runtime overhead, zero GC pause.
+   No manual `malloc`/`free`. No header files to keep in sync with `.c` files. Memory is managed automatically via scope-exit auto-free, **single ownership release cascades**, **zero-allocation stack structs**, **Selective Prelude Emission**, and a **Resolve-Then-Merge multi-file import system** (`import "file.cco";`)—both deterministic, zero runtime overhead, zero GC pause.
+
+---
+
+## ✂️ Selective Prelude Emission (v8.0)
+
+Cco v8.0 optimizes generated C code readability and cleanliness:
+
+- **Usage-Based Helper Emission**: Only stdlib helper functions (`__cco_*`) actually used or structurally required by a program are written to generated `.c` files.
+- **Transitive Dependency Resolution**: Automatically computes transitive dependencies (e.g. `__cco_bounds_check` transitively includes `__cco_arr_len`).
+- **Deterministic Fixed Ordering**: Emits required prelude chunks in a fixed, stable order for diffable compiler output.
+- **Clean Generated C**: Programs that don't use string or file I/O stdlib helpers generate zero unused helper boilerplate.
 
 ---
 
 ## 🏗️ Lightweight Structs (Value Types) (v7.0)
+
 
 Cco v7.0 introduces lightweight value-type structs (`struct Point2D { x: int; y: int; }`):
 
@@ -157,7 +169,7 @@ make test
 
 ---
 
-## 🧪 Test Suite Matrix (v7.0)
+## 🧪 Test Suite Matrix (v8.0)
 
 | Test Case | Description | Result | Valgrind Leak Status |
 | :--- | :--- | :---: | :---: |
@@ -201,6 +213,9 @@ make test
 | `35_struct_borrowed_param` | In-place struct mutation via borrowed reference (`&Vec2`) | **PASS** | 0 Bytes Leaked |
 | `36_struct_nonprimitive_field_ERROR` | Rejecting non-primitive field in struct with clear note | **PASS** | Compile Error (As Expected) |
 | `37_struct_class_name_collision_ERROR` | Rejecting class and struct name collision with two-location error | **PASS** | Compile Error (As Expected) |
+| `38_prelude_minimal` | Program using zero stdlib functions; asserts prelude section contains 0 `__cco_` helpers | **PASS** | 0 Bytes Leaked |
+| `39_prelude_partial` | Program using `concat()` only; asserts generated C contains `__cco_concat` but no unused helpers | **PASS** | 0 Bytes Leaked |
+| `40_prelude_transitive` | Array indexing; asserts transitive emission of `__cco_bounds_check` AND `__cco_arr_len` | **PASS** | 0 Bytes Leaked |
 
 ---
 

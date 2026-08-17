@@ -1000,6 +1000,212 @@ static void gen_function(CodegenCtx *ctx, AstNode *fn) {
     sb_append(&ctx->sb, "\n");
 }
 
+static void mark_chunk_used(bool *used_chunks, const char *name) {
+    if (!name) return;
+    for (size_t i = 0; i < PRELUDE_CHUNK_COUNT; i++) {
+        if (strcmp(PRELUDE_CHUNKS[i].name, name) == 0) {
+            used_chunks[i] = true;
+            return;
+        }
+    }
+}
+
+static void check_releases_usage(AstNode *node, bool *used_chunks) {
+    if (!node) return;
+    for (int i = 0; i < node->releases_count; i++) {
+        if (node->releases_to_emit && node->releases_to_emit[i].is_array) {
+            mark_chunk_used(used_chunks, "free_arr");
+        }
+    }
+    if (node->frees_count > 0) {
+        mark_chunk_used(used_chunks, "free_arr");
+    }
+}
+
+static void scan_node_usage(AstNode *node, bool *used_chunks) {
+    if (!node) return;
+
+    check_releases_usage(node, used_chunks);
+
+    switch (node->type) {
+        case NODE_PROGRAM:
+            for (int i = 0; i < node->as.program.class_count; i++) {
+                scan_node_usage(node->as.program.classes[i], used_chunks);
+            }
+            for (int i = 0; i < node->as.program.struct_count; i++) {
+                scan_node_usage(node->as.program.structs[i], used_chunks);
+            }
+            for (int i = 0; i < node->as.program.count; i++) {
+                scan_node_usage(node->as.program.functions[i], used_chunks);
+            }
+            break;
+
+        case NODE_CLASS:
+            for (int m = 0; m < node->as.class_decl.method_count; m++) {
+                scan_node_usage(node->as.class_decl.methods[m], used_chunks);
+            }
+            break;
+
+        case NODE_FUNCTION:
+            scan_node_usage(node->as.function.body, used_chunks);
+            break;
+
+        case NODE_METHOD:
+            scan_node_usage(node->as.method.body, used_chunks);
+            break;
+
+        case NODE_BLOCK:
+            for (int i = 0; i < node->as.block.count; i++) {
+                scan_node_usage(node->as.block.stmts[i], used_chunks);
+            }
+            break;
+
+        case NODE_LET:
+            if (node->as.let.is_array) {
+                mark_chunk_used(used_chunks, "free_arr");
+            }
+            scan_node_usage(node->as.let.value, used_chunks);
+            break;
+
+        case NODE_ASSIGN:
+            scan_node_usage(node->as.assign.value, used_chunks);
+            break;
+
+        case NODE_MEMBER_ASSIGN:
+            scan_node_usage(node->as.member_assign.object, used_chunks);
+            scan_node_usage(node->as.member_assign.value, used_chunks);
+            break;
+
+        case NODE_INDEX_ASSIGN:
+            mark_chunk_used(used_chunks, "bounds_check");
+            scan_node_usage(node->as.index_assign.array_expr, used_chunks);
+            scan_node_usage(node->as.index_assign.index, used_chunks);
+            scan_node_usage(node->as.index_assign.value, used_chunks);
+            break;
+
+        case NODE_IF:
+            scan_node_usage(node->as.if_stmt.cond, used_chunks);
+            scan_node_usage(node->as.if_stmt.then_b, used_chunks);
+            scan_node_usage(node->as.if_stmt.else_b, used_chunks);
+            break;
+
+        case NODE_WHILE:
+            scan_node_usage(node->as.while_stmt.cond, used_chunks);
+            scan_node_usage(node->as.while_stmt.body, used_chunks);
+            break;
+
+        case NODE_FOR:
+            scan_node_usage(node->as.for_stmt.init, used_chunks);
+            scan_node_usage(node->as.for_stmt.cond, used_chunks);
+            scan_node_usage(node->as.for_stmt.step, used_chunks);
+            scan_node_usage(node->as.for_stmt.body, used_chunks);
+            break;
+
+        case NODE_FOR_EACH:
+            mark_chunk_used(used_chunks, "arr_len");
+            scan_node_usage(node->as.for_each.collection_expr, used_chunks);
+            scan_node_usage(node->as.for_each.body, used_chunks);
+            break;
+
+        case NODE_RETURN:
+            scan_node_usage(node->as.return_stmt.value, used_chunks);
+            break;
+
+        case NODE_PRINT:
+            scan_node_usage(node->as.print_stmt.value, used_chunks);
+            break;
+
+        case NODE_EXPR_STMT:
+            scan_node_usage(node->as.expr_stmt.expr, used_chunks);
+            break;
+
+        case NODE_BINARY:
+            scan_node_usage(node->as.binary.left, used_chunks);
+            scan_node_usage(node->as.binary.right, used_chunks);
+            break;
+
+        case NODE_UNARY:
+            scan_node_usage(node->as.unary.operand, used_chunks);
+            break;
+
+        case NODE_INDEX:
+            mark_chunk_used(used_chunks, "bounds_check");
+            scan_node_usage(node->as.index.array_expr, used_chunks);
+            scan_node_usage(node->as.index.index, used_chunks);
+            break;
+
+        case NODE_ALLOC:
+            mark_chunk_used(used_chunks, "alloc_arr");
+            if (node->as.alloc.elem_type == TY_CLASS) {
+                mark_chunk_used(used_chunks, "free_arr");
+            }
+            scan_node_usage(node->as.alloc.count_expr, used_chunks);
+            break;
+
+        case NODE_CALL: {
+            const char *callee = node->as.call.callee;
+            if (callee) {
+                if (strcmp(callee, "concat") == 0) mark_chunk_used(used_chunks, "concat");
+                else if (strcmp(callee, "char_at") == 0) mark_chunk_used(used_chunks, "char_at");
+                else if (strcmp(callee, "substring") == 0) mark_chunk_used(used_chunks, "substring");
+                else if (strcmp(callee, "abs_int") == 0) mark_chunk_used(used_chunks, "abs_int");
+                else if (strcmp(callee, "min_int") == 0) mark_chunk_used(used_chunks, "min_int");
+                else if (strcmp(callee, "max_int") == 0) mark_chunk_used(used_chunks, "max_int");
+                else if (strcmp(callee, "min_float") == 0) mark_chunk_used(used_chunks, "min_float");
+                else if (strcmp(callee, "max_float") == 0) mark_chunk_used(used_chunks, "max_float");
+                else if (strcmp(callee, "read_file") == 0) mark_chunk_used(used_chunks, "read_file");
+                else if (strcmp(callee, "write_file") == 0) mark_chunk_used(used_chunks, "write_file");
+            }
+            for (int i = 0; i < node->as.call.arg_count; i++) {
+                scan_node_usage(node->as.call.args[i], used_chunks);
+            }
+            break;
+        }
+
+        case NODE_METHOD_CALL:
+            scan_node_usage(node->as.method_call.object, used_chunks);
+            for (int i = 0; i < node->as.method_call.arg_count; i++) {
+                scan_node_usage(node->as.method_call.args[i], used_chunks);
+            }
+            break;
+
+        case NODE_NEW:
+            for (int i = 0; i < node->as.new_expr.field_count; i++) {
+                scan_node_usage(node->as.new_expr.field_values[i], used_chunks);
+            }
+            break;
+
+        case NODE_MEMBER:
+            scan_node_usage(node->as.member.object, used_chunks);
+            break;
+
+        default:
+            break;
+    }
+}
+
+static void resolve_transitive_dependencies(bool *used_chunks) {
+    bool changed = true;
+    while (changed) {
+        changed = false;
+        for (size_t i = 0; i < PRELUDE_CHUNK_COUNT; i++) {
+            if (used_chunks[i] && PRELUDE_CHUNKS[i].depends_on) {
+                for (int d = 0; PRELUDE_CHUNKS[i].depends_on[d] != NULL; d++) {
+                    const char *dep_name = PRELUDE_CHUNKS[i].depends_on[d];
+                    for (size_t k = 0; k < PRELUDE_CHUNK_COUNT; k++) {
+                        if (strcmp(PRELUDE_CHUNKS[k].name, dep_name) == 0) {
+                            if (!used_chunks[k]) {
+                                used_chunks[k] = true;
+                                changed = true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 char *generate_c_code(AstNode *program, AstArena *arena) {
     CodegenCtx ctx;
     ctx.sb = create_buffer();
@@ -1014,9 +1220,19 @@ char *generate_c_code(AstNode *program, AstArena *arena) {
     sb_append(&ctx.sb, "#include <stdio.h>\n");
     sb_append(&ctx.sb, "#include <stdlib.h>\n");
     sb_append(&ctx.sb, "#include <stdbool.h>\n");
-    sb_append(&ctx.sb, "#include <string.h>\n\n");
-    sb_append(&ctx.sb, STDLIB_PRELUDE_C);
-    sb_append(&ctx.sb, "\n");
+    sb_append(&ctx.sb, "#include <string.h>\n");
+    sb_append(&ctx.sb, "#include <math.h>\n\n");
+
+    bool used_chunks[PRELUDE_CHUNK_COUNT];
+    memset(used_chunks, 0, sizeof(used_chunks));
+    scan_node_usage(program, used_chunks);
+    resolve_transitive_dependencies(used_chunks);
+
+    for (size_t i = 0; i < PRELUDE_CHUNK_COUNT; i++) {
+        if (used_chunks[i]) {
+            sb_append(&ctx.sb, PRELUDE_CHUNKS[i].c_source);
+        }
+    }
 
     // Struct definitions
     gen_struct_typedefs(&ctx, program);

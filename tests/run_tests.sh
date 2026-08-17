@@ -61,6 +61,32 @@ for item in tests/programs/*; do
     # 1. Transpile Cco -> C
     ./cco "$entry" -o "$c_out"
 
+    # Specific prelude emission assertions for v8 tests
+    if [ "$base" = "38_prelude_minimal" ]; then
+        if grep -q "__cco_" "$c_out"; then
+            echo "FAILED (38_prelude_minimal contains unexpected __cco_ helper functions in prelude)"
+            FAILED=$((FAILED + 1))
+            continue
+        fi
+    elif [ "$base" = "39_prelude_partial" ]; then
+        if ! grep -q "__cco_concat" "$c_out"; then
+            echo "FAILED (39_prelude_partial missing expected __cco_concat)"
+            FAILED=$((FAILED + 1))
+            continue
+        fi
+        if grep -q "__cco_read_file" "$c_out" || grep -q "__cco_alloc_arr" "$c_out"; then
+            echo "FAILED (39_prelude_partial contains unused __cco_ helpers)"
+            FAILED=$((FAILED + 1))
+            continue
+        fi
+    elif [ "$base" = "40_prelude_transitive" ]; then
+        if ! grep -q "__cco_bounds_check" "$c_out" || ! grep -q "__cco_arr_len" "$c_out"; then
+            echo "FAILED (40_prelude_transitive missing expected __cco_bounds_check or __cco_arr_len)"
+            FAILED=$((FAILED + 1))
+            continue
+        fi
+    fi
+
     # 2. Compile C -> Executable
     gcc -Wall -Wextra -Werror -std=c11 "$c_out" -o "$bin_out" -lm
 

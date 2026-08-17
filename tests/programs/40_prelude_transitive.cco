@@ -1,0 +1,6 @@
+fn main() -> int {
+    let arr: int[] = alloc(int, 3);
+    arr[0] = 42;
+    print(arr[0]);
+    return 0;
+}

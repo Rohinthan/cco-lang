@@ -1,138 +1,192 @@
 #ifndef STDLIB_PRELUDE_H
 #define STDLIB_PRELUDE_H
 
-static const char *STDLIB_PRELUDE_C =
-"#include <math.h>\n"
-"\n"
-"static inline char *__cco_concat(const char *a, const char *b) {\n"
-"    if (!a) a = \"\";\n"
-"    if (!b) b = \"\";\n"
-"    size_t len_a = strlen(a);\n"
-"    size_t len_b = strlen(b);\n"
-"    char *res = (char *)malloc(len_a + len_b + 1);\n"
-"    if (!res) {\n"
-"        fprintf(stderr, \"Memory allocation failed in concat()\\n\");\n"
-"        exit(1);\n"
-"    }\n"
-"    strcpy(res, a);\n"
-"    strcat(res, b);\n"
-"    return res;\n"
-"}\n"
-"\n"
-"static inline char __cco_char_at(const char *s, int i) {\n"
-"    if (!s) {\n"
-"        fprintf(stderr, \"Error: char_at called on null string\\n\");\n"
-"        exit(1);\n"
-"    }\n"
-"    int len = (int)strlen(s);\n"
-"    if (i < 0 || i >= len) {\n"
-"        fprintf(stderr, \"Runtime Error: char_at index %d out of bounds (length %d)\\n\", i, len);\n"
-"        exit(1);\n"
-"    }\n"
-"    return s[i];\n"
-"}\n"
-"\n"
-"static inline char *__cco_substring(const char *s, int start, int end) {\n"
-"    if (!s) s = \"\";\n"
-"    int len = (int)strlen(s);\n"
-"    if (start < 0) start = 0;\n"
-"    if (end > len) end = len;\n"
-"    if (start > end) start = end;\n"
-"    int sub_len = end - start;\n"
-"    char *res = (char *)malloc(sub_len + 1);\n"
-"    if (!res) {\n"
-"        fprintf(stderr, \"Memory allocation failed in substring()\\n\");\n"
-"        exit(1);\n"
-"    }\n"
-"    memcpy(res, s + start, sub_len);\n"
-"    res[sub_len] = '\\0';\n"
-"    return res;\n"
-"}\n"
-"\n"
-"static inline int __cco_abs_int(int x) {\n"
-"    return x < 0 ? -x : x;\n"
-"}\n"
-"\n"
-"static inline int __cco_min_int(int a, int b) {\n"
-"    return a < b ? a : b;\n"
-"}\n"
-"\n"
-"static inline int __cco_max_int(int a, int b) {\n"
-"    return a > b ? a : b;\n"
-"}\n"
-"\n"
-"static inline double __cco_min_float(double a, double b) {\n"
-"    return a < b ? a : b;\n"
-"}\n"
-"\n"
-"static inline double __cco_max_float(double a, double b) {\n"
-"    return a > b ? a : b;\n"
-"}\n"
-"\n"
-"static inline char *__cco_read_file(const char *path) {\n"
-"    FILE *f = fopen(path, \"rb\");\n"
-"    if (!f) {\n"
-"        fprintf(stderr, \"Error: Could not open file '%s' for reading\\n\", path ? path : \"\");\n"
-"        exit(1);\n"
-"    }\n"
-"    fseek(f, 0L, SEEK_END);\n"
-"    long sz = ftell(f);\n"
-"    rewind(f);\n"
-"    char *buf = (char *)malloc(sz + 1);\n"
-"    if (!buf) {\n"
-"        fclose(f);\n"
-"        fprintf(stderr, \"Memory allocation failed in read_file()\\n\");\n"
-"        exit(1);\n"
-"    }\n"
-"    size_t read_bytes = fread(buf, 1, sz, f);\n"
-"    buf[read_bytes] = '\\0';\n"
-"    fclose(f);\n"
-"    return buf;\n"
-"}\n"
-"\n"
-"static inline bool __cco_write_file(const char *path, const char *content) {\n"
-"    if (!path) return false;\n"
-"    FILE *f = fopen(path, \"w\");\n"
-"    if (!f) return false;\n"
-"    if (!content) content = \"\";\n"
-"    size_t len = strlen(content);\n"
-"    size_t written = fwrite(content, 1, len, f);\n"
-"    fclose(f);\n"
-"    return written == len;\n"
-"}\n"
-"\n"
-"static inline void *__cco_alloc_arr(size_t elem_size, int count) {\n"
-"    if (count < 0) count = 0;\n"
-"    size_t *hdr = (size_t *)calloc(1, sizeof(size_t) + (size_t)count * elem_size);\n"
-"    if (!hdr) {\n"
-"        fprintf(stderr, \"Memory allocation failed in alloc()\\n\");\n"
-"        exit(1);\n"
-"    }\n"
-"    hdr[0] = (size_t)count;\n"
-"    return (void *)(hdr + 1);\n"
-"}\n"
-"\n"
-"static inline int __cco_arr_len(void *ptr) {\n"
-"    if (!ptr) return 0;\n"
-"    return (int)(((size_t *)ptr)[-1]);\n"
-"}\n"
-"\n"
-"static inline void __cco_free_arr(void *ptr) {\n"
-"    if (ptr) {\n"
-"        free(((size_t *)ptr) - 1);\n"
-"    }\n"
-"}\n"
-"\n"
-"static inline void __cco_bounds_check(void *ptr, int idx) {\n"
-"    if (!ptr) {\n"
-"        fprintf(stderr, \"Runtime Error: array indexing null pointer\\n\");\n"
-"        exit(1);\n"
-"    }\n"
-"    int len = __cco_arr_len(ptr);\n"
-"    if (idx < 0 || idx >= len) {\n"
-"        fprintf(stderr, \"Runtime Error: array index %d out of bounds (length %d)\\n\", idx, len);\n"
-"        exit(1);\n"
-"    }\n"
-"}\n";
+#include <stddef.h>
+
+typedef struct {
+    const char *name;
+    const char *c_source;
+    const char **depends_on;
+} PreludeChunk;
+
+static const char *deps_bounds_check[] = { "arr_len", NULL };
+
+static const PreludeChunk PRELUDE_CHUNKS[] = {
+    {
+        "concat",
+        "static inline char *__cco_concat(const char *a, const char *b) {\n"
+        "    if (!a) a = \"\";\n"
+        "    if (!b) b = \"\";\n"
+        "    size_t len_a = strlen(a);\n"
+        "    size_t len_b = strlen(b);\n"
+        "    char *res = (char *)malloc(len_a + len_b + 1);\n"
+        "    if (!res) {\n"
+        "        fprintf(stderr, \"Memory allocation failed in concat()\\n\");\n"
+        "        exit(1);\n"
+        "    }\n"
+        "    strcpy(res, a);\n"
+        "    strcat(res, b);\n"
+        "    return res;\n"
+        "}\n\n",
+        NULL
+    },
+    {
+        "char_at",
+        "static inline char __cco_char_at(const char *s, int i) {\n"
+        "    if (!s) {\n"
+        "        fprintf(stderr, \"Error: char_at called on null string\\n\");\n"
+        "        exit(1);\n"
+        "    }\n"
+        "    int len = (int)strlen(s);\n"
+        "    if (i < 0 || i >= len) {\n"
+        "        fprintf(stderr, \"Runtime Error: char_at index %d out of bounds (length %d)\\n\", i, len);\n"
+        "        exit(1);\n"
+        "    }\n"
+        "    return s[i];\n"
+        "}\n\n",
+        NULL
+    },
+    {
+        "substring",
+        "static inline char *__cco_substring(const char *s, int start, int end) {\n"
+        "    if (!s) s = \"\";\n"
+        "    int len = (int)strlen(s);\n"
+        "    if (start < 0) start = 0;\n"
+        "    if (end > len) end = len;\n"
+        "    if (start > end) start = end;\n"
+        "    int sub_len = end - start;\n"
+        "    char *res = (char *)malloc(sub_len + 1);\n"
+        "    if (!res) {\n"
+        "        fprintf(stderr, \"Memory allocation failed in substring()\\n\");\n"
+        "        exit(1);\n"
+        "    }\n"
+        "    memcpy(res, s + start, sub_len);\n"
+        "    res[sub_len] = '\\0';\n"
+        "    return res;\n"
+        "}\n\n",
+        NULL
+    },
+    {
+        "abs_int",
+        "static inline int __cco_abs_int(int x) {\n"
+        "    return x < 0 ? -x : x;\n"
+        "}\n\n",
+        NULL
+    },
+    {
+        "min_int",
+        "static inline int __cco_min_int(int a, int b) {\n"
+        "    return a < b ? a : b;\n"
+        "}\n\n",
+        NULL
+    },
+    {
+        "max_int",
+        "static inline int __cco_max_int(int a, int b) {\n"
+        "    return a > b ? a : b;\n"
+        "}\n\n",
+        NULL
+    },
+    {
+        "min_float",
+        "static inline double __cco_min_float(double a, double b) {\n"
+        "    return a < b ? a : b;\n"
+        "}\n\n",
+        NULL
+    },
+    {
+        "max_float",
+        "static inline double __cco_max_float(double a, double b) {\n"
+        "    return a > b ? a : b;\n"
+        "}\n\n",
+        NULL
+    },
+    {
+        "read_file",
+        "static inline char *__cco_read_file(const char *path) {\n"
+        "    FILE *f = fopen(path, \"rb\");\n"
+        "    if (!f) {\n"
+        "        fprintf(stderr, \"Error: Could not open file '%s' for reading\\n\", path ? path : \"\");\n"
+        "        exit(1);\n"
+        "    }\n"
+        "    fseek(f, 0L, SEEK_END);\n"
+        "    long sz = ftell(f);\n"
+        "    rewind(f);\n"
+        "    char *buf = (char *)malloc(sz + 1);\n"
+        "    if (!buf) {\n"
+        "        fclose(f);\n"
+        "        fprintf(stderr, \"Memory allocation failed in read_file()\\n\");\n"
+        "        exit(1);\n"
+        "    }\n"
+        "    size_t read_bytes = fread(buf, 1, sz, f);\n"
+        "    buf[read_bytes] = '\\0';\n"
+        "    fclose(f);\n"
+        "    return buf;\n"
+        "}\n\n",
+        NULL
+    },
+    {
+        "write_file",
+        "static inline bool __cco_write_file(const char *path, const char *content) {\n"
+        "    if (!path) return false;\n"
+        "    FILE *f = fopen(path, \"w\");\n"
+        "    if (!f) return false;\n"
+        "    if (!content) content = \"\";\n"
+        "    size_t len = strlen(content);\n"
+        "    size_t written = fwrite(content, 1, len, f);\n"
+        "    fclose(f);\n"
+        "    return written == len;\n"
+        "}\n\n",
+        NULL
+    },
+    {
+        "alloc_arr",
+        "static inline void *__cco_alloc_arr(size_t elem_size, int count) {\n"
+        "    if (count < 0) count = 0;\n"
+        "    size_t *hdr = (size_t *)calloc(1, sizeof(size_t) + (size_t)count * elem_size);\n"
+        "    if (!hdr) {\n"
+        "        fprintf(stderr, \"Memory allocation failed in alloc()\\n\");\n"
+        "        exit(1);\n"
+        "    }\n"
+        "    hdr[0] = (size_t)count;\n"
+        "    return (void *)(hdr + 1);\n"
+        "}\n\n",
+        NULL
+    },
+    {
+        "arr_len",
+        "static inline int __cco_arr_len(void *ptr) {\n"
+        "    if (!ptr) return 0;\n"
+        "    return (int)(((size_t *)ptr)[-1]);\n"
+        "}\n\n",
+        NULL
+    },
+    {
+        "free_arr",
+        "static inline void __cco_free_arr(void *ptr) {\n"
+        "    if (ptr) {\n"
+        "        free(((size_t *)ptr) - 1);\n"
+        "    }\n"
+        "}\n\n",
+        NULL
+    },
+    {
+        "bounds_check",
+        "static inline void __cco_bounds_check(void *ptr, int idx) {\n"
+        "    if (!ptr) {\n"
+        "        fprintf(stderr, \"Runtime Error: array indexing null pointer\\n\");\n"
+        "        exit(1);\n"
+        "    }\n"
+        "    int len = __cco_arr_len(ptr);\n"
+        "    if (idx < 0 || idx >= len) {\n"
+        "        fprintf(stderr, \"Runtime Error: array index %d out of bounds (length %d)\\n\", idx, len);\n"
+        "        exit(1);\n"
+        "    }\n"
+        "}\n\n",
+        deps_bounds_check
+    }
+};
+
+static const size_t PRELUDE_CHUNK_COUNT = sizeof(PRELUDE_CHUNKS) / sizeof(PRELUDE_CHUNKS[0]);
 
 #endif // STDLIB_PRELUDE_H
