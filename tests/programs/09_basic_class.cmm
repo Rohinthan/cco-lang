@@ -1,0 +1,11 @@
+class Point {
+    x: int;
+    y: int;
+}
+
+fn main() -> int {
+    let p: Point = Point { x: 10, y: 20 };
+    print(p.x);
+    print(p.y);
+    return 0;
+}

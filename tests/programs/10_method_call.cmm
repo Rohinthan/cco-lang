@@ -1,0 +1,17 @@
+class Point {
+    x: int;
+    y: int;
+
+    fn dist_sq(self, other: Point) -> int {
+        let dx: int = self.x - other.x;
+        let dy: int = self.y - other.y;
+        return dx * dx + dy * dy;
+    }
+}
+
+fn main() -> int {
+    let a: Point = Point { x: 0, y: 0 };
+    let b: Point = Point { x: 3, y: 4 };
+    print(a.dist_sq(b));
+    return 0;
+}
