@@ -1,18 +1,18 @@
-# CMM (C--) Compiler: A C-like Language with Compile-Time Single Ownership & Move Semantics (v3.0)
+# Cco (C--) Compiler: A C-like Language with Compile-Time Single Ownership & Move Semantics (v3.0)
 
-**CMM (C--)** is a lightweight, systems programming language with explicit C-like syntax, **scope-exit auto-free for raw allocations**, and **compile-time single ownership with move semantics** for classes and objects. It transpiles CMM source code (`.cmm`) into portable, standard C11 source code (`.c`), which is compiled to native machine binaries using `gcc` or `clang`.
+**Cco (C--)** is a lightweight, systems programming language with explicit C-like syntax, **scope-exit auto-free for raw allocations**, and **compile-time single ownership with move semantics** for classes and objects. It transpiles Cco source code (`.cco`) into portable, standard C11 source code (`.c`), which is compiled to native machine binaries using `gcc` or `clang`.
 
 > **Write it like Python's class syntax reads. Compile it and it runs like C with zero runtime reference counting overhead, zero GC pauses, no manual free(), and compile-time ownership safety.**
 
 ---
 
-## 🏛️ The Three Pillars of CMM
+## 🏛️ The Three Pillars of Cco
 
 1. **RUNS LIKE C**  
-   CMM is a source-to-source transpiler, not an interpreter and not a VM. Every `.cmm` file becomes real, flat C11 source, compiled by `gcc` to a native binary. There is no runtime interpreter loop, no bytecode dispatch, no runtime reference counter, no VM overhead. A CMM program's speed ceiling is C's speed ceiling, full stop.
+   Cco is a source-to-source transpiler, not an interpreter and not a VM. Every `.cco` file becomes real, flat C11 source, compiled by `gcc` to a native binary. There is no runtime interpreter loop, no bytecode dispatch, no runtime reference counter, no VM overhead. A Cco program's speed ceiling is C's speed ceiling, full stop.
 
 2. **HAS OBJECTS LIKE C++**  
-   CMM provides `class`, fields, methods, and `obj.method(args)` call syntax—the actual ergonomic win of C++ over plain C, placing verbs next to their nouns instead of `distance(&a, &b)` scattered functions. Under the hood it translates to C structs and functions taking a `self` pointer—no vtables, no multiple inheritance, no operator overloading, no templates, no name-mangling maze.
+   Cco provides `class`, fields, methods, and `obj.method(args)` call syntax—the actual ergonomic win of C++ over plain C, placing verbs next to their nouns instead of `distance(&a, &b)` scattered functions. Under the hood it translates to C structs and functions taking a `self` pointer—no vtables, no multiple inheritance, no operator overloading, no templates, no name-mangling maze.
 
 3. **WRITTEN LIKE IT'S EASY**  
    No manual `malloc`/`free`. No header files to keep in sync with `.c` files. No `->` vs `.` decision (member access is always `.`). Memory is managed automatically via scope-exit auto-free (for raw allocations) and **compile-time single ownership with move semantics** (for objects)—both deterministic, zero runtime overhead, zero GC pause.
@@ -40,8 +40,8 @@
 
 ## 💡 Transpilation Example: Move Semantics & Borrowing
 
-### CMM Source (`examples/points_demo.cmm`)
-```cmm
+### Cco Source (`examples/points_demo.cco`)
+```cco
 class Point {
     x: int;
     y: int;
@@ -119,8 +119,8 @@ int main(void) {
 
 ### Quick Start
 ```bash
-# Clone and build the CMM compiler executable
-make cmm
+# Clone and build the Cco compiler executable
+make cco
 
 # Run full Unit and Integration Test Suite under Valgrind
 make test
@@ -159,4 +159,4 @@ make test
 ---
 
 ## 📄 License
-MIT License. Developed for the CMM Source-to-Source Transpiler Sprint.
+MIT License. Developed for the Cco Source-to-Source Transpiler Sprint.

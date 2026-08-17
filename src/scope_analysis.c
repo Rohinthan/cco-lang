@@ -316,7 +316,7 @@ static void analyze_node(ScopeStack *stack, AstNode *node) {
 }
 
 /* ========================================================================= */
-/*  SINGLE OWNERSHIP & MOVE ANALYSIS PASS (CMM v3)                           */
+/*  SINGLE OWNERSHIP & MOVE ANALYSIS PASS (Cco v3)                           */
 /* ========================================================================= */
 
 typedef struct OwnVar {
@@ -994,6 +994,6 @@ void analyze_scopes(AstNode *program, AstArena *arena) {
     stack.current_function = NULL;
     analyze_node(&stack, program);
 
-    // Pass 3: analyze full AST for single-ownership and move tracking (CMM v3)
+    // Pass 3: analyze full AST for single-ownership and move tracking (Cco v3)
     analyze_ownership(program, arena);
 }

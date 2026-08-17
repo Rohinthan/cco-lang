@@ -44,7 +44,7 @@ static void write_file(const char *path, const char *content) {
 
 int main(int argc, char **argv) {
     if (argc < 2) {
-        printf("Usage: cmm <source.cmm> [-o output.c] [--emit-c] [--run]\n");
+        printf("Usage: cco <source.cco> [-o output.c] [--emit-c] [--run]\n");
         return 1;
     }
 
@@ -95,7 +95,7 @@ int main(int argc, char **argv) {
     // 5. Optional compilation and execution with gcc
     if (run_binary) {
         char cmd[512];
-        snprintf(cmd, sizeof(cmd), "gcc -Wall -Wextra -std=c11 %s -o build/cmm_out && ./build/cmm_out", output_c_path);
+        snprintf(cmd, sizeof(cmd), "gcc -Wall -Wextra -std=c11 %s -o build/cco_out && ./build/cco_out", output_c_path);
         int res = system(cmd);
         return res;
     }

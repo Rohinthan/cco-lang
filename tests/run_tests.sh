@@ -4,14 +4,14 @@ set -e
 mkdir -p build
 
 echo "=================================================="
-echo "  CMM (C--) INTEGRATION & VALGRIND TEST SUITE    "
+echo "  Cco (C--) INTEGRATION & VALGRIND TEST SUITE    "
 echo "=================================================="
 
 PASSED=0
 FAILED=0
 
-for prog in tests/programs/*.cmm; do
-    base=$(basename "$prog" .cmm)
+for prog in tests/programs/*.cco; do
+    base=$(basename "$prog" .cco)
     c_out="build/${base}.c"
     bin_out="build/${base}"
     act_out="build/${base}_actual.txt"
@@ -23,7 +23,7 @@ for prog in tests/programs/*.cmm; do
         err_out="build/${base}_err.txt"
         exp_err="tests/expected_output/${base}_stderr.txt"
         set +e
-        ./cmm "$prog" -o "$c_out" 2> "$err_out"
+        ./cco "$prog" -o "$c_out" 2> "$err_out"
         code=$?
         set -e
         if [ "$code" -eq 0 ]; then
@@ -42,8 +42,8 @@ for prog in tests/programs/*.cmm; do
         continue
     fi
 
-    # 1. Transpile CMM -> C
-    ./cmm "$prog" -o "$c_out"
+    # 1. Transpile Cco -> C
+    ./cco "$prog" -o "$c_out"
 
     # 2. Compile C -> Executable
     gcc -Wall -Wextra -Werror -std=c11 "$c_out" -o "$bin_out"

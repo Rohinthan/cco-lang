@@ -1,5 +1,5 @@
 fn main() -> int {
-    print("Hello CMM World!");
+    print("Hello Cco World!");
     let a: int = 15;
     let b: int = 27;
     print(a + b);
