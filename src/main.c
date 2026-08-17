@@ -42,6 +42,8 @@ static void write_file(const char *path, const char *content) {
     fclose(file);
 }
 
+#include "errors.h"
+
 int main(int argc, char **argv) {
     if (argc < 2) {
         printf("Usage: cco <source.cco> [-o output.c] [--emit-c] [--run]\n");
@@ -64,10 +66,10 @@ int main(int argc, char **argv) {
     }
 
     char *source = read_file(input_path);
+    init_error_reporter(input_path, source);
 
     // 1. Lexical Analysis
     TokenArray tokens = lex_source(source);
-    free(source);
 
     // 2. Parsing AST
     AstArena *arena = create_ast_arena();
@@ -91,6 +93,7 @@ int main(int argc, char **argv) {
     free(c_code);
     free_ast_arena(arena);
     free_tokens(&tokens);
+    free(source);
 
     // 5. Optional compilation and execution with gcc
     if (run_binary) {

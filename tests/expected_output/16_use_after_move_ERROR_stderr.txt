@@ -1,1 +1,12 @@
-Scope Analysis Error at line 9: use of moved value 'a' (moved at line 8)
+error: use of moved value 'a'
+  --> tests/programs/16_use_after_move_ERROR.cco:9:11
+    |
+  9 |     print(a.x);
+    |           ^ value used here after being moved
+    |
+note: 'a' was moved into 'b' on line 8
+  --> tests/programs/16_use_after_move_ERROR.cco:8:20
+    |
+  8 |     let b: Point = a;
+    |                    ^ move occurs here
+    |

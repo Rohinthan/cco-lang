@@ -1,5 +1,6 @@
 #define _POSIX_C_SOURCE 200809L
 #include "lexer.h"
+#include "errors.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -114,10 +115,7 @@ TokenArray lex_source(const char *source) {
             }
 
             if (source[pos] == '\0') {
-                fprintf(stderr, "Lexer error at line %d, col %d: unterminated string literal\n", line, start_col);
-                Token err_tok = {TOKEN_ERROR, strdup("unterminated string"), line, start_col};
-                append_token(&array, err_tok);
-                break;
+                fatal_lexer_error(line, start_col, "unterminated string literal");
             }
 
             int len = pos - start_pos;
@@ -129,6 +127,37 @@ TokenArray lex_source(const char *source) {
             col++;
 
             Token tok = {TOKEN_STRING_LIT, buf, line, start_col};
+            append_token(&array, tok);
+            continue;
+        }
+
+        // Character Literals
+        if (c == '\'') {
+            int start_col = col;
+            pos++; // Skip opening quote
+            col++;
+            char ch_val = '\0';
+            if (source[pos] == '\\' && source[pos + 1] != '\0') {
+                pos++; col++;
+                if (source[pos] == 'n') ch_val = '\n';
+                else if (source[pos] == 't') ch_val = '\t';
+                else if (source[pos] == 'r') ch_val = '\r';
+                else if (source[pos] == '0') ch_val = '\0';
+                else if (source[pos] == '\\') ch_val = '\\';
+                else if (source[pos] == '\'') ch_val = '\'';
+                else ch_val = source[pos];
+                pos++; col++;
+            } else {
+                ch_val = source[pos];
+                pos++; col++;
+            }
+            if (source[pos] == '\'') {
+                pos++; col++;
+            }
+            char *buf = malloc(2);
+            buf[0] = ch_val;
+            buf[1] = '\0';
+            Token tok = {TOKEN_CHAR_LIT, buf, line, start_col};
             append_token(&array, tok);
             continue;
         }
@@ -252,11 +281,9 @@ TokenArray lex_source(const char *source) {
         }
 
         // Unknown character
-        fprintf(stderr, "Lexer error at line %d, col %d: unexpected character '%c'\n", line, col, c);
-        char buf[2] = {c, '\0'};
-        append_token(&array, (Token){TOKEN_ERROR, strdup(buf), line, start_col});
-        pos++;
-        col++;
+        char err_msg[64];
+        snprintf(err_msg, sizeof(err_msg), "unexpected character '%c'", c);
+        fatal_lexer_error(line, col, err_msg);
     }
 
     append_token(&array, (Token){TOKEN_EOF, strdup("EOF"), line, col});
@@ -290,6 +317,7 @@ const char *token_type_to_string(TokenType type) {
         case TOKEN_INT_LIT: return "INT_LIT";
         case TOKEN_FLOAT_LIT: return "FLOAT_LIT";
         case TOKEN_STRING_LIT: return "STRING_LIT";
+        case TOKEN_CHAR_LIT: return "CHAR_LIT";
         case TOKEN_LPAREN: return "(";
         case TOKEN_RPAREN: return ")";
         case TOKEN_LBRACE: return "{";

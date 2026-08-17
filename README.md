@@ -1,8 +1,8 @@
-# Cco (C--) Compiler: A C-like Language with Compile-Time Single Ownership & Move Semantics (v3.0)
+# Cco (C--) Compiler: A C-like Language with Compile-Time Single Ownership, Move Semantics & Standard Library (v4.0)
 
-**Cco (C--)** is a lightweight, systems programming language with explicit C-like syntax, **scope-exit auto-free for raw allocations**, and **compile-time single ownership with move semantics** for classes and objects. It transpiles Cco source code (`.cco`) into portable, standard C11 source code (`.c`), which is compiled to native machine binaries using `gcc` or `clang`.
+**Cco (C--)** is a lightweight, systems programming language with explicit C-like syntax, **scope-exit auto-free for raw allocations**, **compile-time single ownership with move semantics** for classes and objects, and a **built-in Standard Library** (Strings, Math, File I/O). It transpiles Cco source code (`.cco`) into portable, standard C11 source code (`.c`), which is compiled to native machine binaries using `gcc` or `clang`.
 
-> **Write it like Python's class syntax reads. Compile it and it runs like C with zero runtime reference counting overhead, zero GC pauses, no manual free(), and compile-time ownership safety.**
+> **Write it like Python's class syntax reads. Compile it and it runs like C with zero runtime reference counting overhead, zero GC pauses, no manual free(), Rust-like compile-time ownership safety, and GCC/Rust-style diagnostic error messages.**
 
 ---
 
@@ -15,97 +15,97 @@
    Cco provides `class`, fields, methods, and `obj.method(args)` call syntax—the actual ergonomic win of C++ over plain C, placing verbs next to their nouns instead of `distance(&a, &b)` scattered functions. Under the hood it translates to C structs and functions taking a `self` pointer—no vtables, no multiple inheritance, no operator overloading, no templates, no name-mangling maze.
 
 3. **WRITTEN LIKE IT'S EASY**  
-   No manual `malloc`/`free`. No header files to keep in sync with `.c` files. No `->` vs `.` decision (member access is always `.`). Memory is managed automatically via scope-exit auto-free (for raw allocations) and **compile-time single ownership with move semantics** (for objects)—both deterministic, zero runtime overhead, zero GC pause.
+   No manual `malloc`/`free`. No header files to keep in sync with `.c` files. No `->` vs `.` decision (member access is always `.`). Memory is managed automatically via scope-exit auto-free (for raw allocations and heap strings) and **compile-time single ownership with move semantics** (for objects)—both deterministic, zero runtime overhead, zero GC pause.
 
 ---
 
-## 🌟 Key Language Features (v3.0)
+## 📚 Standard Library API Reference (Part A)
 
-- **Classes & Methods**: Declare classes with typed fields and methods taking explicit `self`.
-- **Compile-Time Single Ownership & Move Semantics**:
-  - Every object has exactly **one owning variable**.
-  - Assigning or passing an object without `&` is a **MOVE**.
-  - Passing an object with `&` (`p: &Point`) is a **BORROW** without transferring ownership.
-  - Returning an owned object transfers ownership to the caller.
-  - Compile-time static analysis detects and rejects at compile-time:
-    1. **Use-after-move**
-    2. **Double-move**
-    3. **Conditional move**
-    4. **Returning a borrowed parameter**
-- **Zero Runtime Overhead**: No `__rc` header field on structs, no runtime retain/release calls. Destructors (`ClassName_free`) are deterministically injected by the compiler at scope exit or move points.
-- **Scope-Exit Auto-Free (`alloc`)**: Memory allocated via `alloc(type, count)` returns a managed heap pointer that is automatically freed by the compiler when its enclosing scope exits—including early `return`, `break`, `continue`, or normal block fallthrough.
-- **Valgrind Validated**: All valid programs pass full leak checking (`--leak-check=full --error-exitcode=1`) with **0 memory leaks and 0 errors**.
+Cco includes a built-in Standard Library available in every file without manual imports or headers.
+
+### 1. String Functions
+| Function | Signature | Description | Heap Ownership |
+| :--- | :--- | :--- | :--- |
+| `len` | `len(s: string) -> int` | Returns character count of string `s` | - |
+| `concat` | `concat(a: string, b: string) -> string` | Returns a fresh heap-allocated string containing `a + b` | Caller owns return string |
+| `equals` | `equals(a: string, b: string) -> bool` | Returns `true` if string `a` equals string `b` | - |
+| `char_at` | `char_at(s: string, i: int) -> char` | Returns character at 0-indexed position `i` (with bounds check) | - |
+| `substring` | `substring(s: string, start: int, end: int) -> string` | Returns a fresh heap-allocated substring from `start` to `end` | Caller owns return string |
+
+### 2. Math Functions
+| Function | Signature | Description |
+| :--- | :--- | :--- |
+| `sqrt` | `sqrt(x: float) -> float` | Square root of `x` |
+| `pow` | `pow(base: float, exp: float) -> float` | `base` raised to `exp` power |
+| `abs_int` | `abs_int(x: int) -> int` | Absolute value of integer `x` |
+| `abs_float` | `abs_float(x: float) -> float` | Absolute value of float `x` |
+| `floor` | `floor(x: float) -> float` | Floor of float `x` |
+| `ceil` | `ceil(x: float) -> float` | Ceiling of float `x` |
+| `min_int` | `min_int(a: int, b: int) -> int` | Minimum of two integers |
+| `max_int` | `max_int(a: int, b: int) -> int` | Maximum of two integers |
+| `min_float` | `min_float(a: float, b: float) -> float` | Minimum of two floats |
+| `max_float` | `max_float(a: float, b: float) -> float` | Maximum of two floats |
+
+### 3. File I/O Functions
+| Function | Signature | Description | Heap Ownership |
+| :--- | :--- | :--- | :--- |
+| `read_file` | `read_file(path: string) -> string` | Reads entire file at `path` into a fresh heap-allocated string | Caller owns return string |
+| `write_file` | `write_file(path: string, content: string) -> bool` | Writes `content` to file at `path`, returning `true` on success | - |
 
 ---
 
-## 💡 Transpilation Example: Move Semantics & Borrowing
+## 🎯 Diagnostic Error Message Polish (Part B)
 
-### Cco Source (`examples/points_demo.cco`)
-```cco
-class Point {
-    x: int;
-    y: int;
+Cco features GCC/Rust-style two-location diagnostic error reporting with verbatim source line snippets, line number padding, carets pointing at exact spans, and explanatory notes.
 
-    fn sum(self) -> int {
-        return self.x + self.y;
-    }
-}
-
-fn describe(p: &Point) -> void {
-    print(p.sum());
-}
-
-fn main() -> int {
-    let a: Point = Point { x: 3, y: 4 };
-    describe(a); // Borrowed: a remains valid
-    print(a.sum());
-
-    let b: Point = a; // Moved: ownership transferred to b
-    print(b.sum());
-    return 0;
-}
+### Example: Use-After-Move Error
+```
+error: use of moved value 'a'
+  --> tests/programs/16_use_after_move_ERROR.cco:9:11
+    |
+  9 |     print(a.x);
+    |           ^ value used here after being moved
+    |
+note: 'a' was moved into 'b' on line 8
+  --> tests/programs/16_use_after_move_ERROR.cco:8:20
+    |
+  8 |     let b: Point = a;
+    |                    ^ move occurs here
+    |
 ```
 
-### Transpiled Standard C
-```c
-typedef struct Point Point;
-
-struct Point {
-    int x;
-    int y;
-};
-
-static inline void Point_free(Point *p) {
-    if (p) {
-        free(p);
-    }
-}
-
-static inline Point *Point_new(int x, int y) {
-    Point *__obj = (Point *)malloc(sizeof(Point));
-    __obj->x = x;
-    __obj->y = y;
-    return __obj;
-}
-
-int Point_sum(Point * self) {
-    return (self->x + self->y);
-}
-
-void describe(Point * p) {
-    printf("%d\n", (int)(Point_sum(p)));
-}
-
-int main(void) {
-    Point * a = Point_new(3, 4);
-    describe(a);
-    printf("%d\n", (int)(Point_sum(a)));
-    Point * b = a;
-    printf("%d\n", (int)(Point_sum(b)));
-    Point_free(b);
-    return 0;
-}
+### Example: Returning a Borrowed Value Error
 ```
+error: cannot return borrowed value 'p'
+  --> tests/programs/20_return_borrowed_ERROR.cco:7:12
+    |
+  7 |     return p;
+    |            ^ return of borrowed value
+    |
+note: 'p' is a borrowed parameter (&Point) — this function does not own it and cannot transfer ownership to the caller
+  --> tests/programs/20_return_borrowed_ERROR.cco:6:8
+    |
+  6 | fn bad(p: &Point) -> Point {
+    |        ^ parameter declared as borrowed here
+    |
+```
+
+---
+
+## 🎨 Example Program Gallery (Part C)
+
+A comprehensive suite of example programs is available in [`examples/`](examples/):
+
+- [`examples/01_hello_world.cco`](examples/01_hello_world.cco): Basic syntax, primitive types, and printing
+- [`examples/02_fibonacci.cco`](examples/02_fibonacci.cco): Iterative & recursive Fibonacci sequence
+- [`examples/03_point_distance.cco`](examples/03_point_distance.cco): Object-oriented Point class with math stdlib (`sqrt`, `pow`)
+- [`examples/04_string_builder.cco`](examples/04_string_builder.cco): String manipulation (`concat`, `len`, `substring`, `equals`)
+- [`examples/05_array_sum.cco`](examples/05_array_sum.cco): Dynamic array allocation (`alloc`) and iteration
+- [`examples/06_word_count.cco`](examples/06_word_count.cco): File I/O (`read_file`) and word counting
+- [`examples/07_ownership_demo.cco`](examples/07_ownership_demo.cco): Ownership transfer (moves) vs borrowed references (`&Class`)
+- [`examples/08_stack_data_structure.cco`](examples/08_stack_data_structure.cco): OOP Stack data structure with dynamic array buffer
+
+See [`examples/README.md`](examples/README.md) for detailed descriptions and execution instructions.
 
 ---
 
@@ -128,7 +128,7 @@ make test
 
 ---
 
-## 🧪 Test Suite Matrix
+## 🧪 Test Suite Matrix (v4.0)
 
 | Test Case | Description | Result | Valgrind Leak Status |
 | :--- | :--- | :---: | :---: |
@@ -150,11 +150,14 @@ make test
 | `13_object_early_return` | Object lifetime inside loops with early returns | **PASS** | 0 Bytes Leaked |
 | `14_basic_move` | Single ownership move and clean deallocation | **PASS** | 0 Bytes Leaked |
 | `15_borrowed_param` | Borrowed parameter (`&Point`) without ownership transfer | **PASS** | 0 Bytes Leaked |
-| `16_use_after_move_ERROR` | Compile-time rejection of use-after-move | **PASS** | Compile Error 1 (As Expected) |
-| `17_double_move_ERROR` | Compile-time rejection of double-move | **PASS** | Compile Error 1 (As Expected) |
-| `18_conditional_move_ERROR` | Compile-time rejection of conditional move | **PASS** | Compile Error 1 (As Expected) |
+| `16_use_after_move_ERROR` | Formatted Rust-style rejection of use-after-move | **PASS** | Compile Error 1 (As Expected) |
+| `17_double_move_ERROR` | Formatted Rust-style rejection of double-move | **PASS** | Compile Error 1 (As Expected) |
+| `18_conditional_move_ERROR` | Formatted Rust-style rejection of conditional move | **PASS** | Compile Error 1 (As Expected) |
 | `19_move_via_return` | Returning owned objects and moving between scopes | **PASS** | 0 Bytes Leaked |
-| `20_return_borrowed_ERROR` | Compile-time rejection of returning borrowed parameter | **PASS** | Compile Error 1 (As Expected) |
+| `20_return_borrowed_ERROR` | Formatted Rust-style rejection of returning borrowed parameter | **PASS** | Compile Error 1 (As Expected) |
+| `21_stdlib_string` | Standard Library String operations (`concat`, `len`, `equals`, `substring`) | **PASS** | 0 Bytes Leaked |
+| `22_stdlib_math` | Standard Library Math operations (`sqrt`, `pow`, `abs`, `min`, `max`) | **PASS** | 0 Bytes Leaked |
+| `23_stdlib_file_io` | Standard Library File I/O operations (`read_file`, `write_file`) | **PASS** | 0 Bytes Leaked |
 
 ---
 

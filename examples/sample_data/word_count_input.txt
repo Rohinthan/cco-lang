@@ -1,0 +1,2 @@
+The Cco programming language provides single ownership and automatic memory management without a garbage collector.
+It brings Rust-like memory safety guarantees to a simple C-like syntax.

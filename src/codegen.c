@@ -1,5 +1,6 @@
 #define _POSIX_C_SOURCE 200809L
 #include "codegen.h"
+#include "stdlib_prelude.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -46,6 +47,7 @@ typedef struct {
     StringBuffer sb;
     int indent_level;
     AstNode *program;
+    AstNode *current_function;
 } CodegenCtx;
 
 static void emit_indent(CodegenCtx *ctx) {
@@ -72,6 +74,79 @@ static const char *c_type_str_full(Type t, const char *class_name, bool is_heap_
 }
 
 static void gen_expr(CodegenCtx *ctx, AstNode *expr);
+
+static Type infer_expr_type(AstNode *program, AstNode *fn, AstNode *expr) {
+    if (!expr) return TY_INT;
+
+    if (expr->type == NODE_LITERAL) {
+        return expr->as.literal.lit_type;
+    }
+    if (expr->type == NODE_ALLOC) {
+        return expr->as.alloc.elem_type;
+    }
+    if (expr->type == NODE_CALL) {
+        const char *name = expr->as.call.callee;
+        if (strcmp(name, "len") == 0 || strcmp(name, "abs_int") == 0 || strcmp(name, "min_int") == 0 || strcmp(name, "max_int") == 0) return TY_INT;
+        if (strcmp(name, "sqrt") == 0 || strcmp(name, "pow") == 0 || strcmp(name, "abs_float") == 0 || strcmp(name, "floor") == 0 || strcmp(name, "ceil") == 0 || strcmp(name, "min_float") == 0 || strcmp(name, "max_float") == 0) return TY_FLOAT;
+        if (strcmp(name, "concat") == 0 || strcmp(name, "substring") == 0 || strcmp(name, "read_file") == 0) return TY_STRING;
+        if (strcmp(name, "equals") == 0 || strcmp(name, "write_file") == 0) return TY_BOOL;
+        if (strcmp(name, "char_at") == 0) return TY_CHAR;
+
+        if (program && program->type == NODE_PROGRAM) {
+            for (int f = 0; f < program->as.program.count; f++) {
+                AstNode *target_fn = program->as.program.functions[f];
+                if (strcmp(target_fn->as.function.name, name) == 0) {
+                    return target_fn->as.function.return_type;
+                }
+            }
+        }
+    }
+    if (expr->type == NODE_METHOD_CALL) {
+        const char *mname = expr->as.method_call.method_name;
+        const char *cname = expr->as.method_call.target_class_name;
+        if (cname && program && program->type == NODE_PROGRAM) {
+            for (int c = 0; c < program->as.program.class_count; c++) {
+                AstNode *cls = program->as.program.classes[c];
+                if (strcmp(cls->as.class_decl.name, cname) == 0) {
+                    for (int m = 0; m < cls->as.class_decl.method_count; m++) {
+                        AstNode *mn = cls->as.class_decl.methods[m];
+                        if (strcmp(mn->as.method.name, mname) == 0) {
+                            return mn->as.method.return_type;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if (expr->type == NODE_IDENT && fn) {
+        const char *var_name = expr->as.ident.name;
+        if (fn->type == NODE_FUNCTION) {
+            for (int p = 0; p < fn->as.function.param_count; p++) {
+                if (strcmp(fn->as.function.param_names[p], var_name) == 0) {
+                    return fn->as.function.param_types[p];
+                }
+            }
+        } else if (fn->type == NODE_METHOD) {
+            for (int p = 0; p < fn->as.method.param_count; p++) {
+                if (strcmp(fn->as.method.param_names[p], var_name) == 0) {
+                    return fn->as.method.param_types[p];
+                }
+            }
+        }
+        AstNode *body = (fn->type == NODE_FUNCTION) ? fn->as.function.body : fn->as.method.body;
+        if (body && body->type == NODE_BLOCK) {
+            for (int i = 0; i < body->as.block.count; i++) {
+                AstNode *stmt = body->as.block.stmts[i];
+                if (stmt->type == NODE_LET && strcmp(stmt->as.let.name, var_name) == 0) {
+                    return stmt->as.let.var_type;
+                }
+            }
+        }
+    }
+
+    return TY_INT;
+}
+
 static void gen_stmt(CodegenCtx *ctx, AstNode *stmt);
 static void gen_block(CodegenCtx *ctx, AstNode *block_node);
 
@@ -114,7 +189,14 @@ static void gen_expr(CodegenCtx *ctx, AstNode *expr) {
             } else if (expr->as.literal.lit_type == TY_BOOL) {
                 sb_append(&ctx->sb, expr->as.literal.val.b ? "true" : "false");
             } else if (expr->as.literal.lit_type == TY_CHAR) {
-                sb_appendf(&ctx->sb, "'%c'", expr->as.literal.val.c);
+                char c = expr->as.literal.val.c;
+                if (c == '\n') sb_append(&ctx->sb, "'\\n'");
+                else if (c == '\t') sb_append(&ctx->sb, "'\\t'");
+                else if (c == '\r') sb_append(&ctx->sb, "'\\r'");
+                else if (c == '\0') sb_append(&ctx->sb, "'\\0'");
+                else if (c == '\\') sb_append(&ctx->sb, "'\\\\'");
+                else if (c == '\'') sb_append(&ctx->sb, "'\\''");
+                else sb_appendf(&ctx->sb, "'%c'", c);
             }
             break;
 
@@ -186,14 +268,108 @@ static void gen_expr(CodegenCtx *ctx, AstNode *expr) {
             sb_append(&ctx->sb, ")");
             break;
 
-        case NODE_CALL:
-            sb_appendf(&ctx->sb, "%s(", expr->as.call.callee);
-            for (int i = 0; i < expr->as.call.arg_count; i++) {
-                if (i > 0) sb_append(&ctx->sb, ", ");
-                gen_expr(ctx, expr->as.call.args[i]);
+        case NODE_CALL: {
+            const char *callee = expr->as.call.callee;
+            if (strcmp(callee, "len") == 0) {
+                sb_append(&ctx->sb, "((int)strlen(");
+                gen_expr(ctx, expr->as.call.args[0]);
+                sb_append(&ctx->sb, "))");
+            } else if (strcmp(callee, "concat") == 0) {
+                sb_append(&ctx->sb, "__cco_concat(");
+                gen_expr(ctx, expr->as.call.args[0]);
+                sb_append(&ctx->sb, ", ");
+                gen_expr(ctx, expr->as.call.args[1]);
+                sb_append(&ctx->sb, ")");
+            } else if (strcmp(callee, "equals") == 0) {
+                sb_append(&ctx->sb, "(strcmp(");
+                gen_expr(ctx, expr->as.call.args[0]);
+                sb_append(&ctx->sb, ", ");
+                gen_expr(ctx, expr->as.call.args[1]);
+                sb_append(&ctx->sb, ") == 0)");
+            } else if (strcmp(callee, "char_at") == 0) {
+                sb_append(&ctx->sb, "__cco_char_at(");
+                gen_expr(ctx, expr->as.call.args[0]);
+                sb_append(&ctx->sb, ", ");
+                gen_expr(ctx, expr->as.call.args[1]);
+                sb_append(&ctx->sb, ")");
+            } else if (strcmp(callee, "substring") == 0) {
+                sb_append(&ctx->sb, "__cco_substring(");
+                gen_expr(ctx, expr->as.call.args[0]);
+                sb_append(&ctx->sb, ", ");
+                gen_expr(ctx, expr->as.call.args[1]);
+                sb_append(&ctx->sb, ", ");
+                gen_expr(ctx, expr->as.call.args[2]);
+                sb_append(&ctx->sb, ")");
+            } else if (strcmp(callee, "sqrt") == 0) {
+                sb_append(&ctx->sb, "((float)sqrt(");
+                gen_expr(ctx, expr->as.call.args[0]);
+                sb_append(&ctx->sb, "))");
+            } else if (strcmp(callee, "pow") == 0) {
+                sb_append(&ctx->sb, "((float)pow(");
+                gen_expr(ctx, expr->as.call.args[0]);
+                sb_append(&ctx->sb, ", ");
+                gen_expr(ctx, expr->as.call.args[1]);
+                sb_append(&ctx->sb, "))");
+            } else if (strcmp(callee, "abs_int") == 0) {
+                sb_append(&ctx->sb, "__cco_abs_int(");
+                gen_expr(ctx, expr->as.call.args[0]);
+                sb_append(&ctx->sb, ")");
+            } else if (strcmp(callee, "abs_float") == 0) {
+                sb_append(&ctx->sb, "((float)fabs(");
+                gen_expr(ctx, expr->as.call.args[0]);
+                sb_append(&ctx->sb, "))");
+            } else if (strcmp(callee, "floor") == 0) {
+                sb_append(&ctx->sb, "((float)floor(");
+                gen_expr(ctx, expr->as.call.args[0]);
+                sb_append(&ctx->sb, "))");
+            } else if (strcmp(callee, "ceil") == 0) {
+                sb_append(&ctx->sb, "((float)ceil(");
+                gen_expr(ctx, expr->as.call.args[0]);
+                sb_append(&ctx->sb, "))");
+            } else if (strcmp(callee, "min_int") == 0) {
+                sb_append(&ctx->sb, "__cco_min_int(");
+                gen_expr(ctx, expr->as.call.args[0]);
+                sb_append(&ctx->sb, ", ");
+                gen_expr(ctx, expr->as.call.args[1]);
+                sb_append(&ctx->sb, ")");
+            } else if (strcmp(callee, "max_int") == 0) {
+                sb_append(&ctx->sb, "__cco_max_int(");
+                gen_expr(ctx, expr->as.call.args[0]);
+                sb_append(&ctx->sb, ", ");
+                gen_expr(ctx, expr->as.call.args[1]);
+                sb_append(&ctx->sb, ")");
+            } else if (strcmp(callee, "min_float") == 0) {
+                sb_append(&ctx->sb, "__cco_min_float(");
+                gen_expr(ctx, expr->as.call.args[0]);
+                sb_append(&ctx->sb, ", ");
+                gen_expr(ctx, expr->as.call.args[1]);
+                sb_append(&ctx->sb, ")");
+            } else if (strcmp(callee, "max_float") == 0) {
+                sb_append(&ctx->sb, "__cco_max_float(");
+                gen_expr(ctx, expr->as.call.args[0]);
+                sb_append(&ctx->sb, ", ");
+                gen_expr(ctx, expr->as.call.args[1]);
+                sb_append(&ctx->sb, ")");
+            } else if (strcmp(callee, "read_file") == 0) {
+                sb_append(&ctx->sb, "__cco_read_file(");
+                gen_expr(ctx, expr->as.call.args[0]);
+                sb_append(&ctx->sb, ")");
+            } else if (strcmp(callee, "write_file") == 0) {
+                sb_append(&ctx->sb, "__cco_write_file(");
+                gen_expr(ctx, expr->as.call.args[0]);
+                sb_append(&ctx->sb, ", ");
+                gen_expr(ctx, expr->as.call.args[1]);
+                sb_append(&ctx->sb, ")");
+            } else {
+                sb_appendf(&ctx->sb, "%s(", callee);
+                for (int i = 0; i < expr->as.call.arg_count; i++) {
+                    if (i > 0) sb_append(&ctx->sb, ", ");
+                    gen_expr(ctx, expr->as.call.args[i]);
+                }
+                sb_append(&ctx->sb, ")");
             }
-            sb_append(&ctx->sb, ")");
             break;
+        }
 
         default:
             break;
@@ -365,23 +541,33 @@ static void gen_stmt(CodegenCtx *ctx, AstNode *stmt) {
             sb_append(&ctx->sb, "continue;\n");
             break;
 
-        case NODE_PRINT:
+        case NODE_PRINT: {
             emit_indent(ctx);
-            sb_append(&ctx->sb, "printf(");
             AstNode *val = stmt->as.print_stmt.value;
-            if (val->type == NODE_LITERAL) {
-                if (val->as.literal.lit_type == TY_INT) sb_append(&ctx->sb, "\"%ld\\n\", ");
-                else if (val->as.literal.lit_type == TY_FLOAT) sb_append(&ctx->sb, "\"%g\\n\", ");
-                else if (val->as.literal.lit_type == TY_STRING) sb_append(&ctx->sb, "\"%s\\n\", ");
-                else if (val->as.literal.lit_type == TY_BOOL) sb_append(&ctx->sb, "\"%s\\n\", ");
-                else if (val->as.literal.lit_type == TY_CHAR) sb_append(&ctx->sb, "\"%c\\n\", ");
+            Type t = infer_expr_type(ctx->program, ctx->current_function, val);
+            if (t == TY_STRING) {
+                sb_append(&ctx->sb, "printf(\"%s\\n\", ");
+                gen_expr(ctx, val);
+                sb_append(&ctx->sb, ");\n");
+            } else if (t == TY_FLOAT) {
+                sb_append(&ctx->sb, "printf(\"%g\\n\", (double)(");
+                gen_expr(ctx, val);
+                sb_append(&ctx->sb, "));\n");
+            } else if (t == TY_BOOL) {
+                sb_append(&ctx->sb, "printf(\"%s\\n\", (");
+                gen_expr(ctx, val);
+                sb_append(&ctx->sb, ") ? \"true\" : \"false\");\n");
+            } else if (t == TY_CHAR) {
+                sb_append(&ctx->sb, "printf(\"%c\\n\", ");
+                gen_expr(ctx, val);
+                sb_append(&ctx->sb, ");\n");
             } else {
-                sb_append(&ctx->sb, "\"%d\\n\", (int)(");
+                sb_append(&ctx->sb, "printf(\"%ld\\n\", (long)(");
+                gen_expr(ctx, val);
+                sb_append(&ctx->sb, "));\n");
             }
-            gen_expr(ctx, val);
-            if (val->type != NODE_LITERAL) sb_append(&ctx->sb, ")");
-            sb_append(&ctx->sb, ");\n");
             break;
+        }
 
         case NODE_EXPR_STMT:
             emit_indent(ctx);
@@ -439,7 +625,7 @@ static void gen_class_helpers(CodegenCtx *ctx, AstNode *program) {
         for (int f = 0; f < cls->as.class_decl.field_count; f++) {
             AstNode *f_node = cls->as.class_decl.fields[f];
             sb_appendf(&ctx->sb, "    %s %s;\n",
-                       c_type_str_full(f_node->as.field.type, f_node->as.field.class_name, false),
+                       c_type_str_full(f_node->as.field.type, f_node->as.field.class_name, f_node->is_heap_owner),
                        f_node->as.field.name);
         }
         sb_append(&ctx->sb, "};\n\n");
@@ -455,6 +641,8 @@ static void gen_class_helpers(CodegenCtx *ctx, AstNode *program) {
             AstNode *f_node = cls->as.class_decl.fields[f];
             if (f_node->as.field.type == TY_CLASS && f_node->as.field.class_name) {
                 sb_appendf(&ctx->sb, "        %s_free(p->%s);\n", f_node->as.field.class_name, f_node->as.field.name);
+            } else if (f_node->is_heap_owner) {
+                sb_appendf(&ctx->sb, "        free(p->%s);\n", f_node->as.field.name);
             }
         }
         sb_append(&ctx->sb, "        free(p);\n");
@@ -469,7 +657,7 @@ static void gen_class_helpers(CodegenCtx *ctx, AstNode *program) {
                 if (f > 0) sb_append(&ctx->sb, ", ");
                 AstNode *f_node = cls->as.class_decl.fields[f];
                 sb_appendf(&ctx->sb, "%s %s",
-                           c_type_str_full(f_node->as.field.type, f_node->as.field.class_name, false),
+                           c_type_str_full(f_node->as.field.type, f_node->as.field.class_name, f_node->is_heap_owner),
                            f_node->as.field.name);
             }
         }
@@ -486,6 +674,7 @@ static void gen_class_helpers(CodegenCtx *ctx, AstNode *program) {
 }
 
 static void gen_method(CodegenCtx *ctx, const char *class_name, AstNode *m_node) {
+    ctx->current_function = m_node;
     sb_appendf(&ctx->sb, "%s %s_%s(",
                c_type_str_full(m_node->as.method.return_type, m_node->as.method.return_class_name, m_node->as.method.returns_heap_pointer),
                class_name, m_node->as.method.name);
@@ -507,6 +696,7 @@ static void gen_method(CodegenCtx *ctx, const char *class_name, AstNode *m_node)
 }
 
 static void gen_function(CodegenCtx *ctx, AstNode *fn) {
+    ctx->current_function = fn;
     sb_appendf(&ctx->sb, "%s %s(", c_type_str_full(fn->as.function.return_type, fn->as.function.return_class_name, fn->as.function.returns_heap_pointer), fn->as.function.name);
 
     if (fn->as.function.param_count == 0) {
@@ -537,6 +727,8 @@ char *generate_c_code(AstNode *program, AstArena *arena) {
     sb_append(&ctx.sb, "#include <stdlib.h>\n");
     sb_append(&ctx.sb, "#include <stdbool.h>\n");
     sb_append(&ctx.sb, "#include <string.h>\n\n");
+    sb_append(&ctx.sb, STDLIB_PRELUDE_C);
+    sb_append(&ctx.sb, "\n");
 
     // Class struct definitions, retain/release/new helpers
     gen_class_helpers(&ctx, program);

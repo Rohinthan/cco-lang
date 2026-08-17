@@ -56,6 +56,7 @@ typedef struct AstNode AstNode;
 struct AstNode {
     NodeType type;
     int line;
+    int col;
 
     // Scope Analysis annotations (alloc based)
     bool is_heap_owner;           // True if let statement binds an alloc() call
@@ -99,6 +100,8 @@ struct AstNode {
             Type *param_types;
             char **param_class_names;
             bool *param_is_borrowed;
+            int *param_lines;
+            int *param_cols;
             int param_count;
             Type return_type;
             char *return_class_name;
@@ -112,6 +115,8 @@ struct AstNode {
             Type *param_types;
             char **param_class_names;
             bool *param_is_borrowed;
+            int *param_lines;
+            int *param_cols;
             int param_count;
             Type return_type;
             char *return_class_name;
@@ -259,7 +264,7 @@ typedef struct AstArena AstArena;
 
 AstArena *create_ast_arena(void);
 void free_ast_arena(AstArena *arena);
-AstNode *arena_alloc_node(AstArena *arena, NodeType type, int line);
+AstNode *arena_alloc_node(AstArena *arena, NodeType type, int line, int col);
 char *arena_strdup(AstArena *arena, const char *str);
 void **arena_alloc_array(AstArena *arena, int count, size_t elem_size);
 

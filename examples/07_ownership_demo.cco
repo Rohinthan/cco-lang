@@ -1,0 +1,31 @@
+// 07_ownership_demo.cco — Demonstrating ownership transfer vs borrowed references
+
+class Resource {
+    id: int;
+
+    fn get_id(self) -> int {
+        return self.id;
+    }
+}
+
+fn inspect_resource(r: &Resource) -> int {
+    return r.get_id();
+}
+
+fn consume_resource(r: Resource) -> int {
+    return r.get_id();
+}
+
+fn main() -> int {
+    let res: Resource = Resource{ id: 101 };
+
+    // Borrow reference — res retains ownership
+    let val1: int = inspect_resource(res);
+    print(val1);
+
+    // Transfer ownership — res is moved into consume_resource
+    let val2: int = consume_resource(res);
+    print(val2);
+
+    return 0;
+}

@@ -1,0 +1,19 @@
+// 04_string_builder.cco — String concatenation and substring utilities
+
+fn main() -> int {
+    let prefix: string = "Cco";
+    let space: string = " ";
+    let suffix: string = "Programming Language";
+
+    let part: string = concat(prefix, space);
+    let full: string = concat(part, suffix);
+
+    print(full);
+    print(len(full));
+
+    let sub: string = substring(full, 0, 3);
+    print(sub);
+    print(equals(sub, "Cco"));
+
+    return 0;
+}

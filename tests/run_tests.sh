@@ -46,7 +46,7 @@ for prog in tests/programs/*.cco; do
     ./cco "$prog" -o "$c_out"
 
     # 2. Compile C -> Executable
-    gcc -Wall -Wextra -Werror -std=c11 "$c_out" -o "$bin_out"
+    gcc -Wall -Wextra -Werror -std=c11 "$c_out" -o "$bin_out" -lm
 
     # 3. Execute and capture stdout
     "$bin_out" > "$act_out"

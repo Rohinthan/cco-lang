@@ -1,0 +1,21 @@
+// 03_point_distance.cco — Object-oriented Point class using math stdlib
+
+class Point {
+    x: float;
+    y: float;
+
+    fn distance_to(self, other: &Point) -> float {
+        let dx: float = self.x - other.x;
+        let dy: float = self.y - other.y;
+        return sqrt(pow(dx, 2.0) + pow(dy, 2.0));
+    }
+}
+
+fn main() -> int {
+    let p1: Point = Point{ x: 0.0, y: 0.0 };
+    let p2: Point = Point{ x: 3.0, y: 4.0 };
+
+    let dist: float = p1.distance_to(p2);
+    print(dist);
+    return 0;
+}

@@ -1,0 +1,44 @@
+// 08_stack_data_structure.cco — Object-oriented Stack data structure with dynamic array buffer
+
+class IntStack {
+    data: int;
+    capacity: int;
+    top: int;
+
+    fn push(self, val: int) -> int {
+        if (self.top < self.capacity) {
+            self.data[self.top] = val;
+            self.top = self.top + 1;
+            return 1;
+        }
+        return 0;
+    }
+
+    fn pop(self) -> int {
+        if (self.top > 0) {
+            self.top = self.top - 1;
+            return self.data[self.top];
+        }
+        return -1;
+    }
+
+    fn size(self) -> int {
+        return self.top;
+    }
+}
+
+fn main() -> int {
+    let buffer: int = alloc(int, 10);
+    let stack: IntStack = IntStack{ data: buffer, capacity: 10, top: 0 };
+
+    stack.push(10);
+    stack.push(20);
+    stack.push(30);
+
+    print(stack.size());
+    print(stack.pop());
+    print(stack.pop());
+    print(stack.size());
+
+    return 0;
+}

@@ -1,0 +1,15 @@
+// 01_hello_world.cco — Basic syntax, variables, and printing in Cco
+
+fn main() -> int {
+    let greeting: string = "Hello, Cco World!";
+    let year: int = 2026;
+    let pi: float = 3.14159;
+    let is_awesome: bool = true;
+
+    print(greeting);
+    print(year);
+    print(pi);
+    print(is_awesome);
+
+    return 0;
+}

@@ -1,0 +1,29 @@
+// 02_fibonacci.cco — Fibonacci sequence generator using loops and recursion
+
+fn fib_iterative(n: int) -> int {
+    if (n <= 0) { return 0; }
+    if (n == 1) { return 1; }
+
+    let a: int = 0;
+    let b: int = 1;
+    let i: int = 2;
+    while (i <= n) {
+        let temp: int = a + b;
+        a = b;
+        b = temp;
+        i = i + 1;
+    }
+    return b;
+}
+
+fn fib_recursive(n: int) -> int {
+    if (n <= 0) { return 0; }
+    if (n == 1) { return 1; }
+    return fib_recursive(n - 1) + fib_recursive(n - 2);
+}
+
+fn main() -> int {
+    print(fib_iterative(10));
+    print(fib_recursive(10));
+    return 0;
+}

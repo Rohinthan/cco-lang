@@ -60,10 +60,11 @@ static void *arena_malloc(AstArena *arena, size_t size) {
     return ptr;
 }
 
-AstNode *arena_alloc_node(AstArena *arena, NodeType type, int line) {
+AstNode *arena_alloc_node(AstArena *arena, NodeType type, int line, int col) {
     AstNode *node = (AstNode *)arena_malloc(arena, sizeof(AstNode));
     node->type = type;
     node->line = line;
+    node->col = col;
     return node;
 }
 

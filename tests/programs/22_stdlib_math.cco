@@ -1,0 +1,33 @@
+fn main() -> int {
+    let sq: float = sqrt(16.0);
+    print(sq);
+
+    let pw: float = pow(2.0, 3.0);
+    print(pw);
+
+    let ai: int = abs_int(-42);
+    print(ai);
+
+    let af: float = abs_float(-3.14);
+    print(af);
+
+    let fl: float = floor(3.7);
+    print(fl);
+
+    let cl: float = ceil(3.2);
+    print(cl);
+
+    let mi: int = min_int(10, 20);
+    print(mi);
+
+    let ma: int = max_int(10, 20);
+    print(ma);
+
+    let mf: float = min_float(1.5, 2.5);
+    print(mf);
+
+    let mxf: float = max_float(1.5, 2.5);
+    print(mxf);
+
+    return 0;
+}

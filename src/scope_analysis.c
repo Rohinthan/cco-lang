@@ -1,5 +1,6 @@
 #define _POSIX_C_SOURCE 200809L
 #include "scope_analysis.h"
+#include "errors.h"
 #include "class_decl.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -103,6 +104,14 @@ static AstNode *find_function(AstNode *program, const char *name) {
 
 static void analyze_node(ScopeStack *stack, AstNode *node);
 
+static bool is_stdlib_heap_fn(const char *name) {
+    if (!name) return false;
+    return strcmp(name, "concat") == 0 ||
+           strcmp(name, "substring") == 0 ||
+           strcmp(name, "read_file") == 0;
+}
+
+
 static void analyze_block(ScopeStack *stack, AstNode *block_node, bool is_loop) {
     push_scope(stack, block_node, is_loop);
     Scope *s = current_scope(stack);
@@ -112,12 +121,16 @@ static void analyze_block(ScopeStack *stack, AstNode *block_node, bool is_loop) 
 
         if (stmt->type == NODE_LET) {
             analyze_node(stack, stmt->as.let.value);
-            bool is_alloc = (stmt->as.let.value->type == NODE_ALLOC);
+            bool is_alloc = (stmt->as.let.value->type == NODE_ALLOC) || (stmt->as.let.var_type == TY_STRING);
             if (!is_alloc && stmt->as.let.value->type == NODE_CALL) {
                 const char *callee = stmt->as.let.value->as.call.callee;
-                AstNode *fn = find_function(stack->program, callee);
-                if (fn && fn->as.function.returns_heap_pointer) {
+                if (is_stdlib_heap_fn(callee)) {
                     is_alloc = true;
+                } else {
+                    AstNode *fn = find_function(stack->program, callee);
+                    if (fn && fn->as.function.returns_heap_pointer) {
+                        is_alloc = true;
+                    }
                 }
             }
 
@@ -130,7 +143,8 @@ static void analyze_block(ScopeStack *stack, AstNode *block_node, bool is_loop) 
 
             int scope_idx = -1;
             int owned_idx = find_owned_in_stack(stack, stmt->as.assign.name, &scope_idx);
-            if (owned_idx != -1 && stmt->as.assign.value->type == NODE_ALLOC) {
+            bool val_is_heap = (stmt->as.assign.value->type == NODE_ALLOC || (stmt->as.assign.value->type == NODE_CALL && is_stdlib_heap_fn(stmt->as.assign.value->as.call.callee)));
+            if (owned_idx != -1 && val_is_heap) {
                 stmt->free_old_on_reassign = true;
                 add_free_to_node(stack, stmt, stmt->as.assign.name);
             }
@@ -252,7 +266,7 @@ static void analyze_node(ScopeStack *stack, AstNode *node) {
                         stack->current_function->as.function.returns_heap_pointer = true;
                     }
                 }
-            } else if (node->as.return_stmt.value && node->as.return_stmt.value->type == NODE_ALLOC) {
+            } else if (node->as.return_stmt.value && (node->as.return_stmt.value->type == NODE_ALLOC || (node->as.return_stmt.value->type == NODE_CALL && is_stdlib_heap_fn(node->as.return_stmt.value->as.call.callee)))) {
                 if (stack->current_function) {
                     stack->current_function->as.function.returns_heap_pointer = true;
                 }
@@ -307,6 +321,34 @@ static void analyze_node(ScopeStack *stack, AstNode *node) {
                 analyze_node(stack, node->as.call.args[i]);
             }
             break;
+        case NODE_NEW: {
+            for (int k = 0; k < node->as.new_expr.field_count; k++) {
+                AstNode *val = node->as.new_expr.field_values[k];
+                analyze_node(stack, val);
+                bool val_is_heap = (val->type == NODE_ALLOC);
+                if (!val_is_heap && val->type == NODE_IDENT) {
+                    int s_idx = -1;
+                    int o_idx = find_owned_in_stack(stack, val->as.ident.name, &s_idx);
+                    if (o_idx != -1) {
+                        val_is_heap = true;
+                        stack->scopes[s_idx].transferred[o_idx] = true;
+                    }
+                }
+                if (val_is_heap && stack->program && stack->program->type == NODE_PROGRAM) {
+                    for (int c = 0; c < stack->program->as.program.class_count; c++) {
+                        AstNode *cls_ast = stack->program->as.program.classes[c];
+                        if (strcmp(cls_ast->as.class_decl.name, node->as.new_expr.class_name) == 0) {
+                            for (int f = 0; f < cls_ast->as.class_decl.field_count; f++) {
+                                if (strcmp(cls_ast->as.class_decl.fields[f]->as.field.name, node->as.new_expr.field_names[k]) == 0) {
+                                    cls_ast->as.class_decl.fields[f]->is_heap_owner = true;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            break;
+        }
         case NODE_INDEX:
             analyze_node(stack, node->as.index.index);
             break;
@@ -323,6 +365,7 @@ typedef struct OwnVar {
     char *name;
     char *class_name;
     int decl_line;
+    int decl_col;
     bool is_param;
     bool is_borrowed_param;
     bool transferred;
@@ -331,6 +374,8 @@ typedef struct OwnVar {
 typedef struct MovedVar {
     char *name;
     int move_line;
+    int move_col;
+    char *dest_name;
     bool is_conditional;
 } MovedVar;
 
@@ -356,10 +401,6 @@ typedef struct OwnScopeStack {
     char *current_class_name;
 } OwnScopeStack;
 
-static void report_ownership_error(int line, const char *msg) {
-    fprintf(stderr, "Scope Analysis Error at line %d: %s\n", line, msg);
-    exit(1);
-}
 
 static void push_own_scope(OwnScopeStack *stack, AstNode *block_node, bool is_loop) {
     if (stack->depth >= 128) {
@@ -385,7 +426,7 @@ static OwnScope *current_own_scope(OwnScopeStack *stack) {
     return &stack->scopes[stack->depth - 1];
 }
 
-static void own_scope_add_var(OwnScopeStack *stack, OwnScope *s, const char *name, const char *class_name, int line, bool is_param, bool is_borrowed_param) {
+static void own_scope_add_var(OwnScopeStack *stack, OwnScope *s, const char *name, const char *class_name, int line, int col, bool is_param, bool is_borrowed_param) {
     if (!name || !class_name) return;
     if (s->count >= s->capacity) {
         s->capacity = s->capacity == 0 ? 4 : s->capacity * 2;
@@ -398,6 +439,7 @@ static void own_scope_add_var(OwnScopeStack *stack, OwnScope *s, const char *nam
     s->vars[s->count].name = arena_strdup(stack->arena, name);
     s->vars[s->count].class_name = arena_strdup(stack->arena, class_name);
     s->vars[s->count].decl_line = line;
+    s->vars[s->count].decl_col = col;
     s->vars[s->count].is_param = is_param;
     s->vars[s->count].is_borrowed_param = is_borrowed_param;
     s->vars[s->count].transferred = is_borrowed_param;
@@ -439,17 +481,21 @@ static bool is_block_terminator(AstNode *block) {
     return false;
 }
 
-static void mark_moved(OwnScopeStack *stack, const char *name, int move_line, bool is_conditional) {
+static void mark_moved(OwnScopeStack *stack, const char *name, int move_line, int move_col, const char *dest_name, bool is_conditional) {
     if (!name) return;
     MovedVar *mv = find_moved_var(stack, name);
     if (mv) {
         mv->move_line = move_line;
+        mv->move_col = move_col;
+        if (dest_name) mv->dest_name = arena_strdup(stack->arena, dest_name);
         if (is_conditional) mv->is_conditional = true;
         return;
     }
     if (stack->moved_count < 256) {
         stack->moved[stack->moved_count].name = arena_strdup(stack->arena, name);
         stack->moved[stack->moved_count].move_line = move_line;
+        stack->moved[stack->moved_count].move_col = move_col;
+        stack->moved[stack->moved_count].dest_name = dest_name ? arena_strdup(stack->arena, dest_name) : NULL;
         stack->moved[stack->moved_count].is_conditional = is_conditional;
         stack->moved_count++;
     }
@@ -473,16 +519,43 @@ static bool is_var_transferred(OwnScopeStack *stack, OwnVar *v) {
     return false;
 }
 
-static void check_use_var(OwnScopeStack *stack, const char *name, int line) {
+static void check_use_var(OwnScopeStack *stack, const char *name, int line, int col) {
     MovedVar *mv = find_moved_var(stack, name);
     if (mv) {
-        char errbuf[256];
+        ErrorLocation primary = {get_error_filename(), line, col};
+        ErrorLocation note_loc = {get_error_filename(), mv->move_line, mv->move_col};
+        char short_msg[256];
+        char note_msg[256];
+
         if (mv->is_conditional) {
-            snprintf(errbuf, sizeof(errbuf), "'%s' may have been moved (conditionally at line %d)", name, mv->move_line);
+            snprintf(short_msg, sizeof(short_msg), "'%s' may be moved depending on which branch executes", name);
+            snprintf(note_msg, sizeof(note_msg), "moved here, in one branch:");
+            print_formatted_error(
+                short_msg,
+                primary,
+                "value used here",
+                note_msg,
+                &note_loc,
+                "move occurs here",
+                "but not on this path — Cco conservatively treats a variable as moved after ANY branch moves it"
+            );
         } else {
-            snprintf(errbuf, sizeof(errbuf), "use of moved value '%s' (moved at line %d)", name, mv->move_line);
+            snprintf(short_msg, sizeof(short_msg), "use of moved value '%s'", name);
+            if (mv->dest_name) {
+                snprintf(note_msg, sizeof(note_msg), "'%s' was moved into '%s' on line %d", name, mv->dest_name, mv->move_line);
+            } else {
+                snprintf(note_msg, sizeof(note_msg), "'%s' was moved into function call on line %d", name, mv->move_line);
+            }
+            print_formatted_error(
+                short_msg,
+                primary,
+                "value used here after being moved",
+                note_msg,
+                &note_loc,
+                "move occurs here",
+                NULL
+            );
         }
-        report_ownership_error(line, errbuf);
     }
 }
 
@@ -585,7 +658,7 @@ static void analyze_own_block(OwnScopeStack *stack, AstNode *block_node, bool is
             for (int p = 0; p < m->as.method.param_count; p++) {
                 if (m->as.method.param_types[p] == TY_CLASS && m->as.method.param_class_names[p]) {
                     bool is_bor = m->as.method.param_is_borrowed ? m->as.method.param_is_borrowed[p] : (p == 0);
-                    own_scope_add_var(stack, s, m->as.method.param_names[p], m->as.method.param_class_names[p], m->line, true, is_bor);
+                    own_scope_add_var(stack, s, m->as.method.param_names[p], m->as.method.param_class_names[p], m->as.method.param_lines ? m->as.method.param_lines[p] : m->line, m->as.method.param_cols ? m->as.method.param_cols[p] : m->col, true, is_bor);
                 }
             }
         } else if (stack->current_function->type == NODE_FUNCTION) {
@@ -593,7 +666,7 @@ static void analyze_own_block(OwnScopeStack *stack, AstNode *block_node, bool is
             for (int p = 0; p < f->as.function.param_count; p++) {
                 if (f->as.function.param_types[p] == TY_CLASS && f->as.function.param_class_names[p]) {
                     bool is_bor = f->as.function.param_is_borrowed ? f->as.function.param_is_borrowed[p] : false;
-                    own_scope_add_var(stack, s, f->as.function.param_names[p], f->as.function.param_class_names[p], f->line, true, is_bor);
+                    own_scope_add_var(stack, s, f->as.function.param_names[p], f->as.function.param_class_names[p], f->as.function.param_lines ? f->as.function.param_lines[p] : f->line, f->as.function.param_cols ? f->as.function.param_cols[p] : f->col, true, is_bor);
                 }
             }
         }
@@ -621,13 +694,13 @@ static void analyze_own_block(OwnScopeStack *stack, AstNode *block_node, bool is
                     const char *rhs_name = val->as.ident.name;
                     OwnVar *rhs_var = find_own_var(stack, rhs_name, NULL, NULL);
                     if (rhs_var) {
-                        check_use_var(stack, rhs_name, stmt->line);
-                        mark_moved(stack, rhs_name, stmt->line, false);
+                        check_use_var(stack, rhs_name, val->line, val->col);
+                        mark_moved(stack, rhs_name, val->line, val->col, stmt->as.let.name, false);
                     }
                 }
 
                 unmark_moved(stack, stmt->as.let.name);
-                own_scope_add_var(stack, s, stmt->as.let.name, cls_name, stmt->line, false, false);
+                own_scope_add_var(stack, s, stmt->as.let.name, cls_name, stmt->line, stmt->col, false, false);
             }
         } else if (stmt->type == NODE_ASSIGN) {
             analyze_own_node(stack, stmt->as.assign.value);
@@ -637,8 +710,8 @@ static void analyze_own_block(OwnScopeStack *stack, AstNode *block_node, bool is
                 const char *rhs_name = val->as.ident.name;
                 OwnVar *rhs_var = find_own_var(stack, rhs_name, NULL, NULL);
                 if (rhs_var) {
-                    check_use_var(stack, rhs_name, stmt->line);
-                    mark_moved(stack, rhs_name, stmt->line, false);
+                    check_use_var(stack, rhs_name, val->line, val->col);
+                    mark_moved(stack, rhs_name, val->line, val->col, stmt->as.assign.name, false);
                 }
             }
 
@@ -669,8 +742,8 @@ static void analyze_own_block(OwnScopeStack *stack, AstNode *block_node, bool is
                         const char *rhs_name = val->as.ident.name;
                         OwnVar *rhs_var = find_own_var(stack, rhs_name, NULL, NULL);
                         if (rhs_var) {
-                            check_use_var(stack, rhs_name, stmt->line);
-                            mark_moved(stack, rhs_name, stmt->line, false);
+                            check_use_var(stack, rhs_name, val->line, val->col);
+                            mark_moved(stack, rhs_name, val->line, val->col, NULL, false);
                         }
                     }
                 }
@@ -723,7 +796,7 @@ static void analyze_own_node(OwnScopeStack *stack, AstNode *node) {
         case NODE_IDENT: {
             OwnVar *v = find_own_var(stack, node->as.ident.name, NULL, NULL);
             if (v) {
-                check_use_var(stack, node->as.ident.name, node->line);
+                check_use_var(stack, node->as.ident.name, node->line, node->col);
             }
             break;
         }
@@ -779,7 +852,7 @@ static void analyze_own_node(OwnScopeStack *stack, AstNode *node) {
                     stack->moved_count = orig_moved_count;
                     memcpy(stack->moved, orig_moved, orig_moved_count * sizeof(MovedVar));
                     for (int i = orig_moved_count; i < then_moved_count; i++) {
-                        mark_moved(stack, then_moved[i].name, then_moved[i].move_line, true);
+                        mark_moved(stack, then_moved[i].name, then_moved[i].move_line, then_moved[i].move_col, then_moved[i].dest_name, true);
                     }
                 }
             } else {
@@ -793,7 +866,7 @@ static void analyze_own_node(OwnScopeStack *stack, AstNode *node) {
                             break;
                         }
                     }
-                    mark_moved(stack, then_moved[i].name, then_moved[i].move_line, !in_else);
+                    mark_moved(stack, then_moved[i].name, then_moved[i].move_line, then_moved[i].move_col, then_moved[i].dest_name, !in_else);
                 }
                 for (int j = orig_moved_count; j < else_moved_count; j++) {
                     bool in_then = false;
@@ -804,7 +877,7 @@ static void analyze_own_node(OwnScopeStack *stack, AstNode *node) {
                         }
                     }
                     if (!in_then) {
-                        mark_moved(stack, else_moved[j].name, else_moved[j].move_line, true);
+                        mark_moved(stack, else_moved[j].name, else_moved[j].move_line, else_moved[j].move_col, else_moved[j].dest_name, true);
                     }
                 }
             }
@@ -863,10 +936,10 @@ static void analyze_own_node(OwnScopeStack *stack, AstNode *node) {
                     const char *arg_name = arg->as.ident.name;
                     OwnVar *arg_var = find_own_var(stack, arg_name, NULL, NULL);
                     if (arg_var) {
-                        check_use_var(stack, arg_name, node->line);
+                        check_use_var(stack, arg_name, arg->line, arg->col);
                         bool is_bor = (fn && i < fn->as.function.param_count && fn->as.function.param_is_borrowed) ? fn->as.function.param_is_borrowed[i] : false;
                         if (!is_bor) {
-                            mark_moved(stack, arg_name, node->line, false);
+                            mark_moved(stack, arg_name, arg->line, arg->col, NULL, false);
                         }
                     }
                 }
@@ -893,7 +966,7 @@ static void analyze_own_node(OwnScopeStack *stack, AstNode *node) {
                     const char *arg_name = arg->as.ident.name;
                     OwnVar *arg_var = find_own_var(stack, arg_name, NULL, NULL);
                     if (arg_var) {
-                        check_use_var(stack, arg_name, node->line);
+                        check_use_var(stack, arg_name, arg->line, arg->col);
                         bool is_bor = false;
                         if (mi && mi->method_node) {
                             AstNode *mn = mi->method_node;
@@ -903,7 +976,7 @@ static void analyze_own_node(OwnScopeStack *stack, AstNode *node) {
                             }
                         }
                         if (!is_bor) {
-                            mark_moved(stack, arg_name, node->line, false);
+                            mark_moved(stack, arg_name, arg->line, arg->col, NULL, false);
                         }
                     }
                 }
@@ -921,13 +994,25 @@ static void analyze_own_node(OwnScopeStack *stack, AstNode *node) {
                 int s_idx = -1, v_idx = -1;
                 OwnVar *v = find_own_var(stack, ret_var, &s_idx, &v_idx);
                 if (v) {
-                    check_use_var(stack, ret_var, node->line);
+                    check_use_var(stack, ret_var, node->as.return_stmt.value->line, node->as.return_stmt.value->col);
                     if (v->is_borrowed_param) {
-                        char errbuf[256];
-                        snprintf(errbuf, sizeof(errbuf), "cannot return borrowed value '%s'", ret_var);
-                        report_ownership_error(node->line, errbuf);
+                        char short_msg[256];
+                        char note_msg[256];
+                        snprintf(short_msg, sizeof(short_msg), "cannot return borrowed value '%s'", ret_var);
+                        snprintf(note_msg, sizeof(note_msg), "'%s' is a borrowed parameter (&%s) — this function does not own it and cannot transfer ownership to the caller", ret_var, v->class_name ? v->class_name : "");
+                        ErrorLocation primary = {get_error_filename(), node->as.return_stmt.value->line, node->as.return_stmt.value->col};
+                        ErrorLocation note_loc = {get_error_filename(), v->decl_line, v->decl_col};
+                        print_formatted_error(
+                            short_msg,
+                            primary,
+                            "return of borrowed value",
+                            note_msg,
+                            &note_loc,
+                            "parameter declared as borrowed here",
+                            NULL
+                        );
                     }
-                    mark_moved(stack, ret_var, node->line, false);
+                    mark_moved(stack, ret_var, node->as.return_stmt.value->line, node->as.return_stmt.value->col, NULL, false);
                 }
             }
 

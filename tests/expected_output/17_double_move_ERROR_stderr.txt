@@ -1,1 +1,12 @@
-Scope Analysis Error at line 13: use of moved value 'a' (moved at line 12)
+error: use of moved value 'a'
+  --> tests/programs/17_double_move_ERROR.cco:13:13
+    |
+ 13 |     consume(a);
+    |             ^ value used here after being moved
+    |
+note: 'a' was moved into function call on line 12
+  --> tests/programs/17_double_move_ERROR.cco:12:13
+    |
+ 12 |     consume(a);
+    |             ^ move occurs here
+    |

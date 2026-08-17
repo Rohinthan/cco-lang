@@ -1,1 +1,13 @@
-Scope Analysis Error at line 11: 'a' may have been moved (conditionally at line 9)
+error: 'a' may be moved depending on which branch executes
+  --> tests/programs/18_conditional_move_ERROR.cco:11:11
+    |
+ 11 |     print(a.x);
+    |           ^ value used here
+    |
+note: moved here, in one branch:
+  --> tests/programs/18_conditional_move_ERROR.cco:9:24
+    |
+  9 |         let b: Point = a;
+    |                        ^ move occurs here
+    |
+note: but not on this path — Cco conservatively treats a variable as moved after ANY branch moves it

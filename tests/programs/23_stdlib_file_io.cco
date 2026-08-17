@@ -1,0 +1,10 @@
+fn main() -> int {
+    let path: string = "build/test_io_tmp.txt";
+    let content: string = "File I/O in Cco works!";
+    let ok: bool = write_file(path, content);
+    print(ok);
+
+    let read_back: string = read_file(path);
+    print(read_back);
+    return 0;
+}

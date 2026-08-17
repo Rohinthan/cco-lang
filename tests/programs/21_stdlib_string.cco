@@ -1,0 +1,17 @@
+fn main() -> int {
+    let s1: string = "Hello, ";
+    let s2: string = "Cco!";
+    let s3: string = concat(s1, s2);
+    print(s3);
+    print(len(s3));
+
+    let eq: bool = equals(s1, "Hello, ");
+    print(eq);
+
+    let ch: char = char_at(s3, 0);
+    print(ch);
+
+    let sub: string = substring(s3, 7, 10);
+    print(sub);
+    return 0;
+}

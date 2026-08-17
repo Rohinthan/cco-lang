@@ -1,1 +1,12 @@
-Scope Analysis Error at line 7: cannot return borrowed value 'p'
+error: cannot return borrowed value 'p'
+  --> tests/programs/20_return_borrowed_ERROR.cco:7:12
+    |
+  7 |     return p;
+    |            ^ return of borrowed value
+    |
+note: 'p' is a borrowed parameter (&Point) — this function does not own it and cannot transfer ownership to the caller
+  --> tests/programs/20_return_borrowed_ERROR.cco:6:8
+    |
+  6 | fn bad(p: &Point) -> Point {
+    |        ^ parameter declared as borrowed here
+    |
