@@ -88,6 +88,7 @@ const char *type_to_string(Type type) {
         case TY_BOOL: return "bool";
         case TY_STRING: return "string";
         case TY_VOID: return "void";
+        case TY_CLASS: return "class";
         default: return "unknown";
     }
 }

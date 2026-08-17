@@ -4,13 +4,19 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+typedef struct RefRelease {
+    char *var_name;
+    char *class_name;
+} RefRelease;
+
 typedef enum {
     TY_INT,
     TY_FLOAT,
     TY_CHAR,
     TY_BOOL,
     TY_STRING,
-    TY_VOID
+    TY_VOID,
+    TY_CLASS
 } Type;
 
 typedef enum {
@@ -34,7 +40,15 @@ typedef enum {
     NODE_INDEX,
     NODE_LITERAL,
     NODE_IDENT,
-    NODE_ALLOC
+    NODE_ALLOC,
+    // v2 Node Types
+    NODE_CLASS,
+    NODE_FIELD,
+    NODE_METHOD,
+    NODE_NEW,
+    NODE_MEMBER,
+    NODE_METHOD_CALL,
+    NODE_MEMBER_ASSIGN
 } NodeType;
 
 typedef struct AstNode AstNode;
@@ -43,25 +57,60 @@ struct AstNode {
     NodeType type;
     int line;
 
-    // Scope Analysis annotations
+    // Scope Analysis annotations (alloc based)
     bool is_heap_owner;           // True if let statement binds an alloc() call
     bool is_transferred;          // True if ownership moved to caller/outer variable
     char **frees_to_emit;         // Variable names to emit free() for before exit/jump
     int frees_count;
     bool free_old_on_reassign;    // True if assign stmt overwrites an existing owned pointer
 
+    // Scope Analysis annotations (refcount based)
+    RefRelease *releases_to_emit; // Class vars to emit _release() for
+    int releases_count;
+
     union {
         struct {
+            AstNode **classes;
+            int class_count;
             AstNode **functions;
             int count;
         } program;
 
         struct {
             char *name;
+            AstNode **fields;
+            int field_count;
+            AstNode **methods;
+            int method_count;
+        } class_decl;
+
+        struct {
+            char *name;
+            Type type;
+            char *class_name;
+        } field;
+
+        struct {
+            char *name;
+            bool has_self;
             char **param_names;
             Type *param_types;
+            char **param_class_names;
             int param_count;
             Type return_type;
+            char *return_class_name;
+            bool returns_heap_pointer;
+            AstNode *body;
+        } method;
+
+        struct {
+            char *name;
+            char **param_names;
+            Type *param_types;
+            char **param_class_names;
+            int param_count;
+            Type return_type;
+            char *return_class_name;
             bool returns_heap_pointer;
             AstNode *body;
         } function;
@@ -77,13 +126,27 @@ struct AstNode {
         struct {
             char *name;
             Type var_type;
+            char *class_name;
             AstNode *value;
+            bool retain_rhs;
         } let;
 
         struct {
             char *name;
             AstNode *value;
+            char *class_name;
+            bool retain_rhs;
+            bool release_old;
         } assign;
+
+        struct {
+            AstNode *object;
+            char *member_name;
+            AstNode *value;
+            char *field_class_name;
+            bool retain_rhs;
+            bool release_old;
+        } member_assign;
 
         struct {
             char *array_name;
@@ -139,6 +202,27 @@ struct AstNode {
         } call;
 
         struct {
+            char *class_name;
+            char **field_names;
+            AstNode **field_values;
+            int field_count;
+        } new_expr;
+
+        struct {
+            AstNode *object;
+            char *member_name;
+            char *field_class_name;
+        } member;
+
+        struct {
+            AstNode *object;
+            char *method_name;
+            AstNode **args;
+            int arg_count;
+            char *target_class_name;
+        } method_call;
+
+        struct {
             char *array_name;
             AstNode *index;
         } index;
@@ -160,6 +244,7 @@ struct AstNode {
 
         struct {
             Type elem_type;
+            char *class_name;
             AstNode *count_expr;
         } alloc;
     } as;
