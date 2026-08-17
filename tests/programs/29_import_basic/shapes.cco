@@ -1,0 +1,7 @@
+class Circle {
+    radius: float;
+
+    fn area(self) -> float {
+        return 3.14159 * self.radius * self.radius;
+    }
+}

@@ -1,0 +1,6 @@
+import "d.cco";
+
+fn print_point(p: &Point) -> void {
+    print(p.x);
+    print(p.y);
+}

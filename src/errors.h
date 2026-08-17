@@ -4,6 +4,7 @@
 #include <stdbool.h>
 
 void init_error_reporter(const char *filename, const char *source);
+void register_file_source(const char *filename, const char *source);
 const char *get_error_filename(void);
 const char *get_error_source(void);
 

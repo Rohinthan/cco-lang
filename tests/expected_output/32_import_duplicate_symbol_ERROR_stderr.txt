@@ -1,0 +1,12 @@
+error: duplicate definition of 'Helper'
+  --> tests/programs/32_import_duplicate_symbol_ERROR/b.cco:1:1
+    |
+  1 | class Helper {
+    | ^ duplicate definition
+    |
+note: first defined here:
+  --> tests/programs/32_import_duplicate_symbol_ERROR/a.cco:1:1
+    |
+  1 | class Helper {
+    | ^ first defined here
+    |

@@ -1,0 +1,3 @@
+error: circular import detected
+  tests/programs/31_import_circular_ERROR/a.cco imports tests/programs/31_import_circular_ERROR/b.cco (line 1)
+  tests/programs/31_import_circular_ERROR/b.cco imports a.cco (line 1)

@@ -1,0 +1,14 @@
+// shapes.cco — Shape definitions for Cco multi-file import example
+
+class Rectangle {
+    width: float;
+    height: float;
+
+    fn area(self) -> float {
+        return self.width * self.height;
+    }
+
+    fn perimeter(self) -> float {
+        return 2.0 * (self.width + self.height);
+    }
+}

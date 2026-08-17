@@ -1,0 +1,6 @@
+import "a.cco";
+import "b.cco";
+
+fn main() -> int {
+    return 0;
+}

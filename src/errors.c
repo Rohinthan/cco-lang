@@ -4,20 +4,26 @@
 #include <stdlib.h>
 #include <string.h>
 
-static const char *g_filename = "unknown";
-static const char *g_source = "";
+static char *g_filename = NULL;
+static char *g_source = NULL;
 
 void init_error_reporter(const char *filename, const char *source) {
-    if (filename) g_filename = filename;
-    if (source) g_source = source;
+    if (filename) {
+        if (g_filename) free(g_filename);
+        g_filename = strdup(filename);
+    }
+    if (source) {
+        if (g_source) free(g_source);
+        g_source = strdup(source);
+    }
 }
 
 const char *get_error_filename(void) {
-    return g_filename;
+    return g_filename ? g_filename : "unknown";
 }
 
 const char *get_error_source(void) {
-    return g_source;
+    return g_source ? g_source : "";
 }
 
 static char *get_line_source(const char *source, int line_num) {
@@ -52,6 +58,45 @@ static int get_line_width(int line) {
     return w > 2 ? w : 2;
 }
 
+typedef struct {
+    char *filename;
+    char *source;
+} FileRegistryEntry;
+
+static FileRegistryEntry g_file_registry[64];
+static int g_file_registry_count = 0;
+
+void register_file_source(const char *filename, const char *source) {
+    if (!filename || !source) return;
+    for (int i = 0; i < g_file_registry_count; i++) {
+        if (strcmp(g_file_registry[i].filename, filename) == 0) {
+            return;
+        }
+    }
+    if (g_file_registry_count < 64) {
+        g_file_registry[g_file_registry_count].filename = strdup(filename);
+        g_file_registry[g_file_registry_count].source = strdup(source);
+        g_file_registry_count++;
+    }
+    init_error_reporter(filename, source);
+}
+
+static const char *find_file_source(const char *filename) {
+    if (filename) {
+        for (int i = 0; i < g_file_registry_count; i++) {
+            if (strcmp(g_file_registry[i].filename, filename) == 0) {
+                return g_file_registry[i].source;
+            }
+        }
+    }
+    return g_source;
+}
+
+static char *get_line_source_for_file(const char *filename, int line_num) {
+    const char *src = find_file_source(filename);
+    return get_line_source(src, line_num);
+}
+
 void print_formatted_error(const char *short_msg,
                           ErrorLocation primary,
                           const char *primary_caret_note,
@@ -65,7 +110,7 @@ void print_formatted_error(const char *short_msg,
 
     int w1 = get_line_width(primary.line);
     fprintf(stderr, " %*s |\n", w1, "");
-    char *line1 = get_line_source(g_source, primary.line);
+    char *line1 = get_line_source_for_file(fn1, primary.line);
     fprintf(stderr, " %*d | %s\n", w1, primary.line, line1 ? line1 : "");
     fprintf(stderr, " %*s | ", w1, "");
     for (int i = 1; i < primary.col; i++) fputc(' ', stderr);
@@ -82,7 +127,7 @@ void print_formatted_error(const char *short_msg,
             fprintf(stderr, "  --> %s:%d:%d\n", fn2, note_loc->line, note_loc->col);
             int w2 = get_line_width(note_loc->line);
             fprintf(stderr, " %*s |\n", w2, "");
-            char *line2 = get_line_source(g_source, note_loc->line);
+            char *line2 = get_line_source_for_file(fn2, note_loc->line);
             fprintf(stderr, " %*d | %s\n", w2, note_loc->line, line2 ? line2 : "");
             fprintf(stderr, " %*s | ", w2, "");
             for (int i = 1; i < note_loc->col; i++) fputc(' ', stderr);

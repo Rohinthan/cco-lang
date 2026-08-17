@@ -15,6 +15,7 @@ Welcome to the Cco example program gallery. These examples demonstrate the featu
 | [`07_ownership_demo.cco`](07_ownership_demo.cco) | Ownership & move semantics | Ownership transfer (moves), borrowed parameters (`&Class`) |
 | [`08_stack_data_structure.cco`](08_stack_data_structure.cco) | OOP Stack data structure | Classes with heap arrays, method state mutation |
 | [`09_object_array_todo.cco`](09_object_array_todo.cco) | Arrays of Objects & Todo list | Object arrays (`Class[]`), `alloc(Class, n)`, `for-each` loops |
+| [`10_import_demo/`](10_import_demo/) | Multi-file import system | Top-level imports (`import "file.cco";`), Resolve-Then-Merge AST |
 
 ## Compiling & Running Examples
 

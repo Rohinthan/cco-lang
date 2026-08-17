@@ -1,0 +1,11 @@
+// main.cco — Multi-file import system example in Cco v6.0
+
+import "shapes.cco";
+
+fn main() -> int {
+    let r: Rectangle = Rectangle { width: 4.0, height: 5.0 };
+    print("--- RECTANGLE CALCULATION ---");
+    print(r.area());
+    print(r.perimeter());
+    return 0;
+}

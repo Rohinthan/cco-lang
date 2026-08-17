@@ -10,8 +10,24 @@ echo "=================================================="
 PASSED=0
 FAILED=0
 
-for prog in tests/programs/*.cco; do
-    base=$(basename "$prog" .cco)
+for item in tests/programs/*; do
+    if [ -f "$item" ]; then
+        if [[ "$item" != *.cco ]]; then continue; fi
+        base=$(basename "$item" .cco)
+        entry="$item"
+    elif [ -d "$item" ]; then
+        base=$(basename "$item")
+        if [ -f "$item/main.cco" ]; then
+            entry="$item/main.cco"
+        elif [ -f "$item/a.cco" ]; then
+            entry="$item/a.cco"
+        else
+            continue
+        fi
+    else
+        continue
+    fi
+
     c_out="build/${base}.c"
     bin_out="build/${base}"
     act_out="build/${base}_actual.txt"
@@ -23,7 +39,7 @@ for prog in tests/programs/*.cco; do
         err_out="build/${base}_err.txt"
         exp_err="tests/expected_output/${base}_stderr.txt"
         set +e
-        ./cco "$prog" -o "$c_out" 2> "$err_out"
+        ./cco "$entry" -o "$c_out" 2> "$err_out"
         code=$?
         set -e
         if [ "$code" -eq 0 ]; then
@@ -43,7 +59,7 @@ for prog in tests/programs/*.cco; do
     fi
 
     # 1. Transpile Cco -> C
-    ./cco "$prog" -o "$c_out"
+    ./cco "$entry" -o "$c_out"
 
     # 2. Compile C -> Executable
     gcc -Wall -Wextra -Werror -std=c11 "$c_out" -o "$bin_out" -lm

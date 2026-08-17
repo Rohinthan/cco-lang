@@ -50,7 +50,8 @@ typedef enum {
     NODE_NEW,
     NODE_MEMBER,
     NODE_METHOD_CALL,
-    NODE_MEMBER_ASSIGN
+    NODE_MEMBER_ASSIGN,
+    NODE_IMPORT
 } NodeType;
 
 typedef struct AstNode AstNode;
@@ -59,6 +60,7 @@ struct AstNode {
     NodeType type;
     int line;
     int col;
+    const char *source_file;      // Source file path where this node originated
 
     // Scope Analysis annotations (alloc based)
     bool is_heap_owner;           // True if let statement binds an alloc() call
@@ -75,11 +77,17 @@ struct AstNode {
 
     union {
         struct {
+            AstNode **imports;
+            int import_count;
             AstNode **classes;
             int class_count;
             AstNode **functions;
             int count;
         } program;
+
+        struct {
+            char *path;
+        } import_stmt;
 
         struct {
             char *name;

@@ -961,7 +961,21 @@ static AstNode *parse_function(Parser *p) {
     return node;
 }
 
+static AstNode *parse_import_stmt(Parser *p) {
+    Token tok = consume(p, TOKEN_IMPORT, "Expected 'import'");
+    Token path_tok = consume(p, TOKEN_STRING_LIT, "Expected string literal path after 'import'");
+    consume(p, TOKEN_SEMICOLON, "Expected ';' after import statement");
+
+    AstNode *node = arena_alloc_node(p->arena, NODE_IMPORT, tok.line, tok.col);
+    node->as.import_stmt.path = arena_strdup(p->arena, path_tok.lexeme);
+    return node;
+}
+
 AstNode *parse_program(Parser *p) {
+    AstNode **imports = NULL;
+    int import_count = 0;
+    int import_cap = 0;
+
     AstNode **classes = NULL;
     int class_count = 0;
     int class_cap = 0;
@@ -970,8 +984,23 @@ AstNode *parse_program(Parser *p) {
     int fn_count = 0;
     int fn_cap = 0;
 
+    bool seen_decl = false;
+
     while (!is_at_end(p)) {
-        if (check(p, TOKEN_CLASS)) {
+        if (check(p, TOKEN_IMPORT)) {
+            if (seen_decl) {
+                fatal_parser_error(peek(p).line, peek(p).col, peek(p).lexeme, "import statements must appear before any function or class declaration");
+            }
+            AstNode *imp = parse_import_stmt(p);
+            if (import_count >= import_cap) {
+                import_cap = import_cap == 0 ? 4 : import_cap * 2;
+                AstNode **new_imp = (AstNode **)arena_alloc_array(p->arena, import_cap, sizeof(AstNode *));
+                if (imports) memcpy(new_imp, imports, import_count * sizeof(AstNode *));
+                imports = new_imp;
+            }
+            imports[import_count++] = imp;
+        } else if (check(p, TOKEN_CLASS)) {
+            seen_decl = true;
             AstNode *cls = parse_class(p);
             if (class_count >= class_cap) {
                 class_cap = class_cap == 0 ? 4 : class_cap * 2;
@@ -981,6 +1010,7 @@ AstNode *parse_program(Parser *p) {
             }
             classes[class_count++] = cls;
         } else if (check(p, TOKEN_FN)) {
+            seen_decl = true;
             AstNode *fn = parse_function(p);
             if (fn_count >= fn_cap) {
                 fn_cap = fn_cap == 0 ? 4 : fn_cap * 2;
@@ -990,11 +1020,13 @@ AstNode *parse_program(Parser *p) {
             }
             functions[fn_count++] = fn;
         } else {
-            error_at(peek(p), "Expected 'class' or 'fn' at top level");
+            error_at(peek(p), "Expected 'import', 'class', or 'fn' at top level");
         }
     }
 
     AstNode *prog = arena_alloc_node(p->arena, NODE_PROGRAM, 1, 1);
+    prog->as.program.imports = imports;
+    prog->as.program.import_count = import_count;
     prog->as.program.classes = classes;
     prog->as.program.class_count = class_count;
     prog->as.program.functions = functions;

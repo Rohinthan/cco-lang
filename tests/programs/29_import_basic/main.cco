@@ -1,0 +1,7 @@
+import "shapes.cco";
+
+fn main() -> int {
+    let c: Circle = Circle { radius: 2.0 };
+    print(c.area());
+    return 0;
+}

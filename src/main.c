@@ -2,35 +2,12 @@
 #include "lexer.h"
 #include "ast.h"
 #include "parser.h"
+#include "module_resolver.h"
 #include "scope_analysis.h"
 #include "codegen.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-static char *read_file(const char *path) {
-    FILE *file = fopen(path, "rb");
-    if (!file) {
-        fprintf(stderr, "Error: Could not open file '%s'\n", path);
-        exit(1);
-    }
-
-    fseek(file, 0L, SEEK_END);
-    size_t file_size = ftell(file);
-    rewind(file);
-
-    char *buffer = malloc(file_size + 1);
-    if (!buffer) {
-        fprintf(stderr, "Error: Memory allocation failed for file buffer\n");
-        fclose(file);
-        exit(1);
-    }
-
-    size_t bytes_read = fread(buffer, sizeof(char), file_size, file);
-    buffer[bytes_read] = '\0';
-    fclose(file);
-    return buffer;
-}
 
 static void write_file(const char *path, const char *content) {
     FILE *file = fopen(path, "w");
@@ -65,16 +42,8 @@ int main(int argc, char **argv) {
         }
     }
 
-    char *source = read_file(input_path);
-    init_error_reporter(input_path, source);
-
-    // 1. Lexical Analysis
-    TokenArray tokens = lex_source(source);
-
-    // 2. Parsing AST
     AstArena *arena = create_ast_arena();
-    Parser parser = create_parser(tokens, arena);
-    AstNode *ast = parse_program(&parser);
+    AstNode *ast = resolve_program(input_path, arena);
 
     // 3. Scope Analysis & Auto-free Annotation Pass
     analyze_scopes(ast, arena);
@@ -92,8 +61,6 @@ int main(int argc, char **argv) {
     // Cleanup Compiler Memory
     free(c_code);
     free_ast_arena(arena);
-    free_tokens(&tokens);
-    free(source);
 
     // 5. Optional compilation and execution with gcc
     if (run_binary) {

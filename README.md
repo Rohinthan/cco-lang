@@ -1,8 +1,8 @@
-# Cco (C--) Compiler: A C-like Language with Compile-Time Single Ownership, Arrays of Objects & Standard Library (v5.0)
+# Cco (C--) Compiler: A C-like Language with Compile-Time Single Ownership, Arrays of Objects, Minimal Module/Import System & Standard Library (v6.0)
 
-**Cco (C--)** is a lightweight, systems programming language with explicit C-like syntax, **scope-exit auto-free for raw allocations**, **compile-time single ownership with move semantics**, **Arrays of Objects with for-each iteration** (`alloc(Point, n)`, `for p in pts`), and a **built-in Standard Library** (Strings, Math, File I/O). It transpiles Cco source code (`.cco`) into portable, standard C11 source code (`.c`), which is compiled to native machine binaries using `gcc` or `clang`.
+**Cco (C--)** is a lightweight, systems programming language with explicit C-like syntax, **scope-exit auto-free for raw allocations**, **compile-time single ownership with move semantics**, **Arrays of Objects with for-each iteration** (`alloc(Point, n)`, `for p in pts`), **Minimal Multi-file Module/Import System** (`import "file.cco";`), and a **built-in Standard Library** (Strings, Math, File I/O). It transpiles Cco source code (`.cco`) into portable, standard C11 source code (`.c`), which is compiled to native machine binaries using `gcc` or `clang`.
 
-> **Write it like Python's class syntax reads. Compile it and it runs like C with zero runtime reference counting overhead, zero GC pauses, no manual free(), Rust-like compile-time ownership safety for collections of objects, and GCC/Rust-style diagnostic error messages.**
+> **Write it like Python's class syntax reads. Compile it and it runs like C with zero runtime reference counting overhead, zero GC pauses, no manual free(), Rust-like compile-time ownership safety across multi-file programs, and GCC/Rust-style diagnostic error messages.**
 
 ---
 
@@ -15,7 +15,19 @@
    Cco provides `class`, fields, methods, `obj.method(args)` call syntax, and **Arrays of Objects** (`Point[] = alloc(Point, 3)`). Under the hood it translates to C pointers and functions taking a `self` pointer—no vtables, no multiple inheritance, no operator overloading, no templates, no name-mangling maze.
 
 3. **WRITTEN LIKE IT'S EASY**  
-   No manual `malloc`/`free`. No header files to keep in sync with `.c` files. Memory is managed automatically via scope-exit auto-free and **single ownership release cascades** for object arrays (`Point[]`)—both deterministic, zero runtime overhead, zero GC pause.
+   No manual `malloc`/`free`. No header files to keep in sync with `.c` files. Memory is managed automatically via scope-exit auto-free, **single ownership release cascades**, and a **Resolve-Then-Merge multi-file import system** (`import "file.cco";`)—both deterministic, zero runtime overhead, zero GC pause.
+
+---
+
+## 📁 Minimal Module/Import System (v6.0)
+
+Cco v6.0 introduces multi-file program support via a Resolve-Then-Merge AST architecture:
+
+- **Import Syntax**: `import "shapes.cco";` statements must appear at the top of a file before any function or class declarations.
+- **Resolve-Then-Merge AST**: Files are parsed independently into separate ASTs, then recursively merged into a single combined program AST before scope analysis or code generation runs.
+- **Automatic De-duplication**: Diamond imports (`A -> B, C; B -> D; C -> D`) parse and merge `D` exactly once based on canonical absolute file path resolution.
+- **Flat Global Namespace**: Functions and classes across imported files live in one global namespace without mandatory visibility modifiers or qualified names.
+- **Diagnostic Error Reporting**: Compile-time detection of circular imports (`A <-> B`) and duplicate symbol definitions with clear two-location error messages.
 
 ---
 
@@ -70,24 +82,27 @@ Cco includes a built-in Standard Library available in every file without manual 
 
 Cco features GCC/Rust-style two-location diagnostic error reporting with verbatim source line snippets, line number padding, carets pointing at exact spans, and explanatory notes.
 
-### Example: Move-Out of Array Element Error (v5.0)
+### Example: Duplicate Symbol Definition Error Across Files (v6.0)
 ```
-error: cannot move out of array element 'pts[0]' — array elements can only be borrowed, not moved, in this version of Cco
-  --> tests/programs/27_object_array_move_out_ERROR.cco:9:20
+error: duplicate definition of 'Helper'
+  --> tests/programs/32_import_duplicate_symbol_ERROR/b.cco:1:1
     |
-  9 |     let p: Point = pts[0];
-    |                    ^ cannot move out of array element
+  1 | class Helper {
+    | ^ duplicate definition
+    |
+note: first defined here:
+  --> tests/programs/32_import_duplicate_symbol_ERROR/a.cco:1:1
+    |
+  1 | class Helper {
+    | ^ first defined here
     |
 ```
 
-### Example: Constant Array Bounds Error (v5.0)
+### Example: Circular Import Error (v6.0)
 ```
-error: index 10 out of bounds for array of length 3
-  --> tests/programs/28_object_array_bounds_ERROR.cco:9:11
-    |
-  9 |     print(pts[10].x);
-    |           ^ index out of bounds
-    |
+error: circular import detected
+  tests/programs/31_import_circular_ERROR/a.cco imports b.cco (line 1)
+  b.cco imports a.cco (line 1)
 ```
 
 ---
@@ -105,6 +120,7 @@ A comprehensive suite of example programs is available in [`examples/`](examples
 - [`examples/07_ownership_demo.cco`](examples/07_ownership_demo.cco): Ownership transfer (moves) vs borrowed references (`&Class`)
 - [`examples/08_stack_data_structure.cco`](examples/08_stack_data_structure.cco): OOP Stack data structure with dynamic array buffer
 - [`examples/09_object_array_todo.cco`](examples/09_object_array_todo.cco): Arrays of Objects (`Task[]`) and `for-each` loop iteration
+- [`examples/10_import_demo/`](examples/10_import_demo/): Multi-file import system (`import "shapes.cco";`)
 
 See [`examples/README.md`](examples/README.md) for detailed descriptions and execution instructions.
 
@@ -129,12 +145,12 @@ make test
 
 ---
 
-## 🧪 Test Suite Matrix (v5.0)
+## 🧪 Test Suite Matrix (v6.0)
 
 | Test Case | Description | Result | Valgrind Leak Status |
 | :--- | :--- | :---: | :---: |
-| `test_lexer` | Unit tests for tokenizer, keywords (`class`, `self`, `in`) & `&` borrow token | **PASS** | 0 Bytes Leaked |
-| `test_parser` | Unit tests for AST node construction & array type parsing | **PASS** | 0 Bytes Leaked |
+| `test_lexer` | Unit tests for tokenizer, keywords (`class`, `self`, `in`, `import`) & `&` borrow token | **PASS** | 0 Bytes Leaked |
+| `test_parser` | Unit tests for AST node construction & `NODE_IMPORT` parsing | **PASS** | 0 Bytes Leaked |
 | `test_scope` | Unit tests for ownership pass, move tracking, free injection | **PASS** | 0 Bytes Leaked |
 | `01_hello` | Basic printing, strings, arithmetic operations | **PASS** | 0 Bytes Leaked |
 | `02_alloc_basic` | Basic array allocation, indexing, & block exit free | **PASS** | 0 Bytes Leaked |
@@ -164,9 +180,14 @@ make test
 | `26_object_array_free_cascade` | Null-checked release cascade skipping empty array slots | **PASS** | 0 Bytes Leaked |
 | `27_object_array_move_out_ERROR` | Rejecting move-out of array element (`let p = pts[0]`) | **PASS** | Compile Error (As Expected) |
 | `28_object_array_bounds_ERROR` | Rejecting constant index out-of-bounds (`pts[10]`) | **PASS** | Compile Error (As Expected) |
+| `29_import_basic` | Basic multi-file import (`import "shapes.cco";`) | **PASS** | 0 Bytes Leaked |
+| `30_import_diamond` | Diamond import resolution & AST de-duplication | **PASS** | 0 Bytes Leaked |
+| `31_import_circular_ERROR` | Circular import cycle detection & full chain error report | **PASS** | Compile Error (As Expected) |
+| `32_import_duplicate_symbol_ERROR` | Duplicate class/function definition rejection across files | **PASS** | Compile Error (As Expected) |
 
 ---
 
 ## 📄 License
 MIT License. Developed for the Cco Source-to-Source Transpiler Sprint.
+
 

@@ -1,0 +1,5 @@
+import "d.cco";
+
+fn create_b() -> Point {
+    return Point { x: 10, y: 20 };
+}

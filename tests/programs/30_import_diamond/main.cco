@@ -1,0 +1,8 @@
+import "b.cco";
+import "c.cco";
+
+fn main() -> int {
+    let p: Point = create_b();
+    print_point(p);
+    return 0;
+}
