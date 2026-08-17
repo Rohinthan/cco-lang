@@ -1,6 +1,6 @@
 CC = gcc
 CFLAGS = -Wall -Wextra -Werror -std=c11 -Isrc
-SRC = src/lexer.c src/ast.c src/parser.c src/scope_analysis.c src/codegen.c
+SRC = src/lexer.c src/ast.c src/class_decl.c src/parser.c src/scope_analysis.c src/codegen.c
 MAIN_SRC = src/main.c
 
 all: cmm

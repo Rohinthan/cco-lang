@@ -45,6 +45,7 @@ static void sb_appendf(StringBuffer *sb, const char *fmt, ...) {
 typedef struct {
     StringBuffer sb;
     int indent_level;
+    AstNode *program;
 } CodegenCtx;
 
 static void emit_indent(CodegenCtx *ctx) {
@@ -53,7 +54,12 @@ static void emit_indent(CodegenCtx *ctx) {
     }
 }
 
-static const char *c_type_str(Type t, bool is_heap_owner) {
+static const char *c_type_str_full(Type t, const char *class_name, bool is_heap_owner) {
+    if (t == TY_CLASS && class_name) {
+        static char buf[128];
+        snprintf(buf, sizeof(buf), "%s *", class_name);
+        return buf;
+    }
     switch (t) {
         case TY_INT: return is_heap_owner ? "int *" : "int";
         case TY_FLOAT: return is_heap_owner ? "double *" : "double";
@@ -75,6 +81,23 @@ static void emit_frees(CodegenCtx *ctx, AstNode *node) {
         emit_indent(ctx);
         sb_appendf(&ctx->sb, "free(%s);\n", node->frees_to_emit[i]);
     }
+}
+
+static void emit_releases(CodegenCtx *ctx, AstNode *node) {
+    if (!node || node->releases_count == 0) return;
+    for (int i = 0; i < node->releases_count; i++) {
+        emit_indent(ctx);
+        sb_appendf(&ctx->sb, "%s_release(%s);\n", node->releases_to_emit[i].class_name, node->releases_to_emit[i].var_name);
+    }
+}
+
+static AstNode *find_class_ast(AstNode *program, const char *name) {
+    if (!program || program->type != NODE_PROGRAM || !name) return NULL;
+    for (int i = 0; i < program->as.program.class_count; i++) {
+        AstNode *cls = program->as.program.classes[i];
+        if (strcmp(cls->as.class_decl.name, name) == 0) return cls;
+    }
+    return NULL;
 }
 
 static void gen_expr(CodegenCtx *ctx, AstNode *expr) {
@@ -100,9 +123,47 @@ static void gen_expr(CodegenCtx *ctx, AstNode *expr) {
             break;
 
         case NODE_ALLOC:
-            sb_appendf(&ctx->sb, "(%s *)malloc((", c_type_str(expr->as.alloc.elem_type, false));
+            sb_appendf(&ctx->sb, "(%s *)malloc((", c_type_str_full(expr->as.alloc.elem_type, expr->as.alloc.class_name, false));
             gen_expr(ctx, expr->as.alloc.count_expr);
-            sb_appendf(&ctx->sb, ") * sizeof(%s))", c_type_str(expr->as.alloc.elem_type, false));
+            sb_appendf(&ctx->sb, ") * sizeof(%s))", c_type_str_full(expr->as.alloc.elem_type, expr->as.alloc.class_name, false));
+            break;
+
+        case NODE_NEW: {
+            const char *cname = expr->as.new_expr.class_name;
+            AstNode *cls_node = find_class_ast(ctx->program, cname);
+            sb_appendf(&ctx->sb, "%s_new(", cname);
+            if (cls_node) {
+                for (int f = 0; f < cls_node->as.class_decl.field_count; f++) {
+                    if (f > 0) sb_append(&ctx->sb, ", ");
+                    const char *target_fname = cls_node->as.class_decl.fields[f]->as.field.name;
+                    AstNode *fval = NULL;
+                    for (int k = 0; k < expr->as.new_expr.field_count; k++) {
+                        if (strcmp(expr->as.new_expr.field_names[k], target_fname) == 0) {
+                            fval = expr->as.new_expr.field_values[k];
+                            break;
+                        }
+                    }
+                    if (fval) gen_expr(ctx, fval);
+                    else sb_append(&ctx->sb, "0");
+                }
+            }
+            sb_append(&ctx->sb, ")");
+            break;
+        }
+
+        case NODE_MEMBER:
+            gen_expr(ctx, expr->as.member.object);
+            sb_appendf(&ctx->sb, "->%s", expr->as.member.member_name);
+            break;
+
+        case NODE_METHOD_CALL:
+            sb_appendf(&ctx->sb, "%s_%s(", expr->as.method_call.target_class_name ? expr->as.method_call.target_class_name : "Object", expr->as.method_call.method_name);
+            gen_expr(ctx, expr->as.method_call.object);
+            for (int i = 0; i < expr->as.method_call.arg_count; i++) {
+                sb_append(&ctx->sb, ", ");
+                gen_expr(ctx, expr->as.method_call.args[i]);
+            }
+            sb_append(&ctx->sb, ")");
             break;
 
         case NODE_INDEX:
@@ -145,8 +206,12 @@ static void gen_stmt(CodegenCtx *ctx, AstNode *stmt) {
     switch (stmt->type) {
         case NODE_LET:
             emit_indent(ctx);
-            sb_appendf(&ctx->sb, "%s %s = ", c_type_str(stmt->as.let.var_type, stmt->is_heap_owner), stmt->as.let.name);
-            if (stmt->as.let.var_type == TY_STRING && stmt->as.let.value->type == NODE_LITERAL) {
+            sb_appendf(&ctx->sb, "%s %s = ", c_type_str_full(stmt->as.let.var_type, stmt->as.let.class_name, stmt->is_heap_owner), stmt->as.let.name);
+            if (stmt->as.let.retain_rhs && stmt->as.let.class_name) {
+                sb_appendf(&ctx->sb, "%s_retain(", stmt->as.let.class_name);
+                gen_expr(ctx, stmt->as.let.value);
+                sb_append(&ctx->sb, ")");
+            } else if (stmt->as.let.var_type == TY_STRING && stmt->as.let.value->type == NODE_LITERAL) {
                 sb_appendf(&ctx->sb, "strdup(\"%s\")", stmt->as.let.value->as.literal.val.s);
             } else {
                 gen_expr(ctx, stmt->as.let.value);
@@ -155,15 +220,62 @@ static void gen_stmt(CodegenCtx *ctx, AstNode *stmt) {
             break;
 
         case NODE_ASSIGN:
-            emit_frees(ctx, stmt); // Free old allocation if reassigning
-            emit_indent(ctx);
-            sb_appendf(&ctx->sb, "%s = ", stmt->as.assign.name);
-            if (stmt->as.assign.value->type == NODE_LITERAL && stmt->as.assign.value->as.literal.lit_type == TY_STRING) {
-                sb_appendf(&ctx->sb, "strdup(\"%s\")", stmt->as.assign.value->as.literal.val.s);
-            } else {
+            emit_frees(ctx, stmt);
+            if (stmt->as.assign.release_old && stmt->as.assign.class_name) {
+                if (stmt->as.assign.retain_rhs) {
+                    emit_indent(ctx);
+                    sb_appendf(&ctx->sb, "%s_retain(", stmt->as.assign.class_name);
+                    gen_expr(ctx, stmt->as.assign.value);
+                    sb_append(&ctx->sb, ");\n");
+                }
+                emit_indent(ctx);
+                sb_appendf(&ctx->sb, "%s_release(%s);\n", stmt->as.assign.class_name, stmt->as.assign.name);
+                emit_indent(ctx);
+                sb_appendf(&ctx->sb, "%s = ", stmt->as.assign.name);
                 gen_expr(ctx, stmt->as.assign.value);
+                sb_append(&ctx->sb, ";\n");
+            } else {
+                emit_indent(ctx);
+                sb_appendf(&ctx->sb, "%s = ", stmt->as.assign.name);
+                if (stmt->as.assign.retain_rhs && stmt->as.assign.class_name) {
+                    sb_appendf(&ctx->sb, "%s_retain(", stmt->as.assign.class_name);
+                    gen_expr(ctx, stmt->as.assign.value);
+                    sb_append(&ctx->sb, ")");
+                } else if (stmt->as.assign.value->type == NODE_LITERAL && stmt->as.assign.value->as.literal.lit_type == TY_STRING) {
+                    sb_appendf(&ctx->sb, "strdup(\"%s\")", stmt->as.assign.value->as.literal.val.s);
+                } else {
+                    gen_expr(ctx, stmt->as.assign.value);
+                }
+                sb_append(&ctx->sb, ";\n");
             }
-            sb_append(&ctx->sb, ";\n");
+            break;
+
+        case NODE_MEMBER_ASSIGN:
+            if (stmt->as.member_assign.release_old && stmt->as.member_assign.field_class_name) {
+                const char *fcls = stmt->as.member_assign.field_class_name;
+                if (stmt->as.member_assign.retain_rhs) {
+                    emit_indent(ctx);
+                    sb_appendf(&ctx->sb, "%s_retain(", fcls);
+                    gen_expr(ctx, stmt->as.member_assign.value);
+                    sb_append(&ctx->sb, ");\n");
+                }
+                emit_indent(ctx);
+                sb_appendf(&ctx->sb, "%s_release(", fcls);
+                gen_expr(ctx, stmt->as.member_assign.object);
+                sb_appendf(&ctx->sb, "->%s);\n", stmt->as.member_assign.member_name);
+
+                emit_indent(ctx);
+                gen_expr(ctx, stmt->as.member_assign.object);
+                sb_appendf(&ctx->sb, "->%s = ", stmt->as.member_assign.member_name);
+                gen_expr(ctx, stmt->as.member_assign.value);
+                sb_append(&ctx->sb, ";\n");
+            } else {
+                emit_indent(ctx);
+                gen_expr(ctx, stmt->as.member_assign.object);
+                sb_appendf(&ctx->sb, "->%s = ", stmt->as.member_assign.member_name);
+                gen_expr(ctx, stmt->as.member_assign.value);
+                sb_append(&ctx->sb, ";\n");
+            }
             break;
 
         case NODE_INDEX_ASSIGN:
@@ -220,7 +332,7 @@ static void gen_stmt(CodegenCtx *ctx, AstNode *stmt) {
             sb_append(&ctx->sb, "for (");
             if (stmt->as.for_stmt.init) {
                 if (stmt->as.for_stmt.init->type == NODE_LET) {
-                    sb_appendf(&ctx->sb, "%s %s = ", c_type_str(stmt->as.for_stmt.init->as.let.var_type, stmt->as.for_stmt.init->is_heap_owner), stmt->as.for_stmt.init->as.let.name);
+                    sb_appendf(&ctx->sb, "%s %s = ", c_type_str_full(stmt->as.for_stmt.init->as.let.var_type, stmt->as.for_stmt.init->as.let.class_name, stmt->as.for_stmt.init->is_heap_owner), stmt->as.for_stmt.init->as.let.name);
                     gen_expr(ctx, stmt->as.for_stmt.init->as.let.value);
                 } else if (stmt->as.for_stmt.init->type == NODE_ASSIGN) {
                     sb_appendf(&ctx->sb, "%s = ", stmt->as.for_stmt.init->as.assign.name);
@@ -244,7 +356,7 @@ static void gen_stmt(CodegenCtx *ctx, AstNode *stmt) {
 
         case NODE_RETURN:
             if (stmt->as.return_stmt.value) {
-                if (stmt->frees_count > 0) {
+                if (stmt->frees_count > 0 || stmt->releases_count > 0) {
                     emit_indent(ctx);
                     sb_append(&ctx->sb, "__typeof__(");
                     gen_expr(ctx, stmt->as.return_stmt.value);
@@ -253,6 +365,7 @@ static void gen_stmt(CodegenCtx *ctx, AstNode *stmt) {
                     sb_append(&ctx->sb, ";\n");
 
                     emit_frees(ctx, stmt);
+                    emit_releases(ctx, stmt);
 
                     emit_indent(ctx);
                     sb_append(&ctx->sb, "return __cmm_ret_val;\n");
@@ -264,6 +377,7 @@ static void gen_stmt(CodegenCtx *ctx, AstNode *stmt) {
                 }
             } else {
                 emit_frees(ctx, stmt);
+                emit_releases(ctx, stmt);
                 emit_indent(ctx);
                 sb_append(&ctx->sb, "return;\n");
             }
@@ -271,12 +385,14 @@ static void gen_stmt(CodegenCtx *ctx, AstNode *stmt) {
 
         case NODE_BREAK:
             emit_frees(ctx, stmt);
+            emit_releases(ctx, stmt);
             emit_indent(ctx);
             sb_append(&ctx->sb, "break;\n");
             break;
 
         case NODE_CONTINUE:
             emit_frees(ctx, stmt);
+            emit_releases(ctx, stmt);
             emit_indent(ctx);
             sb_append(&ctx->sb, "continue;\n");
             break;
@@ -284,7 +400,6 @@ static void gen_stmt(CodegenCtx *ctx, AstNode *stmt) {
         case NODE_PRINT:
             emit_indent(ctx);
             sb_append(&ctx->sb, "printf(");
-            // Format string detection based on print expression
             AstNode *val = stmt->as.print_stmt.value;
             if (val->type == NODE_LITERAL) {
                 if (val->as.literal.lit_type == TY_INT) sb_append(&ctx->sb, "\"%ld\\n\", ");
@@ -293,7 +408,7 @@ static void gen_stmt(CodegenCtx *ctx, AstNode *stmt) {
                 else if (val->as.literal.lit_type == TY_BOOL) sb_append(&ctx->sb, "\"%s\\n\", ");
                 else if (val->as.literal.lit_type == TY_CHAR) sb_append(&ctx->sb, "\"%c\\n\", ");
             } else {
-                sb_append(&ctx->sb, "\"%d\\n\", (int)("); // Default int cast for variables/expressions
+                sb_append(&ctx->sb, "\"%d\\n\", (int)(");
             }
             gen_expr(ctx, val);
             if (val->type != NODE_LITERAL) sb_append(&ctx->sb, ")");
@@ -323,23 +438,126 @@ static void gen_block(CodegenCtx *ctx, AstNode *block_node) {
         gen_stmt(ctx, block_node->as.block.stmts[i]);
     }
 
-    // Emit block fallthrough frees before closing brace
-    emit_frees(ctx, block_node);
+    bool last_is_jump = false;
+    if (block_node->as.block.count > 0) {
+        NodeType last_type = block_node->as.block.stmts[block_node->as.block.count - 1]->type;
+        if (last_type == NODE_RETURN || last_type == NODE_BREAK || last_type == NODE_CONTINUE) {
+            last_is_jump = true;
+        }
+    }
+
+    if (!last_is_jump) {
+        emit_frees(ctx, block_node);
+        emit_releases(ctx, block_node);
+    }
 
     ctx->indent_level--;
     emit_indent(ctx);
     sb_append(&ctx->sb, "}\n");
 }
 
+static void gen_class_helpers(CodegenCtx *ctx, AstNode *program) {
+    if (!program || program->type != NODE_PROGRAM) return;
+
+    for (int i = 0; i < program->as.program.class_count; i++) {
+        AstNode *cls = program->as.program.classes[i];
+        sb_appendf(&ctx->sb, "typedef struct %s %s;\n", cls->as.class_decl.name, cls->as.class_decl.name);
+    }
+    if (program->as.program.class_count > 0) sb_append(&ctx->sb, "\n");
+
+    for (int i = 0; i < program->as.program.class_count; i++) {
+        AstNode *cls = program->as.program.classes[i];
+        sb_appendf(&ctx->sb, "struct %s {\n", cls->as.class_decl.name);
+        sb_append(&ctx->sb, "    int __rc;\n");
+        for (int f = 0; f < cls->as.class_decl.field_count; f++) {
+            AstNode *f_node = cls->as.class_decl.fields[f];
+            sb_appendf(&ctx->sb, "    %s %s;\n",
+                       c_type_str_full(f_node->as.field.type, f_node->as.field.class_name, false),
+                       f_node->as.field.name);
+        }
+        sb_append(&ctx->sb, "};\n\n");
+    }
+
+    for (int i = 0; i < program->as.program.class_count; i++) {
+        AstNode *cls = program->as.program.classes[i];
+        const char *cname = cls->as.class_decl.name;
+
+        sb_appendf(&ctx->sb, "static inline %s *%s_retain(%s *p) {\n", cname, cname, cname);
+        sb_append(&ctx->sb, "    if (p) p->__rc++;\n");
+        sb_append(&ctx->sb, "    return p;\n");
+        sb_append(&ctx->sb, "}\n\n");
+
+        sb_appendf(&ctx->sb, "static inline void %s_release(%s *p) {\n", cname, cname);
+        sb_append(&ctx->sb, "    if (p && --p->__rc == 0) {\n");
+        for (int f = 0; f < cls->as.class_decl.field_count; f++) {
+            AstNode *f_node = cls->as.class_decl.fields[f];
+            if (f_node->as.field.type == TY_CLASS && f_node->as.field.class_name) {
+                sb_appendf(&ctx->sb, "        %s_release(p->%s);\n", f_node->as.field.class_name, f_node->as.field.name);
+            }
+        }
+        sb_append(&ctx->sb, "        free(p);\n");
+        sb_append(&ctx->sb, "    }\n");
+        sb_append(&ctx->sb, "}\n\n");
+
+        sb_appendf(&ctx->sb, "static inline %s *%s_new(", cname, cname);
+        if (cls->as.class_decl.field_count == 0) {
+            sb_append(&ctx->sb, "void");
+        } else {
+            for (int f = 0; f < cls->as.class_decl.field_count; f++) {
+                if (f > 0) sb_append(&ctx->sb, ", ");
+                AstNode *f_node = cls->as.class_decl.fields[f];
+                sb_appendf(&ctx->sb, "%s %s",
+                           c_type_str_full(f_node->as.field.type, f_node->as.field.class_name, false),
+                           f_node->as.field.name);
+            }
+        }
+        sb_append(&ctx->sb, ") {\n");
+        sb_appendf(&ctx->sb, "    %s *__obj = (%s *)malloc(sizeof(%s));\n", cname, cname, cname);
+        sb_append(&ctx->sb, "    __obj->__rc = 1;\n");
+        for (int f = 0; f < cls->as.class_decl.field_count; f++) {
+            AstNode *f_node = cls->as.class_decl.fields[f];
+            const char *fname = f_node->as.field.name;
+            if (f_node->as.field.type == TY_CLASS && f_node->as.field.class_name) {
+                sb_appendf(&ctx->sb, "    __obj->%s = %s_retain(%s);\n", fname, f_node->as.field.class_name, fname);
+            } else {
+                sb_appendf(&ctx->sb, "    __obj->%s = %s;\n", fname, fname);
+            }
+        }
+        sb_append(&ctx->sb, "    return __obj;\n");
+        sb_append(&ctx->sb, "}\n\n");
+    }
+}
+
+static void gen_method(CodegenCtx *ctx, const char *class_name, AstNode *m_node) {
+    sb_appendf(&ctx->sb, "%s %s_%s(",
+               c_type_str_full(m_node->as.method.return_type, m_node->as.method.return_class_name, m_node->as.method.returns_heap_pointer),
+               class_name, m_node->as.method.name);
+
+    if (m_node->as.method.param_count == 0) {
+        sb_append(&ctx->sb, "void");
+    } else {
+        for (int i = 0; i < m_node->as.method.param_count; i++) {
+            if (i > 0) sb_append(&ctx->sb, ", ");
+            sb_appendf(&ctx->sb, "%s %s",
+                       c_type_str_full(m_node->as.method.param_types[i], m_node->as.method.param_class_names[i], false),
+                       m_node->as.method.param_names[i]);
+        }
+    }
+    sb_append(&ctx->sb, ") ");
+
+    gen_block(ctx, m_node->as.method.body);
+    sb_append(&ctx->sb, "\n");
+}
+
 static void gen_function(CodegenCtx *ctx, AstNode *fn) {
-    sb_appendf(&ctx->sb, "%s %s(", c_type_str(fn->as.function.return_type, fn->as.function.returns_heap_pointer), fn->as.function.name);
+    sb_appendf(&ctx->sb, "%s %s(", c_type_str_full(fn->as.function.return_type, fn->as.function.return_class_name, fn->as.function.returns_heap_pointer), fn->as.function.name);
 
     if (fn->as.function.param_count == 0) {
         sb_append(&ctx->sb, "void");
     } else {
         for (int i = 0; i < fn->as.function.param_count; i++) {
             if (i > 0) sb_append(&ctx->sb, ", ");
-            sb_appendf(&ctx->sb, "%s %s", c_type_str(fn->as.function.param_types[i], false), fn->as.function.param_names[i]);
+            sb_appendf(&ctx->sb, "%s %s", c_type_str_full(fn->as.function.param_types[i], fn->as.function.param_class_names[i], false), fn->as.function.param_names[i]);
         }
     }
     sb_append(&ctx->sb, ") ");
@@ -353,6 +571,7 @@ char *generate_c_code(AstNode *program, AstArena *arena) {
     CodegenCtx ctx;
     ctx.sb = create_buffer();
     ctx.indent_level = 0;
+    ctx.program = program;
 
     // Fixed C prelude
     sb_append(&ctx.sb, "/* Generated by CMM (C--) Compiler */\n");
@@ -362,6 +581,18 @@ char *generate_c_code(AstNode *program, AstArena *arena) {
     sb_append(&ctx.sb, "#include <stdbool.h>\n");
     sb_append(&ctx.sb, "#include <string.h>\n\n");
 
+    // Class struct definitions, retain/release/new helpers
+    gen_class_helpers(&ctx, program);
+
+    // Method definitions
+    for (int i = 0; i < program->as.program.class_count; i++) {
+        AstNode *cls = program->as.program.classes[i];
+        for (int m = 0; m < cls->as.class_decl.method_count; m++) {
+            gen_method(&ctx, cls->as.class_decl.name, cls->as.class_decl.methods[m]);
+        }
+    }
+
+    // Function definitions
     for (int i = 0; i < program->as.program.count; i++) {
         gen_function(&ctx, program->as.program.functions[i]);
     }
