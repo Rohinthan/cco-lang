@@ -42,6 +42,7 @@ static TokenType check_keyword(const char *str) {
     if (strcmp(str, "else") == 0) return TOKEN_ELSE;
     if (strcmp(str, "while") == 0) return TOKEN_WHILE;
     if (strcmp(str, "for") == 0) return TOKEN_FOR;
+    if (strcmp(str, "in") == 0) return TOKEN_IN;
     if (strcmp(str, "return") == 0) return TOKEN_RETURN;
     if (strcmp(str, "break") == 0) return TOKEN_BREAK;
     if (strcmp(str, "continue") == 0) return TOKEN_CONTINUE;

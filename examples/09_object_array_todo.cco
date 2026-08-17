@@ -1,0 +1,31 @@
+// 09_object_array_todo.cco — Demonstrates Arrays of Objects and for-each iteration in Cco v5
+
+class Task {
+    id: int;
+    title: string;
+    completed: bool;
+
+    fn print_task(self) -> void {
+        if (self.completed) {
+            print("[X]");
+        } else {
+            print("[ ]");
+        }
+        print(self.title);
+    }
+}
+
+fn main() -> int {
+    let tasks: Task[] = alloc(Task, 3);
+
+    tasks[0] = Task { id: 1, title: "Build Cco v5.0 compiler", completed: true };
+    tasks[1] = Task { id: 2, title: "Add object arrays & for-each", completed: true };
+    tasks[2] = Task { id: 3, title: "Write awesome example gallery", completed: false };
+
+    print("--- TODO LIST ---");
+    for task in tasks {
+        task.print_task();
+    }
+
+    return 0;
+}

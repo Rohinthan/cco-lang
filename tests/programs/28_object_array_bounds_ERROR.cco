@@ -1,0 +1,11 @@
+class Point {
+    x: int;
+    y: int;
+}
+
+fn main() -> int {
+    let pts: Point[] = alloc(Point, 3);
+    pts[0] = Point { x: 10, y: 20 };
+    print(pts[10].x);
+    return 0;
+}

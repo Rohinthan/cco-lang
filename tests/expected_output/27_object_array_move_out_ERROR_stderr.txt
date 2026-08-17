@@ -1,0 +1,6 @@
+error: cannot move out of array element 'pts[0]' — array elements can only be borrowed, not moved, in this version of Cco
+  --> tests/programs/27_object_array_move_out_ERROR.cco:9:20
+    |
+  9 |     let p: Point = pts[0];
+    |                    ^ cannot move out of array element
+    |

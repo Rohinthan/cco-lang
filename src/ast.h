@@ -7,6 +7,7 @@
 typedef struct RefRelease {
     char *var_name;
     char *class_name;
+    bool is_array;
 } RefRelease;
 
 typedef enum {
@@ -29,6 +30,7 @@ typedef enum {
     NODE_IF,
     NODE_WHILE,
     NODE_FOR,
+    NODE_FOR_EACH,
     NODE_RETURN,
     NODE_BREAK,
     NODE_CONTINUE,
@@ -90,6 +92,7 @@ struct AstNode {
         struct {
             char *name;
             Type type;
+            bool is_array;
             char *class_name;
         } field;
 
@@ -98,12 +101,14 @@ struct AstNode {
             bool has_self;
             char **param_names;
             Type *param_types;
+            bool *param_is_array;
             char **param_class_names;
             bool *param_is_borrowed;
             int *param_lines;
             int *param_cols;
             int param_count;
             Type return_type;
+            bool return_is_array;
             char *return_class_name;
             bool returns_heap_pointer;
             AstNode *body;
@@ -113,12 +118,14 @@ struct AstNode {
             char *name;
             char **param_names;
             Type *param_types;
+            bool *param_is_array;
             char **param_class_names;
             bool *param_is_borrowed;
             int *param_lines;
             int *param_cols;
             int param_count;
             Type return_type;
+            bool return_is_array;
             char *return_class_name;
             bool returns_heap_pointer;
             AstNode *body;
@@ -135,6 +142,7 @@ struct AstNode {
         struct {
             char *name;
             Type var_type;
+            bool is_array;
             char *class_name;
             AstNode *value;
             bool retain_rhs;
@@ -158,6 +166,7 @@ struct AstNode {
         } member_assign;
 
         struct {
+            AstNode *array_expr;
             char *array_name;
             AstNode *index;
             AstNode *value;
@@ -180,6 +189,12 @@ struct AstNode {
             AstNode *step;
             AstNode *body;
         } for_stmt;
+
+        struct {
+            char *loop_var_name;
+            AstNode *collection_expr;
+            AstNode *body;
+        } for_each;
 
         struct {
             AstNode *value; // NULL if return void
@@ -232,6 +247,7 @@ struct AstNode {
         } method_call;
 
         struct {
+            AstNode *array_expr;
             char *array_name;
             AstNode *index;
         } index;

@@ -1,0 +1,19 @@
+class Point {
+    x: int;
+    y: int;
+
+    fn sum(self) -> int {
+        return self.x + self.y;
+    }
+}
+
+fn main() -> int {
+    let pts: Point[] = alloc(Point, 3);
+    pts[0] = Point { x: 5, y: 15 };
+    pts[1] = Point { x: 100, y: 200 };
+
+    for p in pts {
+        print(p.sum());
+    }
+    return 0;
+}

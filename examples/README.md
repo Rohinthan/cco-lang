@@ -14,6 +14,7 @@ Welcome to the Cco example program gallery. These examples demonstrate the featu
 | [`06_word_count.cco`](06_word_count.cco) | File I/O & word counting | File reading (`read_file`), character inspection (`char_at`) |
 | [`07_ownership_demo.cco`](07_ownership_demo.cco) | Ownership & move semantics | Ownership transfer (moves), borrowed parameters (`&Class`) |
 | [`08_stack_data_structure.cco`](08_stack_data_structure.cco) | OOP Stack data structure | Classes with heap arrays, method state mutation |
+| [`09_object_array_todo.cco`](09_object_array_todo.cco) | Arrays of Objects & Todo list | Object arrays (`Class[]`), `alloc(Class, n)`, `for-each` loops |
 
 ## Compiling & Running Examples
 

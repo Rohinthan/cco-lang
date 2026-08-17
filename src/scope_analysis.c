@@ -121,7 +121,7 @@ static void analyze_block(ScopeStack *stack, AstNode *block_node, bool is_loop) 
 
         if (stmt->type == NODE_LET) {
             analyze_node(stack, stmt->as.let.value);
-            bool is_alloc = (stmt->as.let.value->type == NODE_ALLOC) || (stmt->as.let.var_type == TY_STRING);
+            bool is_alloc = (stmt->as.let.value->type == NODE_ALLOC && stmt->as.let.value->as.alloc.elem_type != TY_CLASS) || (stmt->as.let.var_type == TY_STRING);
             if (!is_alloc && stmt->as.let.value->type == NODE_CALL) {
                 const char *callee = stmt->as.let.value->as.call.callee;
                 if (is_stdlib_heap_fn(callee)) {
@@ -143,7 +143,7 @@ static void analyze_block(ScopeStack *stack, AstNode *block_node, bool is_loop) 
 
             int scope_idx = -1;
             int owned_idx = find_owned_in_stack(stack, stmt->as.assign.name, &scope_idx);
-            bool val_is_heap = (stmt->as.assign.value->type == NODE_ALLOC || (stmt->as.assign.value->type == NODE_CALL && is_stdlib_heap_fn(stmt->as.assign.value->as.call.callee)));
+            bool val_is_heap = ((stmt->as.assign.value->type == NODE_ALLOC && stmt->as.assign.value->as.alloc.elem_type != TY_CLASS) || (stmt->as.assign.value->type == NODE_LITERAL && stmt->as.assign.value->as.literal.lit_type == TY_STRING) || (stmt->as.assign.value->type == NODE_CALL && is_stdlib_heap_fn(stmt->as.assign.value->as.call.callee)));
             if (owned_idx != -1 && val_is_heap) {
                 stmt->free_old_on_reassign = true;
                 add_free_to_node(stack, stmt, stmt->as.assign.name);
@@ -369,6 +369,8 @@ typedef struct OwnVar {
     bool is_param;
     bool is_borrowed_param;
     bool transferred;
+    bool is_array;
+    int const_size;
 } OwnVar;
 
 typedef struct MovedVar {
@@ -426,7 +428,7 @@ static OwnScope *current_own_scope(OwnScopeStack *stack) {
     return &stack->scopes[stack->depth - 1];
 }
 
-static void own_scope_add_var(OwnScopeStack *stack, OwnScope *s, const char *name, const char *class_name, int line, int col, bool is_param, bool is_borrowed_param) {
+static void own_scope_add_var_full(OwnScopeStack *stack, OwnScope *s, const char *name, const char *class_name, int line, int col, bool is_param, bool is_borrowed_param, bool is_array, int const_size) {
     if (!name || !class_name) return;
     if (s->count >= s->capacity) {
         s->capacity = s->capacity == 0 ? 4 : s->capacity * 2;
@@ -443,7 +445,13 @@ static void own_scope_add_var(OwnScopeStack *stack, OwnScope *s, const char *nam
     s->vars[s->count].is_param = is_param;
     s->vars[s->count].is_borrowed_param = is_borrowed_param;
     s->vars[s->count].transferred = is_borrowed_param;
+    s->vars[s->count].is_array = is_array;
+    s->vars[s->count].const_size = const_size;
     s->count++;
+}
+
+static void own_scope_add_var(OwnScopeStack *stack, OwnScope *s, const char *name, const char *class_name, int line, int col, bool is_param, bool is_borrowed_param) {
+    own_scope_add_var_full(stack, s, name, class_name, line, col, is_param, is_borrowed_param, false, -1);
 }
 
 static OwnVar *find_own_var(OwnScopeStack *stack, const char *name, int *out_scope_idx, int *out_var_idx) {
@@ -559,7 +567,7 @@ static void check_use_var(OwnScopeStack *stack, const char *name, int line, int 
     }
 }
 
-static void add_free_release_to_node(OwnScopeStack *stack, AstNode *node, const char *var_name, const char *class_name) {
+static void add_free_release_to_node(OwnScopeStack *stack, AstNode *node, const char *var_name, const char *class_name, bool is_array) {
     if (!node || !var_name || !class_name) return;
     for (int i = 0; i < node->releases_count; i++) {
         if (strcmp(node->releases_to_emit[i].var_name, var_name) == 0) return;
@@ -572,6 +580,7 @@ static void add_free_release_to_node(OwnScopeStack *stack, AstNode *node, const 
     }
     new_rels[node->releases_count].var_name = arena_strdup(stack->arena, var_name);
     new_rels[node->releases_count].class_name = arena_strdup(stack->arena, class_name);
+    new_rels[node->releases_count].is_array = is_array;
     node->releases_to_emit = new_rels;
     node->releases_count++;
 }
@@ -585,6 +594,16 @@ static char *get_expr_class_type(OwnScopeStack *stack, AstNode *expr) {
             if (v) return v->class_name;
             if (stack->current_class_name && strcmp(expr->as.ident.name, "self") == 0) {
                 return stack->current_class_name;
+            }
+            return NULL;
+        }
+
+        case NODE_INDEX: {
+            if (expr->as.index.array_expr) {
+                return get_expr_class_type(stack, expr->as.index.array_expr);
+            } else if (expr->as.index.array_name) {
+                OwnVar *v = find_own_var(stack, expr->as.index.array_name, NULL, NULL);
+                if (v) return v->class_name;
             }
             return NULL;
         }
@@ -677,6 +696,23 @@ static void analyze_own_block(OwnScopeStack *stack, AstNode *block_node, bool is
 
         if (stmt->type == NODE_LET) {
             analyze_own_node(stack, stmt->as.let.value);
+
+            if (!stmt->as.let.is_array && stmt->as.let.value && stmt->as.let.value->type == NODE_INDEX) {
+                AstNode *idx_node = stmt->as.let.value;
+                char *elem_cls = get_expr_class_type(stack, idx_node);
+                if (elem_cls != NULL) {
+                    const char *arr_n = idx_node->as.index.array_name;
+                    if (!arr_n && idx_node->as.index.array_expr && idx_node->as.index.array_expr->type == NODE_IDENT) {
+                        arr_n = idx_node->as.index.array_expr->as.ident.name;
+                    }
+                    char short_msg[256];
+                    snprintf(short_msg, sizeof(short_msg), "cannot move out of array element '%s[0]' — array elements can only be borrowed, not moved, in this version of Cco", arr_n ? arr_n : "arr");
+                    ErrorLocation primary = {get_error_filename(), idx_node->line, idx_node->col};
+                    print_formatted_error(short_msg, primary, "cannot move out of array element", NULL, NULL, NULL, NULL);
+                    exit(1);
+                }
+            }
+
             char *cls_name = stmt->as.let.class_name;
             if (!cls_name && stmt->as.let.var_type == TY_CLASS) {
                 cls_name = stmt->as.let.class_name;
@@ -699,8 +735,16 @@ static void analyze_own_block(OwnScopeStack *stack, AstNode *block_node, bool is
                     }
                 }
 
+                int const_size = -1;
+                if (stmt->as.let.value && stmt->as.let.value->type == NODE_ALLOC) {
+                    AstNode *cnt = stmt->as.let.value->as.alloc.count_expr;
+                    if (cnt && cnt->type == NODE_LITERAL && cnt->as.literal.lit_type == TY_INT) {
+                        const_size = (int)cnt->as.literal.val.i;
+                    }
+                }
+
                 unmark_moved(stack, stmt->as.let.name);
-                own_scope_add_var(stack, s, stmt->as.let.name, cls_name, stmt->line, stmt->col, false, false);
+                own_scope_add_var_full(stack, s, stmt->as.let.name, cls_name, stmt->line, stmt->col, false, false, stmt->as.let.is_array, const_size);
             }
         } else if (stmt->type == NODE_ASSIGN) {
             analyze_own_node(stack, stmt->as.assign.value);
@@ -718,12 +762,72 @@ static void analyze_own_block(OwnScopeStack *stack, AstNode *block_node, bool is
             const char *lhs_name = stmt->as.assign.name;
             OwnVar *lhs_var = find_own_var(stack, lhs_name, NULL, NULL);
             if (lhs_var) {
+                if (!lhs_var->is_array && stmt->as.assign.value && stmt->as.assign.value->type == NODE_INDEX) {
+                    AstNode *idx_node = stmt->as.assign.value;
+                    char *elem_cls = get_expr_class_type(stack, idx_node);
+                    if (elem_cls != NULL) {
+                        const char *arr_n = idx_node->as.index.array_name;
+                        if (!arr_n && idx_node->as.index.array_expr && idx_node->as.index.array_expr->type == NODE_IDENT) {
+                            arr_n = idx_node->as.index.array_expr->as.ident.name;
+                        }
+                        char short_msg[256];
+                        snprintf(short_msg, sizeof(short_msg), "cannot move out of array element '%s[0]' — array elements can only be borrowed, not moved, in this version of Cco", arr_n ? arr_n : "arr");
+                        ErrorLocation primary = {get_error_filename(), idx_node->line, idx_node->col};
+                        print_formatted_error(short_msg, primary, "cannot move out of array element", NULL, NULL, NULL, NULL);
+                        exit(1);
+                    }
+                }
+
                 stmt->as.assign.class_name = arena_strdup(stack->arena, lhs_var->class_name);
                 if (!find_moved_var(stack, lhs_name) && !lhs_var->transferred) {
                     stmt->as.assign.release_old = true;
                 }
                 unmark_moved(stack, lhs_name);
                 lhs_var->transferred = false;
+            }
+        } else if (stmt->type == NODE_INDEX_ASSIGN) {
+            analyze_own_node(stack, stmt->as.index_assign.index);
+            analyze_own_node(stack, stmt->as.index_assign.value);
+
+            AstNode *val = stmt->as.index_assign.value;
+            if (val->type == NODE_IDENT) {
+                const char *rhs_name = val->as.ident.name;
+                OwnVar *rhs_var = find_own_var(stack, rhs_name, NULL, NULL);
+                if (rhs_var) {
+                    check_use_var(stack, rhs_name, val->line, val->col);
+                    mark_moved(stack, rhs_name, val->line, val->col, NULL, false);
+                }
+            }
+
+            const char *arr_name = stmt->as.index_assign.array_name;
+            if (!arr_name && stmt->as.index_assign.array_expr && stmt->as.index_assign.array_expr->type == NODE_IDENT) {
+                arr_name = stmt->as.index_assign.array_expr->as.ident.name;
+            }
+            if (arr_name) {
+                OwnVar *arr_var = find_own_var(stack, arr_name, NULL, NULL);
+                if (arr_var) {
+                    if (arr_var->const_size >= 0) {
+                        AstNode *idx_n = stmt->as.index_assign.index;
+                        if (idx_n && idx_n->type == NODE_LITERAL && idx_n->as.literal.lit_type == TY_INT) {
+                            long idx_val = idx_n->as.literal.val.i;
+                            if (idx_val < 0 || idx_val >= arr_var->const_size) {
+                                ErrorLocation primary = {get_error_filename(), stmt->line, stmt->col};
+                                char short_msg[256];
+                                snprintf(short_msg, sizeof(short_msg), "index %ld out of bounds for array of length %d", idx_val, arr_var->const_size);
+                                print_formatted_error(short_msg, primary, "index out of bounds", NULL, NULL, NULL, NULL);
+                                exit(1);
+                            }
+                        }
+                    }
+
+                    if (val && val->type == NODE_LITERAL && val->as.literal.lit_type == TY_STRING && arr_var->is_array) {
+                        ErrorLocation primary = {get_error_filename(), stmt->line, stmt->col};
+                        char short_msg[256];
+                        snprintf(short_msg, sizeof(short_msg), "cannot assign string to array of type %s[]", arr_var->class_name);
+                        print_formatted_error(short_msg, primary, "type mismatch", NULL, NULL, NULL, NULL);
+                        exit(1);
+                    }
+                }
             }
         } else if (stmt->type == NODE_MEMBER_ASSIGN) {
             analyze_own_node(stack, stmt->as.member_assign.object);
@@ -755,7 +859,7 @@ static void analyze_own_block(OwnScopeStack *stack, AstNode *block_node, bool is
 
     for (int i = 0; i < s->count; i++) {
         if (!is_var_transferred(stack, &s->vars[i])) {
-            add_free_release_to_node(stack, block_node, s->vars[i].name, s->vars[i].class_name);
+            add_free_release_to_node(stack, block_node, s->vars[i].name, s->vars[i].class_name, s->vars[i].is_array);
         }
     }
 
@@ -910,7 +1014,26 @@ static void analyze_own_node(OwnScopeStack *stack, AstNode *node) {
             OwnScope *fs = current_own_scope(stack);
             for (int i = 0; i < fs->count; i++) {
                 if (!is_var_transferred(stack, &fs->vars[i])) {
-                    add_free_release_to_node(stack, node, fs->vars[i].name, fs->vars[i].class_name);
+                    add_free_release_to_node(stack, node, fs->vars[i].name, fs->vars[i].class_name, fs->vars[i].is_array);
+                }
+            }
+            pop_own_scope(stack);
+            break;
+        }
+
+        case NODE_FOR_EACH: {
+            analyze_own_node(stack, node->as.for_each.collection_expr);
+            push_own_scope(stack, node, true);
+            OwnScope *s = current_own_scope(stack);
+            char *elem_cls = get_expr_class_type(stack, node->as.for_each.collection_expr);
+            if (elem_cls) {
+                own_scope_add_var_full(stack, s, node->as.for_each.loop_var_name, elem_cls, node->line, node->col, true, true, false, -1);
+            }
+            if (node->as.for_each.body) {
+                if (node->as.for_each.body->type == NODE_BLOCK) {
+                    analyze_own_block(stack, node->as.for_each.body, false, false);
+                } else {
+                    analyze_own_node(stack, node->as.for_each.body);
                 }
             }
             pop_own_scope(stack);
@@ -940,6 +1063,23 @@ static void analyze_own_node(OwnScopeStack *stack, AstNode *node) {
                         bool is_bor = (fn && i < fn->as.function.param_count && fn->as.function.param_is_borrowed) ? fn->as.function.param_is_borrowed[i] : false;
                         if (!is_bor) {
                             mark_moved(stack, arg_name, arg->line, arg->col, NULL, false);
+                        }
+                    }
+                } else if (arg->type == NODE_INDEX) {
+                    bool is_bor = (fn && i < fn->as.function.param_count && fn->as.function.param_is_borrowed) ? fn->as.function.param_is_borrowed[i] : false;
+                    bool is_class_param = (fn && i < fn->as.function.param_count && fn->as.function.param_types[i] == TY_CLASS && (!fn->as.function.param_is_array || !fn->as.function.param_is_array[i]));
+                    if (is_class_param && !is_bor) {
+                        char *elem_cls = get_expr_class_type(stack, arg);
+                        if (elem_cls != NULL) {
+                            const char *arr_n = arg->as.index.array_name;
+                            if (!arr_n && arg->as.index.array_expr && arg->as.index.array_expr->type == NODE_IDENT) {
+                                arr_n = arg->as.index.array_expr->as.ident.name;
+                            }
+                            char short_msg[256];
+                            snprintf(short_msg, sizeof(short_msg), "cannot move out of array element '%s[0]' — array elements can only be borrowed, not moved, in this version of Cco", arr_n ? arr_n : "arr");
+                            ErrorLocation primary = {get_error_filename(), arg->line, arg->col};
+                            print_formatted_error(short_msg, primary, "cannot move out of array element", NULL, NULL, NULL, NULL);
+                            exit(1);
                         }
                     }
                 }
@@ -977,6 +1117,58 @@ static void analyze_own_node(OwnScopeStack *stack, AstNode *node) {
                         }
                         if (!is_bor) {
                             mark_moved(stack, arg_name, arg->line, arg->col, NULL, false);
+                        }
+                    }
+                } else if (arg->type == NODE_INDEX) {
+                    bool is_bor = false;
+                    bool is_class_param = false;
+                    if (mi && mi->method_node) {
+                        AstNode *mn = mi->method_node;
+                        int param_idx = i + 1;
+                        if (param_idx < mn->as.method.param_count) {
+                            if (mn->as.method.param_is_borrowed) is_bor = mn->as.method.param_is_borrowed[param_idx];
+                            is_class_param = (mn->as.method.param_types[param_idx] == TY_CLASS && (!mn->as.method.param_is_array || !mn->as.method.param_is_array[param_idx]));
+                        }
+                    }
+                    if (is_class_param && !is_bor) {
+                        char *elem_cls = get_expr_class_type(stack, arg);
+                        if (elem_cls != NULL) {
+                            const char *arr_n = arg->as.index.array_name;
+                            if (!arr_n && arg->as.index.array_expr && arg->as.index.array_expr->type == NODE_IDENT) {
+                                arr_n = arg->as.index.array_expr->as.ident.name;
+                            }
+                            char short_msg[256];
+                            snprintf(short_msg, sizeof(short_msg), "cannot move out of array element '%s[0]' — array elements can only be borrowed, not moved, in this version of Cco", arr_n ? arr_n : "arr");
+                            ErrorLocation primary = {get_error_filename(), arg->line, arg->col};
+                            print_formatted_error(short_msg, primary, "cannot move out of array element", NULL, NULL, NULL, NULL);
+                            exit(1);
+                        }
+                    }
+                }
+            }
+            break;
+        }
+
+        case NODE_INDEX: {
+            if (node->as.index.array_expr) analyze_own_node(stack, node->as.index.array_expr);
+            analyze_own_node(stack, node->as.index.index);
+
+            const char *arr_name = node->as.index.array_name;
+            if (!arr_name && node->as.index.array_expr && node->as.index.array_expr->type == NODE_IDENT) {
+                arr_name = node->as.index.array_expr->as.ident.name;
+            }
+            if (arr_name) {
+                OwnVar *arr_var = find_own_var(stack, arr_name, NULL, NULL);
+                if (arr_var && arr_var->const_size >= 0) {
+                    AstNode *idx_n = node->as.index.index;
+                    if (idx_n && idx_n->type == NODE_LITERAL && idx_n->as.literal.lit_type == TY_INT) {
+                        long idx_val = idx_n->as.literal.val.i;
+                        if (idx_val < 0 || idx_val >= arr_var->const_size) {
+                            ErrorLocation primary = {get_error_filename(), node->line, node->col};
+                            char short_msg[256];
+                            snprintf(short_msg, sizeof(short_msg), "index %ld out of bounds for array of length %d", idx_val, arr_var->const_size);
+                            print_formatted_error(short_msg, primary, "index out of bounds", NULL, NULL, NULL, NULL);
+                            exit(1);
                         }
                     }
                 }
@@ -1020,7 +1212,7 @@ static void analyze_own_node(OwnScopeStack *stack, AstNode *node) {
                 OwnScope *s = &stack->scopes[s_idx];
                 for (int i = 0; i < s->count; i++) {
                     if (!is_var_transferred(stack, &s->vars[i])) {
-                        add_free_release_to_node(stack, node, s->vars[i].name, s->vars[i].class_name);
+                        add_free_release_to_node(stack, node, s->vars[i].name, s->vars[i].class_name, s->vars[i].is_array);
                     }
                 }
             }
@@ -1033,7 +1225,7 @@ static void analyze_own_node(OwnScopeStack *stack, AstNode *node) {
                 OwnScope *s = &stack->scopes[s_idx];
                 for (int i = 0; i < s->count; i++) {
                     if (!is_var_transferred(stack, &s->vars[i])) {
-                        add_free_release_to_node(stack, node, s->vars[i].name, s->vars[i].class_name);
+                        add_free_release_to_node(stack, node, s->vars[i].name, s->vars[i].class_name, s->vars[i].is_array);
                     }
                 }
                 if (s->is_loop_scope) break;

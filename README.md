@@ -1,8 +1,8 @@
-# Cco (C--) Compiler: A C-like Language with Compile-Time Single Ownership, Move Semantics & Standard Library (v4.0)
+# Cco (C--) Compiler: A C-like Language with Compile-Time Single Ownership, Arrays of Objects & Standard Library (v5.0)
 
-**Cco (C--)** is a lightweight, systems programming language with explicit C-like syntax, **scope-exit auto-free for raw allocations**, **compile-time single ownership with move semantics** for classes and objects, and a **built-in Standard Library** (Strings, Math, File I/O). It transpiles Cco source code (`.cco`) into portable, standard C11 source code (`.c`), which is compiled to native machine binaries using `gcc` or `clang`.
+**Cco (C--)** is a lightweight, systems programming language with explicit C-like syntax, **scope-exit auto-free for raw allocations**, **compile-time single ownership with move semantics**, **Arrays of Objects with for-each iteration** (`alloc(Point, n)`, `for p in pts`), and a **built-in Standard Library** (Strings, Math, File I/O). It transpiles Cco source code (`.cco`) into portable, standard C11 source code (`.c`), which is compiled to native machine binaries using `gcc` or `clang`.
 
-> **Write it like Python's class syntax reads. Compile it and it runs like C with zero runtime reference counting overhead, zero GC pauses, no manual free(), Rust-like compile-time ownership safety, and GCC/Rust-style diagnostic error messages.**
+> **Write it like Python's class syntax reads. Compile it and it runs like C with zero runtime reference counting overhead, zero GC pauses, no manual free(), Rust-like compile-time ownership safety for collections of objects, and GCC/Rust-style diagnostic error messages.**
 
 ---
 
@@ -11,11 +11,23 @@
 1. **RUNS LIKE C**  
    Cco is a source-to-source transpiler, not an interpreter and not a VM. Every `.cco` file becomes real, flat C11 source, compiled by `gcc` to a native binary. There is no runtime interpreter loop, no bytecode dispatch, no runtime reference counter, no VM overhead. A Cco program's speed ceiling is C's speed ceiling, full stop.
 
-2. **HAS OBJECTS LIKE C++**  
-   Cco provides `class`, fields, methods, and `obj.method(args)` call syntax—the actual ergonomic win of C++ over plain C, placing verbs next to their nouns instead of `distance(&a, &b)` scattered functions. Under the hood it translates to C structs and functions taking a `self` pointer—no vtables, no multiple inheritance, no operator overloading, no templates, no name-mangling maze.
+2. **HAS OBJECTS & COLLECTIONS LIKE C++**  
+   Cco provides `class`, fields, methods, `obj.method(args)` call syntax, and **Arrays of Objects** (`Point[] = alloc(Point, 3)`). Under the hood it translates to C pointers and functions taking a `self` pointer—no vtables, no multiple inheritance, no operator overloading, no templates, no name-mangling maze.
 
 3. **WRITTEN LIKE IT'S EASY**  
-   No manual `malloc`/`free`. No header files to keep in sync with `.c` files. No `->` vs `.` decision (member access is always `.`). Memory is managed automatically via scope-exit auto-free (for raw allocations and heap strings) and **compile-time single ownership with move semantics** (for objects)—both deterministic, zero runtime overhead, zero GC pause.
+   No manual `malloc`/`free`. No header files to keep in sync with `.c` files. Memory is managed automatically via scope-exit auto-free and **single ownership release cascades** for object arrays (`Point[]`)—both deterministic, zero runtime overhead, zero GC pause.
+
+---
+
+## 📦 Arrays of Objects & For-Each (v5.0)
+
+Cco v5.0 extends single-ownership to collections of class instances:
+
+- **Allocation**: `let pts: Point[] = alloc(Point, n);` zero-initializes `n` element slots.
+- **Ownership**: An array of objects owns every element inside it.
+- **Borrow-Only Indexing**: Elements can be accessed, mutated, or passed as borrowed references (`pts[i].x`, `pts[i].sum()`, `&pts[i]`). Moving an element out of an array (`let p: Point = pts[0];`) is rejected at compile time with a clear diagnostic message.
+- **For-Each Loops**: `for p in pts { p.sum(); }` iterates over elements, yielding borrowed element references while skipping `NULL` slots.
+- **Automated Free Cascade**: At scope exit, any non-NULL elements in the array are automatically freed via their class destructor, followed by freeing the array buffer.
 
 ---
 
@@ -58,35 +70,23 @@ Cco includes a built-in Standard Library available in every file without manual 
 
 Cco features GCC/Rust-style two-location diagnostic error reporting with verbatim source line snippets, line number padding, carets pointing at exact spans, and explanatory notes.
 
-### Example: Use-After-Move Error
+### Example: Move-Out of Array Element Error (v5.0)
 ```
-error: use of moved value 'a'
-  --> tests/programs/16_use_after_move_ERROR.cco:9:11
+error: cannot move out of array element 'pts[0]' — array elements can only be borrowed, not moved, in this version of Cco
+  --> tests/programs/27_object_array_move_out_ERROR.cco:9:20
     |
-  9 |     print(a.x);
-    |           ^ value used here after being moved
-    |
-note: 'a' was moved into 'b' on line 8
-  --> tests/programs/16_use_after_move_ERROR.cco:8:20
-    |
-  8 |     let b: Point = a;
-    |                    ^ move occurs here
+  9 |     let p: Point = pts[0];
+    |                    ^ cannot move out of array element
     |
 ```
 
-### Example: Returning a Borrowed Value Error
+### Example: Constant Array Bounds Error (v5.0)
 ```
-error: cannot return borrowed value 'p'
-  --> tests/programs/20_return_borrowed_ERROR.cco:7:12
+error: index 10 out of bounds for array of length 3
+  --> tests/programs/28_object_array_bounds_ERROR.cco:9:11
     |
-  7 |     return p;
-    |            ^ return of borrowed value
-    |
-note: 'p' is a borrowed parameter (&Point) — this function does not own it and cannot transfer ownership to the caller
-  --> tests/programs/20_return_borrowed_ERROR.cco:6:8
-    |
-  6 | fn bad(p: &Point) -> Point {
-    |        ^ parameter declared as borrowed here
+  9 |     print(pts[10].x);
+    |           ^ index out of bounds
     |
 ```
 
@@ -104,6 +104,7 @@ A comprehensive suite of example programs is available in [`examples/`](examples
 - [`examples/06_word_count.cco`](examples/06_word_count.cco): File I/O (`read_file`) and word counting
 - [`examples/07_ownership_demo.cco`](examples/07_ownership_demo.cco): Ownership transfer (moves) vs borrowed references (`&Class`)
 - [`examples/08_stack_data_structure.cco`](examples/08_stack_data_structure.cco): OOP Stack data structure with dynamic array buffer
+- [`examples/09_object_array_todo.cco`](examples/09_object_array_todo.cco): Arrays of Objects (`Task[]`) and `for-each` loop iteration
 
 See [`examples/README.md`](examples/README.md) for detailed descriptions and execution instructions.
 
@@ -128,12 +129,12 @@ make test
 
 ---
 
-## 🧪 Test Suite Matrix (v4.0)
+## 🧪 Test Suite Matrix (v5.0)
 
 | Test Case | Description | Result | Valgrind Leak Status |
 | :--- | :--- | :---: | :---: |
-| `test_lexer` | Unit tests for tokenizer, keywords (`class`, `self`) & `&` borrow token | **PASS** | 0 Bytes Leaked |
-| `test_parser` | Unit tests for AST node construction & `&` parameter type parsing | **PASS** | 0 Bytes Leaked |
+| `test_lexer` | Unit tests for tokenizer, keywords (`class`, `self`, `in`) & `&` borrow token | **PASS** | 0 Bytes Leaked |
+| `test_parser` | Unit tests for AST node construction & array type parsing | **PASS** | 0 Bytes Leaked |
 | `test_scope` | Unit tests for ownership pass, move tracking, free injection | **PASS** | 0 Bytes Leaked |
 | `01_hello` | Basic printing, strings, arithmetic operations | **PASS** | 0 Bytes Leaked |
 | `02_alloc_basic` | Basic array allocation, indexing, & block exit free | **PASS** | 0 Bytes Leaked |
@@ -150,16 +151,22 @@ make test
 | `13_object_early_return` | Object lifetime inside loops with early returns | **PASS** | 0 Bytes Leaked |
 | `14_basic_move` | Single ownership move and clean deallocation | **PASS** | 0 Bytes Leaked |
 | `15_borrowed_param` | Borrowed parameter (`&Point`) without ownership transfer | **PASS** | 0 Bytes Leaked |
-| `16_use_after_move_ERROR` | Formatted Rust-style rejection of use-after-move | **PASS** | Compile Error 1 (As Expected) |
-| `17_double_move_ERROR` | Formatted Rust-style rejection of double-move | **PASS** | Compile Error 1 (As Expected) |
-| `18_conditional_move_ERROR` | Formatted Rust-style rejection of conditional move | **PASS** | Compile Error 1 (As Expected) |
+| `16_use_after_move_ERROR` | Formatted Rust-style rejection of use-after-move | **PASS** | Compile Error (As Expected) |
+| `17_double_move_ERROR` | Formatted Rust-style rejection of double-move | **PASS** | Compile Error (As Expected) |
+| `18_conditional_move_ERROR` | Formatted Rust-style rejection of conditional move | **PASS** | Compile Error (As Expected) |
 | `19_move_via_return` | Returning owned objects and moving between scopes | **PASS** | 0 Bytes Leaked |
-| `20_return_borrowed_ERROR` | Formatted Rust-style rejection of returning borrowed parameter | **PASS** | Compile Error 1 (As Expected) |
+| `20_return_borrowed_ERROR` | Formatted Rust-style rejection of returning borrowed parameter | **PASS** | Compile Error (As Expected) |
 | `21_stdlib_string` | Standard Library String operations (`concat`, `len`, `equals`, `substring`) | **PASS** | 0 Bytes Leaked |
 | `22_stdlib_math` | Standard Library Math operations (`sqrt`, `pow`, `abs`, `min`, `max`) | **PASS** | 0 Bytes Leaked |
 | `23_stdlib_file_io` | Standard Library File I/O operations (`read_file`, `write_file`) | **PASS** | 0 Bytes Leaked |
+| `24_object_array_basic` | Object array allocation (`Point[]`), indexing, and scope-exit free cascade | **PASS** | 0 Bytes Leaked |
+| `25_object_array_foreach` | For-each loop iteration over object arrays (`for p in pts`) | **PASS** | 0 Bytes Leaked |
+| `26_object_array_free_cascade` | Null-checked release cascade skipping empty array slots | **PASS** | 0 Bytes Leaked |
+| `27_object_array_move_out_ERROR` | Rejecting move-out of array element (`let p = pts[0]`) | **PASS** | Compile Error (As Expected) |
+| `28_object_array_bounds_ERROR` | Rejecting constant index out-of-bounds (`pts[10]`) | **PASS** | Compile Error (As Expected) |
 
 ---
 
 ## 📄 License
 MIT License. Developed for the Cco Source-to-Source Transpiler Sprint.
+

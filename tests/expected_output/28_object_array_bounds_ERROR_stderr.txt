@@ -1,0 +1,6 @@
+error: index 10 out of bounds for array of length 3
+  --> tests/programs/28_object_array_bounds_ERROR.cco:9:11
+    |
+  9 |     print(pts[10].x);
+    |           ^ index out of bounds
+    |
