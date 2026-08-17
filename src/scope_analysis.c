@@ -675,7 +675,7 @@ static void analyze_own_block(OwnScopeStack *stack, AstNode *block_node, bool is
         if (stack->current_function->type == NODE_METHOD) {
             AstNode *m = stack->current_function;
             for (int p = 0; p < m->as.method.param_count; p++) {
-                if (m->as.method.param_types[p] == TY_CLASS && m->as.method.param_class_names[p]) {
+                if (m->as.method.param_types[p] == TY_CLASS && m->as.method.param_class_names[p] && find_class(stack->ct, m->as.method.param_class_names[p]) != NULL) {
                     bool is_bor = m->as.method.param_is_borrowed ? m->as.method.param_is_borrowed[p] : (p == 0);
                     own_scope_add_var(stack, s, m->as.method.param_names[p], m->as.method.param_class_names[p], m->as.method.param_lines ? m->as.method.param_lines[p] : m->line, m->as.method.param_cols ? m->as.method.param_cols[p] : m->col, true, is_bor);
                 }
@@ -683,7 +683,7 @@ static void analyze_own_block(OwnScopeStack *stack, AstNode *block_node, bool is
         } else if (stack->current_function->type == NODE_FUNCTION) {
             AstNode *f = stack->current_function;
             for (int p = 0; p < f->as.function.param_count; p++) {
-                if (f->as.function.param_types[p] == TY_CLASS && f->as.function.param_class_names[p]) {
+                if (f->as.function.param_types[p] == TY_CLASS && f->as.function.param_class_names[p] && find_class(stack->ct, f->as.function.param_class_names[p]) != NULL) {
                     bool is_bor = f->as.function.param_is_borrowed ? f->as.function.param_is_borrowed[p] : false;
                     own_scope_add_var(stack, s, f->as.function.param_names[p], f->as.function.param_class_names[p], f->as.function.param_lines ? f->as.function.param_lines[p] : f->line, f->as.function.param_cols ? f->as.function.param_cols[p] : f->col, true, is_bor);
                 }
@@ -721,7 +721,7 @@ static void analyze_own_block(OwnScopeStack *stack, AstNode *block_node, bool is
                 cls_name = get_expr_class_type(stack, stmt->as.let.value);
             }
 
-            if (cls_name) {
+            if (cls_name && find_class(stack->ct, cls_name) != NULL) {
                 stmt->as.let.class_name = arena_strdup(stack->arena, cls_name);
                 stmt->as.let.var_type = TY_CLASS;
 

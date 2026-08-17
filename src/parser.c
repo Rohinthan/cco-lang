@@ -309,7 +309,7 @@ static AstNode *parse_call_or_index(Parser *p) {
 }
 
 static AstNode *parse_unary(Parser *p) {
-    if (match(p, TOKEN_NOT) || match(p, TOKEN_MINUS)) {
+    if (match(p, TOKEN_NOT) || match(p, TOKEN_MINUS) || match(p, TOKEN_AMP)) {
         Token op = previous(p);
         AstNode *operand = parse_unary(p);
         AstNode *node = arena_alloc_node(p->arena, NODE_UNARY, op.line, op.col);
@@ -876,6 +876,73 @@ static AstNode *parse_class(Parser *p) {
     return cls_node;
 }
 
+static AstNode *parse_struct(Parser *p) {
+    Token tok = consume(p, TOKEN_STRUCT, "Expected 'struct'");
+    Token name_tok = consume(p, TOKEN_IDENT, "Expected struct name");
+    consume(p, TOKEN_LBRACE, "Expected '{' after struct name");
+
+    AstNode **fields = NULL;
+    int field_count = 0;
+    int field_cap = 0;
+
+    while (!check(p, TOKEN_RBRACE) && !is_at_end(p)) {
+        if (check(p, TOKEN_FN)) {
+            fatal_parser_error(peek(p).line, peek(p).col, peek(p).lexeme, "structs cannot have methods — did you mean to declare this as a 'class' instead?");
+        }
+
+        Token f_name = consume(p, TOKEN_IDENT, "Expected field declaration in struct");
+        consume(p, TOKEN_COLON, "Expected ':' after field name");
+
+        Type f_type;
+        if (match(p, TOKEN_TYPE_INT)) {
+            f_type = TY_INT;
+        } else if (match(p, TOKEN_TYPE_FLOAT)) {
+            f_type = TY_FLOAT;
+        } else if (match(p, TOKEN_TYPE_CHAR)) {
+            f_type = TY_CHAR;
+        } else if (match(p, TOKEN_TYPE_BOOL)) {
+            f_type = TY_BOOL;
+        } else {
+            Token err_tok = peek(p);
+            char short_msg[256];
+            snprintf(short_msg, sizeof(short_msg), "struct fields must be a primitive type (int, float, char, bool) — '%s: %s' is not allowed in v7", f_name.lexeme, err_tok.lexeme);
+            ErrorLocation loc = {get_error_filename(), err_tok.line, err_tok.col};
+            print_formatted_error(
+                short_msg,
+                loc,
+                "not allowed in v7",
+                "structs are value types with no ownership tracking; a string or object field would need copy semantics not yet supported — consider using a class instead if you need this field",
+                NULL,
+                NULL,
+                NULL
+            );
+            exit(1);
+        }
+
+        consume(p, TOKEN_SEMICOLON, "Expected ';' after struct field declaration");
+
+        AstNode *f_node = arena_alloc_node(p->arena, NODE_STRUCT_FIELD, f_name.line, f_name.col);
+        f_node->as.struct_field_decl.name = arena_strdup(p->arena, f_name.lexeme);
+        f_node->as.struct_field_decl.field_type = f_type;
+
+        if (field_count >= field_cap) {
+            field_cap = field_cap == 0 ? 4 : field_cap * 2;
+            AstNode **new_f = (AstNode **)arena_alloc_array(p->arena, field_cap, sizeof(AstNode *));
+            if (fields) memcpy(new_f, fields, field_count * sizeof(AstNode *));
+            fields = new_f;
+        }
+        fields[field_count++] = f_node;
+    }
+
+    consume(p, TOKEN_RBRACE, "Expected '}' at end of struct declaration");
+
+    AstNode *s_node = arena_alloc_node(p->arena, NODE_STRUCT, tok.line, tok.col);
+    s_node->as.struct_decl.name = arena_strdup(p->arena, name_tok.lexeme);
+    s_node->as.struct_decl.fields = fields;
+    s_node->as.struct_decl.field_count = field_count;
+    return s_node;
+}
+
 static AstNode *parse_function(Parser *p) {
     Token tok = consume(p, TOKEN_FN, "Expected 'fn'");
     Token name_tok = consume(p, TOKEN_IDENT, "Expected function name");
@@ -980,6 +1047,10 @@ AstNode *parse_program(Parser *p) {
     int class_count = 0;
     int class_cap = 0;
 
+    AstNode **structs = NULL;
+    int struct_count = 0;
+    int struct_cap = 0;
+
     AstNode **functions = NULL;
     int fn_count = 0;
     int fn_cap = 0;
@@ -1009,6 +1080,16 @@ AstNode *parse_program(Parser *p) {
                 classes = new_cls;
             }
             classes[class_count++] = cls;
+        } else if (check(p, TOKEN_STRUCT)) {
+            seen_decl = true;
+            AstNode *st = parse_struct(p);
+            if (struct_count >= struct_cap) {
+                struct_cap = struct_cap == 0 ? 4 : struct_cap * 2;
+                AstNode **new_st = (AstNode **)arena_alloc_array(p->arena, struct_cap, sizeof(AstNode *));
+                if (structs) memcpy(new_st, structs, struct_count * sizeof(AstNode *));
+                structs = new_st;
+            }
+            structs[struct_count++] = st;
         } else if (check(p, TOKEN_FN)) {
             seen_decl = true;
             AstNode *fn = parse_function(p);
@@ -1020,7 +1101,7 @@ AstNode *parse_program(Parser *p) {
             }
             functions[fn_count++] = fn;
         } else {
-            error_at(peek(p), "Expected 'import', 'class', or 'fn' at top level");
+            fatal_parser_error(peek(p).line, peek(p).col, peek(p).lexeme, "Expected 'import', 'class', 'struct', or 'fn'");
         }
     }
 
@@ -1029,6 +1110,8 @@ AstNode *parse_program(Parser *p) {
     prog->as.program.import_count = import_count;
     prog->as.program.classes = classes;
     prog->as.program.class_count = class_count;
+    prog->as.program.structs = structs;
+    prog->as.program.struct_count = struct_count;
     prog->as.program.functions = functions;
     prog->as.program.count = fn_count;
     return prog;

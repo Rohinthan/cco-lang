@@ -30,6 +30,10 @@ typedef struct {
     int class_count;
     int class_cap;
 
+    AstNode **merged_structs;
+    int struct_count;
+    int struct_cap;
+
     AstNode **merged_functions;
     int fn_count;
     int fn_cap;
@@ -114,12 +118,59 @@ static void check_and_add_class(ResolverCtx *ctx, AstNode *cls, const char *cano
             print_formatted_error(short_msg, primary, "duplicate definition", "first defined here:", &note_loc, "first defined here", NULL);
         }
     }
+    for (int i = 0; i < ctx->struct_count; i++) {
+        AstNode *existing = ctx->merged_structs[i];
+        if (strcmp(existing->as.struct_decl.name, cname) == 0) {
+            char short_msg[256];
+            snprintf(short_msg, sizeof(short_msg), "duplicate definition of '%s'", cname);
+
+            ErrorLocation primary = {cls->source_file, cls->line, cls->col};
+            ErrorLocation note_loc = {existing->source_file, existing->line, existing->col};
+
+            print_formatted_error(short_msg, primary, "duplicate definition", "first defined here:", &note_loc, "first defined here", NULL);
+        }
+    }
 
     if (ctx->class_count >= ctx->class_cap) {
         ctx->class_cap = ctx->class_cap == 0 ? 4 : ctx->class_cap * 2;
         ctx->merged_classes = realloc(ctx->merged_classes, ctx->class_cap * sizeof(AstNode *));
     }
     ctx->merged_classes[ctx->class_count++] = cls;
+}
+
+static void check_and_add_struct(ResolverCtx *ctx, AstNode *st, const char *canonical_path) {
+    st->source_file = canonical_path;
+    const char *sname = st->as.struct_decl.name;
+    for (int i = 0; i < ctx->struct_count; i++) {
+        AstNode *existing = ctx->merged_structs[i];
+        if (strcmp(existing->as.struct_decl.name, sname) == 0) {
+            char short_msg[256];
+            snprintf(short_msg, sizeof(short_msg), "duplicate definition of '%s'", sname);
+
+            ErrorLocation primary = {st->source_file, st->line, st->col};
+            ErrorLocation note_loc = {existing->source_file, existing->line, existing->col};
+
+            print_formatted_error(short_msg, primary, "duplicate definition", "first defined here:", &note_loc, "first defined here", NULL);
+        }
+    }
+    for (int i = 0; i < ctx->class_count; i++) {
+        AstNode *existing = ctx->merged_classes[i];
+        if (strcmp(existing->as.class_decl.name, sname) == 0) {
+            char short_msg[256];
+            snprintf(short_msg, sizeof(short_msg), "duplicate definition of '%s'", sname);
+
+            ErrorLocation primary = {st->source_file, st->line, st->col};
+            ErrorLocation note_loc = {existing->source_file, existing->line, existing->col};
+
+            print_formatted_error(short_msg, primary, "duplicate definition", "first defined here:", &note_loc, "first defined here", NULL);
+        }
+    }
+
+    if (ctx->struct_count >= ctx->struct_cap) {
+        ctx->struct_cap = ctx->struct_cap == 0 ? 4 : ctx->struct_cap * 2;
+        ctx->merged_structs = realloc(ctx->merged_structs, ctx->struct_cap * sizeof(AstNode *));
+    }
+    ctx->merged_structs[ctx->struct_count++] = st;
 }
 
 static void check_and_add_function(ResolverCtx *ctx, AstNode *fn, const char *canonical_path) {
@@ -229,6 +280,12 @@ static void resolve_file_rec(ResolverCtx *ctx, const char *raw_path, const char 
         check_and_add_class(ctx, cls, arena_display_path);
     }
 
+    for (int i = 0; i < file_ast->as.program.struct_count; i++) {
+        AstNode *st = file_ast->as.program.structs[i];
+        tag_nodes_with_source(st, arena_display_path);
+        check_and_add_struct(ctx, st, arena_display_path);
+    }
+
     for (int i = 0; i < file_ast->as.program.count; i++) {
         AstNode *fn = file_ast->as.program.functions[i];
         tag_nodes_with_source(fn, arena_display_path);
@@ -261,6 +318,12 @@ AstNode *resolve_program(const char *entry_path, AstArena *arena) {
     }
     merged_prog->as.program.class_count = ctx.class_count;
 
+    merged_prog->as.program.structs = (AstNode **)arena_alloc_array(arena, ctx.struct_count, sizeof(AstNode *));
+    if (ctx.struct_count > 0 && ctx.merged_structs) {
+        memcpy(merged_prog->as.program.structs, ctx.merged_structs, ctx.struct_count * sizeof(AstNode *));
+    }
+    merged_prog->as.program.struct_count = ctx.struct_count;
+
     merged_prog->as.program.functions = (AstNode **)arena_alloc_array(arena, ctx.fn_count, sizeof(AstNode *));
     if (ctx.fn_count > 0 && ctx.merged_functions) {
         memcpy(merged_prog->as.program.functions, ctx.merged_functions, ctx.fn_count * sizeof(AstNode *));
@@ -268,6 +331,7 @@ AstNode *resolve_program(const char *entry_path, AstArena *arena) {
     merged_prog->as.program.count = ctx.fn_count;
 
     if (ctx.merged_classes) free(ctx.merged_classes);
+    if (ctx.merged_structs) free(ctx.merged_structs);
     if (ctx.merged_functions) free(ctx.merged_functions);
     for (int i = 0; i < ctx.resolved_count; i++) {
         free(ctx.resolved_paths[i]);

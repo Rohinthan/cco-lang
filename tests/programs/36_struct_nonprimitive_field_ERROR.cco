@@ -1,0 +1,7 @@
+struct Bad {
+    name: string;
+}
+
+fn main() -> int {
+    return 0;
+}

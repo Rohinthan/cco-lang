@@ -1,0 +1,17 @@
+struct Vec2 {
+    x: float;
+    y: float;
+}
+
+fn scale(v: &Vec2, factor: float) -> void {
+    v.x = v.x * factor;
+    v.y = v.y * factor;
+}
+
+fn main() -> int {
+    let v: Vec2 = Vec2 { x: 3.0, y: 4.0 };
+    scale(&v, 2.0);
+    print(v.x);
+    print(v.y);
+    return 0;
+}

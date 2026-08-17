@@ -1,0 +1,12 @@
+error: duplicate definition of 'Point'
+  --> tests/programs/37_struct_class_name_collision_ERROR.cco:5:1
+    |
+  5 | struct Point {
+    | ^ duplicate definition
+    |
+note: first defined here:
+  --> tests/programs/37_struct_class_name_collision_ERROR.cco:1:1
+    |
+  1 | class Point {
+    | ^ first defined here
+    |

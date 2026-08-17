@@ -1,5 +1,6 @@
 #define _POSIX_C_SOURCE 200809L
 #include "codegen.h"
+#include "class_decl.h"
 #include "stdlib_prelude.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -48,7 +49,13 @@ typedef struct {
     int indent_level;
     AstNode *program;
     AstNode *current_function;
+    ClassTable *ct;
 } CodegenCtx;
+
+static bool is_struct_name(CodegenCtx *ctx, const char *name) {
+    if (!ctx || !ctx->ct || !name) return false;
+    return resolve_type_name(ctx->ct, name) == TYPE_KIND_STRUCT;
+}
 
 static void emit_indent(CodegenCtx *ctx) {
     for (int i = 0; i < ctx->indent_level; i++) {
@@ -56,9 +63,17 @@ static void emit_indent(CodegenCtx *ctx) {
     }
 }
 
-static const char *c_type_str_full(Type t, const char *class_name, bool is_heap_owner) {
+static const char *c_type_str_full(CodegenCtx *ctx, Type t, const char *class_name, bool is_borrowed, bool is_heap_owner) {
     if (t == TY_CLASS && class_name) {
         static char buf[128];
+        if (is_struct_name(ctx, class_name)) {
+            if (is_borrowed) {
+                snprintf(buf, sizeof(buf), "%s *", class_name);
+            } else {
+                snprintf(buf, sizeof(buf), "%s", class_name);
+            }
+            return buf;
+        }
         snprintf(buf, sizeof(buf), "%s *", class_name);
         return buf;
     }
@@ -73,11 +88,15 @@ static const char *c_type_str_full(Type t, const char *class_name, bool is_heap_
     }
 }
 
-static const char *c_type_str_decl(Type t, const char *class_name, bool is_array, bool is_heap_owner) {
+static const char *c_type_str_decl(CodegenCtx *ctx, Type t, const char *class_name, bool is_array, bool is_heap_owner) {
     if (is_array) {
         if (t == TY_CLASS && class_name) {
             static char buf[128];
-            snprintf(buf, sizeof(buf), "%s **", class_name);
+            if (is_struct_name(ctx, class_name)) {
+                snprintf(buf, sizeof(buf), "%s *", class_name);
+            } else {
+                snprintf(buf, sizeof(buf), "%s **", class_name);
+            }
             return buf;
         }
         switch (t) {
@@ -89,7 +108,77 @@ static const char *c_type_str_decl(Type t, const char *class_name, bool is_array
             default: return "void *";
         }
     }
-    return c_type_str_full(t, class_name, is_heap_owner);
+    return c_type_str_full(ctx, t, class_name, false, is_heap_owner);
+}
+
+static bool is_expr_pointer(CodegenCtx *ctx, AstNode *expr) {
+    if (!expr) return true;
+
+    if (expr->type == NODE_IDENT) {
+        const char *name = expr->as.ident.name;
+        if (ctx->current_function) {
+            AstNode *fn = ctx->current_function;
+            if (fn->type == NODE_FUNCTION) {
+                for (int i = 0; i < fn->as.function.param_count; i++) {
+                    if (strcmp(fn->as.function.param_names[i], name) == 0) {
+                        const char *cname = fn->as.function.param_class_names[i];
+                        if (cname && is_struct_name(ctx, cname)) {
+                            return fn->as.function.param_is_borrowed[i];
+                        }
+                        return true;
+                    }
+                }
+            } else if (fn->type == NODE_METHOD) {
+                if (strcmp(name, "self") == 0) return true;
+                for (int i = 0; i < fn->as.method.param_count; i++) {
+                    if (strcmp(fn->as.method.param_names[i], name) == 0) {
+                        const char *cname = fn->as.method.param_class_names[i];
+                        if (cname && is_struct_name(ctx, cname)) {
+                            return fn->as.method.param_is_borrowed[i];
+                        }
+                        return true;
+                    }
+                }
+            }
+
+            AstNode *body = (fn->type == NODE_FUNCTION) ? fn->as.function.body : fn->as.method.body;
+            if (body && body->type == NODE_BLOCK) {
+                for (int i = 0; i < body->as.block.count; i++) {
+                    AstNode *stmt = body->as.block.stmts[i];
+                    if (stmt->type == NODE_LET && strcmp(stmt->as.let.name, name) == 0) {
+                        const char *cname = stmt->as.let.class_name;
+                        if (cname && is_struct_name(ctx, cname)) {
+                            return false;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (expr->type == NODE_NEW) {
+        const char *cname = expr->as.new_expr.class_name;
+        if (cname && is_struct_name(ctx, cname)) {
+            return false;
+        }
+    }
+
+    if (expr->type == NODE_CALL) {
+        const char *callee = expr->as.call.callee;
+        if (ctx->program && ctx->program->type == NODE_PROGRAM) {
+            for (int i = 0; i < ctx->program->as.program.count; i++) {
+                AstNode *target_fn = ctx->program->as.program.functions[i];
+                if (strcmp(target_fn->as.function.name, callee) == 0) {
+                    const char *cname = target_fn->as.function.return_class_name;
+                    if (cname && is_struct_name(ctx, cname)) {
+                        return false;
+                    }
+                }
+            }
+        }
+    }
+
+    return true;
 }
 
 static const char *get_expr_elem_class_name(CodegenCtx *ctx, AstNode *expr) {
@@ -311,43 +400,57 @@ static void gen_expr(CodegenCtx *ctx, AstNode *expr) {
                 gen_expr(ctx, expr->as.alloc.count_expr);
                 sb_append(&ctx->sb, ")");
             } else {
-                sb_appendf(&ctx->sb, "(%s *)malloc((", c_type_str_full(expr->as.alloc.elem_type, expr->as.alloc.class_name, false));
+                sb_appendf(&ctx->sb, "(%s *)malloc((", c_type_str_full(ctx, expr->as.alloc.elem_type, expr->as.alloc.class_name, false, false));
                 gen_expr(ctx, expr->as.alloc.count_expr);
-                sb_appendf(&ctx->sb, ") * sizeof(%s))", c_type_str_full(expr->as.alloc.elem_type, expr->as.alloc.class_name, false));
+                sb_appendf(&ctx->sb, ") * sizeof(%s))", c_type_str_full(ctx, expr->as.alloc.elem_type, expr->as.alloc.class_name, false, false));
             }
             break;
 
         case NODE_NEW: {
             const char *cname = expr->as.new_expr.class_name;
-            AstNode *cls_node = find_class_ast(ctx->program, cname);
-            sb_appendf(&ctx->sb, "%s_new(", cname);
-            if (cls_node) {
-                for (int f = 0; f < cls_node->as.class_decl.field_count; f++) {
-                    if (f > 0) sb_append(&ctx->sb, ", ");
-                    const char *target_fname = cls_node->as.class_decl.fields[f]->as.field.name;
-                    AstNode *fval = NULL;
-                    for (int k = 0; k < expr->as.new_expr.field_count; k++) {
-                        if (strcmp(expr->as.new_expr.field_names[k], target_fname) == 0) {
-                            fval = expr->as.new_expr.field_values[k];
-                            break;
-                        }
-                    }
-                    if (fval) {
-                        if (cls_node->as.class_decl.fields[f]->as.field.type == TY_STRING && fval->type == NODE_LITERAL) {
-                            sb_appendf(&ctx->sb, "strdup(\"%s\")", fval->as.literal.val.s);
-                        } else {
-                            gen_expr(ctx, fval);
-                        }
-                    } else sb_append(&ctx->sb, "0");
+            if (is_struct_name(ctx, cname)) {
+                sb_appendf(&ctx->sb, "(%s){ ", cname);
+                for (int k = 0; k < expr->as.new_expr.field_count; k++) {
+                    if (k > 0) sb_append(&ctx->sb, ", ");
+                    sb_appendf(&ctx->sb, ".%s = ", expr->as.new_expr.field_names[k]);
+                    gen_expr(ctx, expr->as.new_expr.field_values[k]);
                 }
+                sb_append(&ctx->sb, " }");
+            } else {
+                AstNode *cls_node = find_class_ast(ctx->program, cname);
+                sb_appendf(&ctx->sb, "%s_new(", cname);
+                if (cls_node) {
+                    for (int f = 0; f < cls_node->as.class_decl.field_count; f++) {
+                        if (f > 0) sb_append(&ctx->sb, ", ");
+                        const char *target_fname = cls_node->as.class_decl.fields[f]->as.field.name;
+                        AstNode *fval = NULL;
+                        for (int k = 0; k < expr->as.new_expr.field_count; k++) {
+                            if (strcmp(expr->as.new_expr.field_names[k], target_fname) == 0) {
+                                fval = expr->as.new_expr.field_values[k];
+                                break;
+                            }
+                        }
+                        if (fval) {
+                            if (cls_node->as.class_decl.fields[f]->as.field.type == TY_STRING && fval->type == NODE_LITERAL) {
+                                sb_appendf(&ctx->sb, "strdup(\"%s\")", fval->as.literal.val.s);
+                            } else {
+                                gen_expr(ctx, fval);
+                            }
+                        } else sb_append(&ctx->sb, "0");
+                    }
+                }
+                sb_append(&ctx->sb, ")");
             }
-            sb_append(&ctx->sb, ")");
             break;
         }
 
         case NODE_MEMBER:
             gen_expr(ctx, expr->as.member.object);
-            sb_appendf(&ctx->sb, "->%s", expr->as.member.member_name);
+            if (is_expr_pointer(ctx, expr->as.member.object)) {
+                sb_appendf(&ctx->sb, "->%s", expr->as.member.member_name);
+            } else {
+                sb_appendf(&ctx->sb, ".%s", expr->as.member.member_name);
+            }
             break;
 
         case NODE_METHOD_CALL:
@@ -499,7 +602,7 @@ static void gen_stmt(CodegenCtx *ctx, AstNode *stmt) {
     switch (stmt->type) {
         case NODE_LET:
             emit_indent(ctx);
-            sb_appendf(&ctx->sb, "%s %s = ", c_type_str_decl(stmt->as.let.var_type, stmt->as.let.class_name, stmt->as.let.is_array, stmt->is_heap_owner), stmt->as.let.name);
+            sb_appendf(&ctx->sb, "%s %s = ", c_type_str_decl(ctx, stmt->as.let.var_type, stmt->as.let.class_name, stmt->as.let.is_array, stmt->is_heap_owner), stmt->as.let.name);
             if (stmt->as.let.var_type == TY_STRING && stmt->as.let.value->type == NODE_LITERAL) {
                 sb_appendf(&ctx->sb, "strdup(\"%s\")", stmt->as.let.value->as.literal.val.s);
             } else {
@@ -530,11 +633,19 @@ static void gen_stmt(CodegenCtx *ctx, AstNode *stmt) {
                 emit_indent(ctx);
                 sb_appendf(&ctx->sb, "%s_free(", fcls);
                 gen_expr(ctx, stmt->as.member_assign.object);
-                sb_appendf(&ctx->sb, "->%s);\n", stmt->as.member_assign.member_name);
+                if (is_expr_pointer(ctx, stmt->as.member_assign.object)) {
+                    sb_appendf(&ctx->sb, "->%s);\n", stmt->as.member_assign.member_name);
+                } else {
+                    sb_appendf(&ctx->sb, ".%s);\n", stmt->as.member_assign.member_name);
+                }
             }
             emit_indent(ctx);
             gen_expr(ctx, stmt->as.member_assign.object);
-            sb_appendf(&ctx->sb, "->%s = ", stmt->as.member_assign.member_name);
+            if (is_expr_pointer(ctx, stmt->as.member_assign.object)) {
+                sb_appendf(&ctx->sb, "->%s = ", stmt->as.member_assign.member_name);
+            } else {
+                sb_appendf(&ctx->sb, ".%s = ", stmt->as.member_assign.member_name);
+            }
             gen_expr(ctx, stmt->as.member_assign.value);
             sb_append(&ctx->sb, ";\n");
             break;
@@ -634,7 +745,7 @@ static void gen_stmt(CodegenCtx *ctx, AstNode *stmt) {
             sb_append(&ctx->sb, "for (");
             if (stmt->as.for_stmt.init) {
                 if (stmt->as.for_stmt.init->type == NODE_LET) {
-                    sb_appendf(&ctx->sb, "%s %s = ", c_type_str_full(stmt->as.for_stmt.init->as.let.var_type, stmt->as.for_stmt.init->as.let.class_name, stmt->as.for_stmt.init->is_heap_owner), stmt->as.for_stmt.init->as.let.name);
+                    sb_appendf(&ctx->sb, "%s %s = ", c_type_str_full(ctx, stmt->as.for_stmt.init->as.let.var_type, stmt->as.for_stmt.init->as.let.class_name, false, stmt->as.for_stmt.init->is_heap_owner), stmt->as.for_stmt.init->as.let.name);
                     gen_expr(ctx, stmt->as.for_stmt.init->as.let.value);
                 } else if (stmt->as.for_stmt.init->type == NODE_ASSIGN) {
                     sb_appendf(&ctx->sb, "%s = ", stmt->as.for_stmt.init->as.assign.name);
@@ -768,6 +879,22 @@ static void gen_block(CodegenCtx *ctx, AstNode *block_node) {
     sb_append(&ctx->sb, "}\n");
 }
 
+static void gen_struct_typedefs(CodegenCtx *ctx, AstNode *program) {
+    if (!program || program->type != NODE_PROGRAM) return;
+
+    for (int i = 0; i < program->as.program.struct_count; i++) {
+        AstNode *st = program->as.program.structs[i];
+        sb_appendf(&ctx->sb, "typedef struct {\n");
+        for (int f = 0; f < st->as.struct_decl.field_count; f++) {
+            AstNode *f_node = st->as.struct_decl.fields[f];
+            sb_appendf(&ctx->sb, "    %s %s;\n",
+                       c_type_str_full(ctx, f_node->as.struct_field_decl.field_type, NULL, false, false),
+                       f_node->as.struct_field_decl.name);
+        }
+        sb_appendf(&ctx->sb, "} %s;\n\n", st->as.struct_decl.name);
+    }
+}
+
 static void gen_class_helpers(CodegenCtx *ctx, AstNode *program) {
     if (!program || program->type != NODE_PROGRAM) return;
 
@@ -783,7 +910,7 @@ static void gen_class_helpers(CodegenCtx *ctx, AstNode *program) {
         for (int f = 0; f < cls->as.class_decl.field_count; f++) {
             AstNode *f_node = cls->as.class_decl.fields[f];
             sb_appendf(&ctx->sb, "    %s %s;\n",
-                       c_type_str_full(f_node->as.field.type, f_node->as.field.class_name, f_node->is_heap_owner),
+                       c_type_str_full(ctx, f_node->as.field.type, f_node->as.field.class_name, false, f_node->is_heap_owner),
                        f_node->as.field.name);
         }
         sb_append(&ctx->sb, "};\n\n");
@@ -815,7 +942,7 @@ static void gen_class_helpers(CodegenCtx *ctx, AstNode *program) {
                 if (f > 0) sb_append(&ctx->sb, ", ");
                 AstNode *f_node = cls->as.class_decl.fields[f];
                 sb_appendf(&ctx->sb, "%s %s",
-                           c_type_str_full(f_node->as.field.type, f_node->as.field.class_name, f_node->is_heap_owner),
+                           c_type_str_full(ctx, f_node->as.field.type, f_node->as.field.class_name, false, f_node->is_heap_owner),
                            f_node->as.field.name);
             }
         }
@@ -834,7 +961,7 @@ static void gen_class_helpers(CodegenCtx *ctx, AstNode *program) {
 static void gen_method(CodegenCtx *ctx, const char *class_name, AstNode *m_node) {
     ctx->current_function = m_node;
     sb_appendf(&ctx->sb, "%s %s_%s(",
-               c_type_str_full(m_node->as.method.return_type, m_node->as.method.return_class_name, m_node->as.method.returns_heap_pointer),
+               c_type_str_full(ctx, m_node->as.method.return_type, m_node->as.method.return_class_name, false, m_node->as.method.returns_heap_pointer),
                class_name, m_node->as.method.name);
 
     if (m_node->as.method.param_count == 0) {
@@ -842,8 +969,9 @@ static void gen_method(CodegenCtx *ctx, const char *class_name, AstNode *m_node)
     } else {
         for (int i = 0; i < m_node->as.method.param_count; i++) {
             if (i > 0) sb_append(&ctx->sb, ", ");
+            bool is_bor = m_node->as.method.param_is_borrowed ? m_node->as.method.param_is_borrowed[i] : false;
             sb_appendf(&ctx->sb, "%s %s",
-                       c_type_str_full(m_node->as.method.param_types[i], m_node->as.method.param_class_names[i], false),
+                       c_type_str_full(ctx, m_node->as.method.param_types[i], m_node->as.method.param_class_names[i], is_bor, false),
                        m_node->as.method.param_names[i]);
         }
     }
@@ -855,14 +983,15 @@ static void gen_method(CodegenCtx *ctx, const char *class_name, AstNode *m_node)
 
 static void gen_function(CodegenCtx *ctx, AstNode *fn) {
     ctx->current_function = fn;
-    sb_appendf(&ctx->sb, "%s %s(", c_type_str_full(fn->as.function.return_type, fn->as.function.return_class_name, fn->as.function.returns_heap_pointer), fn->as.function.name);
+    sb_appendf(&ctx->sb, "%s %s(", c_type_str_full(ctx, fn->as.function.return_type, fn->as.function.return_class_name, false, fn->as.function.returns_heap_pointer), fn->as.function.name);
 
     if (fn->as.function.param_count == 0) {
         sb_append(&ctx->sb, "void");
     } else {
         for (int i = 0; i < fn->as.function.param_count; i++) {
             if (i > 0) sb_append(&ctx->sb, ", ");
-            sb_appendf(&ctx->sb, "%s %s", c_type_str_full(fn->as.function.param_types[i], fn->as.function.param_class_names[i], false), fn->as.function.param_names[i]);
+            bool is_bor = fn->as.function.param_is_borrowed ? fn->as.function.param_is_borrowed[i] : false;
+            sb_appendf(&ctx->sb, "%s %s", c_type_str_full(ctx, fn->as.function.param_types[i], fn->as.function.param_class_names[i], is_bor, false), fn->as.function.param_names[i]);
         }
     }
     sb_append(&ctx->sb, ") ");
@@ -872,11 +1001,12 @@ static void gen_function(CodegenCtx *ctx, AstNode *fn) {
 }
 
 char *generate_c_code(AstNode *program, AstArena *arena) {
-    (void)arena;
     CodegenCtx ctx;
     ctx.sb = create_buffer();
     ctx.indent_level = 0;
     ctx.program = program;
+    ctx.current_function = NULL;
+    ctx.ct = build_class_table(program, arena);
 
     // Fixed C prelude
     sb_append(&ctx.sb, "/* Generated by Cco (C--) Compiler */\n");
@@ -887,6 +1017,9 @@ char *generate_c_code(AstNode *program, AstArena *arena) {
     sb_append(&ctx.sb, "#include <string.h>\n\n");
     sb_append(&ctx.sb, STDLIB_PRELUDE_C);
     sb_append(&ctx.sb, "\n");
+
+    // Struct definitions
+    gen_struct_typedefs(&ctx, program);
 
     // Class struct definitions, retain/release/new helpers
     gen_class_helpers(&ctx, program);

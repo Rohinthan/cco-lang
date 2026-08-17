@@ -1,0 +1,13 @@
+struct Point2D {
+    x: int;
+    y: int;
+}
+
+fn main() -> int {
+    let p: Point2D = Point2D { x: 1, y: 2 };
+    let q: Point2D = p;
+    q.x = 99;
+    print(p.x);
+    print(q.x);
+    return 0;
+}

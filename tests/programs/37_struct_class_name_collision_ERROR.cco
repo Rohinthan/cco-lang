@@ -1,0 +1,12 @@
+class Point {
+    x: int;
+}
+
+struct Point {
+    x: int;
+    y: int;
+}
+
+fn main() -> int {
+    return 0;
+}

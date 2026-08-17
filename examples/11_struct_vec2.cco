@@ -1,0 +1,35 @@
+struct Vec2 {
+    x: float;
+    y: float;
+}
+
+fn add(a: Vec2, b: Vec2) -> Vec2 {
+    return Vec2 { x: a.x + b.x, y: a.y + b.y };
+}
+
+fn dot(a: Vec2, b: Vec2) -> float {
+    return a.x * b.x + a.y * b.y;
+}
+
+fn scale_inplace(v: &Vec2, factor: float) -> void {
+    v.x = v.x * factor;
+    v.y = v.y * factor;
+}
+
+fn main() -> int {
+    let u: Vec2 = Vec2 { x: 3.0, y: 4.0 };
+    let v: Vec2 = Vec2 { x: 1.0, y: 2.0 };
+
+    let sum: Vec2 = add(u, v);
+    print(sum.x);
+    print(sum.y);
+
+    let d: float = dot(u, v);
+    print(d);
+
+    scale_inplace(&u, 2.0);
+    print(u.x);
+    print(u.y);
+
+    return 0;
+}

@@ -1,0 +1,7 @@
+error: struct fields must be a primitive type (int, float, char, bool) — 'name: string' is not allowed in v7
+  --> tests/programs/36_struct_nonprimitive_field_ERROR.cco:2:11
+    |
+  2 |     name: string;
+    |           ^ not allowed in v7
+    |
+note: structs are value types with no ownership tracking; a string or object field would need copy semantics not yet supported — consider using a class instead if you need this field

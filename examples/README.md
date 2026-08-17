@@ -16,6 +16,7 @@ Welcome to the Cco example program gallery. These examples demonstrate the featu
 | [`08_stack_data_structure.cco`](08_stack_data_structure.cco) | OOP Stack data structure | Classes with heap arrays, method state mutation |
 | [`09_object_array_todo.cco`](09_object_array_todo.cco) | Arrays of Objects & Todo list | Object arrays (`Class[]`), `alloc(Class, n)`, `for-each` loops |
 | [`10_import_demo/`](10_import_demo/) | Multi-file import system | Top-level imports (`import "file.cco";`), Resolve-Then-Merge AST |
+| [`11_struct_vec2.cco`](11_struct_vec2.cco) | Lightweight Structs (Value Types) | Value type structs (`struct`), copy semantics, in-place borrowed mutation (`&Struct`) |
 
 ## Compiling & Running Examples
 

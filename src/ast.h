@@ -51,7 +51,9 @@ typedef enum {
     NODE_MEMBER,
     NODE_METHOD_CALL,
     NODE_MEMBER_ASSIGN,
-    NODE_IMPORT
+    NODE_IMPORT,
+    NODE_STRUCT,
+    NODE_STRUCT_FIELD
 } NodeType;
 
 typedef struct AstNode AstNode;
@@ -81,6 +83,8 @@ struct AstNode {
             int import_count;
             AstNode **classes;
             int class_count;
+            AstNode **structs;
+            int struct_count;
             AstNode **functions;
             int count;
         } program;
@@ -96,6 +100,17 @@ struct AstNode {
             AstNode **methods;
             int method_count;
         } class_decl;
+
+        struct {
+            char *name;
+            AstNode **fields;
+            int field_count;
+        } struct_decl;
+
+        struct {
+            char *name;
+            Type field_type;
+        } struct_field_decl;
 
         struct {
             char *name;
@@ -238,6 +253,7 @@ struct AstNode {
             char **field_names;
             AstNode **field_values;
             int field_count;
+            bool constructs_struct;
         } new_expr;
 
         struct {
