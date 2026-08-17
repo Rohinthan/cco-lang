@@ -81,10 +81,110 @@ void test_ownership_transfer() {
     printf("[PASS] test_ownership_transfer\n");
 }
 
+void test_refcount_aliasing() {
+    const char *src =
+        "class Point { x: int; y: int; }\n"
+        "fn main() -> void {\n"
+        "    let a: Point = Point { x: 1, y: 2 };\n"
+        "    let b: Point = a;\n"
+        "}\n";
+
+    TokenArray tokens = lex_source(src);
+    AstArena *arena = create_ast_arena();
+    Parser parser = create_parser(tokens, arena);
+    AstNode *prog = parse_program(&parser);
+
+    analyze_scopes(prog, arena);
+
+    AstNode *fn = prog->as.program.functions[0];
+    AstNode *body = fn->as.function.body;
+    AstNode *let_b = body->as.block.stmts[1];
+
+    assert(let_b->type == NODE_LET);
+    assert(let_b->as.let.retain_rhs == true);
+
+    // End of block releases both a and b
+    assert(body->releases_count == 2);
+
+    free_ast_arena(arena);
+    free_tokens(&tokens);
+    printf("[PASS] test_refcount_aliasing\n");
+}
+
+void test_refcount_reassignment() {
+    const char *src =
+        "class Point { x: int; y: int; }\n"
+        "fn main() -> void {\n"
+        "    let a: Point = Point { x: 1, y: 2 };\n"
+        "    a = Point { x: 3, y: 4 };\n"
+        "}\n";
+
+    TokenArray tokens = lex_source(src);
+    AstArena *arena = create_ast_arena();
+    Parser parser = create_parser(tokens, arena);
+    AstNode *prog = parse_program(&parser);
+
+    analyze_scopes(prog, arena);
+
+    AstNode *fn = prog->as.program.functions[0];
+    AstNode *body = fn->as.function.body;
+    AstNode *assign_stmt = body->as.block.stmts[1];
+
+    assert(assign_stmt->type == NODE_ASSIGN);
+    assert(assign_stmt->as.assign.release_old == true);
+    assert(strcmp(assign_stmt->as.assign.class_name, "Point") == 0);
+
+    free_ast_arena(arena);
+    free_tokens(&tokens);
+    printf("[PASS] test_refcount_reassignment\n");
+}
+
+void test_refcount_early_return() {
+    const char *src =
+        "class Point { x: int; y: int; }\n"
+        "fn make_point(skip: bool) -> Point {\n"
+        "    let p: Point = Point { x: 1, y: 2 };\n"
+        "    let dummy: Point = Point { x: 99, y: 99 };\n"
+        "    if (skip) {\n"
+        "        return p;\n"
+        "    }\n"
+        "    return dummy;\n"
+        "}\n";
+
+    TokenArray tokens = lex_source(src);
+    AstArena *arena = create_ast_arena();
+    Parser parser = create_parser(tokens, arena);
+    AstNode *prog = parse_program(&parser);
+
+    analyze_scopes(prog, arena);
+
+    AstNode *fn = prog->as.program.functions[0];
+    AstNode *body = fn->as.function.body;
+    AstNode *if_stmt = body->as.block.stmts[2];
+    AstNode *then_b = if_stmt->as.if_stmt.then_b;
+    AstNode *ret_p = then_b->as.block.stmts[0];
+
+    assert(ret_p->type == NODE_RETURN);
+    assert(ret_p->releases_count == 1);
+    assert(strcmp(ret_p->releases_to_emit[0].var_name, "dummy") == 0);
+
+    AstNode *ret_dummy = body->as.block.stmts[3];
+    assert(ret_dummy->type == NODE_RETURN);
+    assert(ret_dummy->releases_count == 1);
+    assert(strcmp(ret_dummy->releases_to_emit[0].var_name, "p") == 0);
+
+    free_ast_arena(arena);
+    free_tokens(&tokens);
+    printf("[PASS] test_refcount_early_return\n");
+}
+
 int main() {
     printf("Running Scope Analysis Unit Tests...\n");
     test_early_return_frees();
     test_ownership_transfer();
+    test_refcount_aliasing();
+    test_refcount_reassignment();
+    test_refcount_early_return();
     printf("All Scope Analysis tests passed!\n");
     return 0;
 }
