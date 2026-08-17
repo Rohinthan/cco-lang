@@ -50,6 +50,7 @@ static TokenType check_keyword(const char *str) {
     if (strcmp(str, "continue") == 0) return TOKEN_CONTINUE;
     if (strcmp(str, "print") == 0) return TOKEN_PRINT;
     if (strcmp(str, "alloc") == 0) return TOKEN_ALLOC;
+    if (strcmp(str, "list_new") == 0) return TOKEN_LIST_NEW;
     if (strcmp(str, "int") == 0) return TOKEN_TYPE_INT;
     if (strcmp(str, "float") == 0) return TOKEN_TYPE_FLOAT;
     if (strcmp(str, "char") == 0) return TOKEN_TYPE_CHAR;

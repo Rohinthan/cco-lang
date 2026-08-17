@@ -73,6 +73,10 @@ static char *resolve_path(const char *raw_path, const char *importing_file_path)
         free(dir);
     }
 
+    // NOTE: realpath() is a POSIX standard function (POSIX.1-2001) used here for
+    // canonical path resolution in the Cco compiler itself. While Cco-generated C output
+    // is strictly portable standard C11, running the Cco compiler binary requires a POSIX environment
+    // (Linux/macOS/WSL). On Windows host builds, this would require _fullpath().
     char resolved[PATH_MAX];
     if (realpath(combined, resolved) != NULL) {
         return strdup(resolved);

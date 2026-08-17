@@ -1,0 +1,5 @@
+fn main() -> void {
+    let nums: int[] = list_new(int);
+    let x: int = pop(nums);
+    print(x);
+}

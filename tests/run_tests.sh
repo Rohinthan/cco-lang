@@ -6,6 +6,15 @@ mkdir -p build
 echo "=================================================="
 echo "  Cco (C--) INTEGRATION & VALGRIND TEST SUITE    "
 echo "=================================================="
+if command -v clang >/dev/null 2>&1; then
+    echo "  [Compiler] GCC: yes (-pedantic-errors), Clang: yes (-pedantic-errors)"
+else
+    echo "  [Compiler] GCC: yes (-pedantic-errors), Clang: not found (skipping)"
+fi
+if command -v tcc >/dev/null 2>&1; then
+    echo "  [Compiler] TCC: yes"
+fi
+echo "=================================================="
 
 PASSED=0
 FAILED=0
@@ -34,6 +43,31 @@ for item in tests/programs/*; do
     exp_out="tests/expected_output/${base}.txt"
 
     echo -n "Testing ${base}... "
+
+    if [[ "$base" == *"_RUNTIME_ERROR"* ]]; then
+        err_out="build/${base}_err.txt"
+        exp_err="tests/expected_output/${base}_stderr.txt"
+        ./cco "$entry" -o "$c_out"
+        gcc -Wall -Wextra -Werror -pedantic-errors -std=c11 "$c_out" -o "$bin_out" -lm
+        set +e
+        "$bin_out" 2> "$err_out" > /dev/null
+        code=$?
+        set -e
+        if [ "$code" -eq 0 ]; then
+            echo "FAILED (Expected runtime failure with non-zero exit code, got 0)"
+            FAILED=$((FAILED + 1))
+            continue
+        fi
+        if ! diff -u "$err_out" "$exp_err" > /dev/null; then
+            echo "FAILED (Runtime stderr mismatch)"
+            diff -u "$err_out" "$exp_err"
+            FAILED=$((FAILED + 1))
+            continue
+        fi
+        echo "PASSED (Runtime Failed as Expected)"
+        PASSED=$((PASSED + 1))
+        continue
+    fi
 
     if [[ "$base" == *"_ERROR"* ]]; then
         err_out="build/${base}_err.txt"
@@ -87,8 +121,18 @@ for item in tests/programs/*; do
         fi
     fi
 
-    # 2. Compile C -> Executable
-    gcc -Wall -Wextra -Werror -std=c11 "$c_out" -o "$bin_out" -lm
+    # 2. Compile C -> Executable (gcc with strict C11 -pedantic-errors)
+    gcc -Wall -Wextra -Werror -pedantic-errors -std=c11 "$c_out" -o "$bin_out" -lm
+
+    # Optional Clang compilation pass
+    if command -v clang >/dev/null 2>&1; then
+        clang -Wall -Wextra -Werror -pedantic-errors -std=c11 "$c_out" -o "${bin_out}_clang" -lm
+    fi
+
+    # Optional TCC compilation pass
+    if command -v tcc >/dev/null 2>&1; then
+        tcc -std=c11 "$c_out" -o "${bin_out}_tcc" -lm
+    fi
 
     # 3. Execute and capture stdout
     "$bin_out" > "$act_out"

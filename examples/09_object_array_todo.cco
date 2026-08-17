@@ -1,4 +1,4 @@
-// 09_object_array_todo.cco — Demonstrates Arrays of Objects and for-each iteration in Cco v5
+// 09_object_array_todo.cco — Demonstrates Growable Arrays of Objects and for-each iteration in Cco v9.0
 
 class Task {
     id: int;
@@ -16,13 +16,15 @@ class Task {
 }
 
 fn main() -> int {
-    let tasks: Task[] = alloc(Task, 3);
+    let tasks: Task[] = list_new(Task);
 
-    tasks[0] = Task { id: 1, title: "Build Cco v5.0 compiler", completed: true };
-    tasks[1] = Task { id: 2, title: "Add object arrays & for-each", completed: true };
-    tasks[2] = Task { id: 3, title: "Write awesome example gallery", completed: false };
+    tasks = push(tasks, Task { id: 1, title: "Build Cco v9.0 growable arrays", completed: true });
+    tasks = push(tasks, Task { id: 2, title: "Add list_new, push, pop, len", completed: true });
+    tasks = push(tasks, Task { id: 3, title: "Write awesome example gallery", completed: false });
 
     print("--- TODO LIST ---");
+    print(len(tasks));
+
     for task in tasks {
         task.print_task();
     }

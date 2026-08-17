@@ -9,7 +9,15 @@ typedef struct {
     const char **depends_on;
 } PreludeChunk;
 
-static const char *deps_bounds_check[] = { "arr_len", NULL };
+static const char *deps_alloc_arr[] = { "arr_header", NULL };
+static const char *deps_list_new[] = { "arr_header", NULL };
+static const char *deps_arr_len_raw[] = { "arr_header", NULL };
+static const char *deps_arr_len[] = { "arr_len_raw", "arr_header", NULL };
+static const char *deps_free_arr[] = { "arr_header", NULL };
+static const char *deps_arr_incr_len[] = { "arr_header", NULL };
+static const char *deps_arr_decr_len[] = { "arr_header", NULL };
+static const char *deps_arr_maybe_grow[] = { "arr_header", NULL };
+static const char *deps_bounds_check[] = { "arr_len", "arr_header", NULL };
 
 static const PreludeChunk PRELUDE_CHUNKS[] = {
     {
@@ -140,35 +148,107 @@ static const PreludeChunk PRELUDE_CHUNKS[] = {
         NULL
     },
     {
+        "arr_header",
+        "typedef struct {\n"
+        "    size_t capacity;\n"
+        "    size_t length;\n"
+        "} __cco_arr_header;\n\n",
+        NULL
+    },
+    {
         "alloc_arr",
         "static inline void *__cco_alloc_arr(size_t elem_size, int count) {\n"
         "    if (count < 0) count = 0;\n"
-        "    size_t *hdr = (size_t *)calloc(1, sizeof(size_t) + (size_t)count * elem_size);\n"
+        "    __cco_arr_header *hdr = (__cco_arr_header *)calloc(1, sizeof(__cco_arr_header) + (size_t)count * elem_size);\n"
         "    if (!hdr) {\n"
         "        fprintf(stderr, \"Memory allocation failed in alloc()\\n\");\n"
         "        exit(1);\n"
         "    }\n"
-        "    hdr[0] = (size_t)count;\n"
+        "    hdr->capacity = (size_t)count;\n"
+        "    hdr->length = (size_t)count;\n"
         "    return (void *)(hdr + 1);\n"
         "}\n\n",
-        NULL
+        deps_alloc_arr
+    },
+    {
+        "list_new",
+        "static inline void *__cco_list_new(size_t elem_size) {\n"
+        "    size_t init_cap = 4;\n"
+        "    __cco_arr_header *hdr = (__cco_arr_header *)calloc(1, sizeof(__cco_arr_header) + init_cap * elem_size);\n"
+        "    if (!hdr) {\n"
+        "        fprintf(stderr, \"Memory allocation failed in list_new()\\n\");\n"
+        "        exit(1);\n"
+        "    }\n"
+        "    hdr->capacity = init_cap;\n"
+        "    hdr->length = 0;\n"
+        "    return (void *)(hdr + 1);\n"
+        "}\n\n",
+        deps_list_new
+    },
+    {
+        "arr_len_raw",
+        "static inline int __cco_arr_len_raw(void *ptr) {\n"
+        "    if (!ptr) return 0;\n"
+        "    return (int)(((__cco_arr_header *)ptr)[-1].length);\n"
+        "}\n\n",
+        deps_arr_len_raw
     },
     {
         "arr_len",
         "static inline int __cco_arr_len(void *ptr) {\n"
-        "    if (!ptr) return 0;\n"
-        "    return (int)(((size_t *)ptr)[-1]);\n"
+        "    return __cco_arr_len_raw(ptr);\n"
         "}\n\n",
-        NULL
+        deps_arr_len
     },
     {
         "free_arr",
         "static inline void __cco_free_arr(void *ptr) {\n"
         "    if (ptr) {\n"
-        "        free(((size_t *)ptr) - 1);\n"
+        "        free(((__cco_arr_header *)ptr) - 1);\n"
         "    }\n"
         "}\n\n",
-        NULL
+        deps_free_arr
+    },
+    {
+        "arr_incr_len",
+        "static inline void __cco_arr_incr_len(void *ptr) {\n"
+        "    if (ptr) {\n"
+        "        ((__cco_arr_header *)ptr)[-1].length++;\n"
+        "    }\n"
+        "}\n\n",
+        deps_arr_incr_len
+    },
+    {
+        "arr_decr_len",
+        "static inline void __cco_arr_decr_len(void *ptr) {\n"
+        "    if (ptr) {\n"
+        "        if (((__cco_arr_header *)ptr)[-1].length == 0) {\n"
+        "            fprintf(stderr, \"Runtime Error: pop() called on empty array\\n\");\n"
+        "            exit(1);\n"
+        "        }\n"
+        "        ((__cco_arr_header *)ptr)[-1].length--;\n"
+        "    }\n"
+        "}\n\n",
+        deps_arr_decr_len
+    },
+    {
+        "arr_maybe_grow",
+        "static inline void *__cco_arr_maybe_grow(void *ptr, size_t elem_size) {\n"
+        "    if (!ptr) return NULL;\n"
+        "    __cco_arr_header *hdr = ((__cco_arr_header *)ptr) - 1;\n"
+        "    if (hdr->length >= hdr->capacity) {\n"
+        "        size_t new_cap = hdr->capacity == 0 ? 4 : hdr->capacity * 2;\n"
+        "        __cco_arr_header *new_hdr = (__cco_arr_header *)realloc(hdr, sizeof(__cco_arr_header) + new_cap * elem_size);\n"
+        "        if (!new_hdr) {\n"
+        "            fprintf(stderr, \"Memory allocation failed in push()\\n\");\n"
+        "            exit(1);\n"
+        "        }\n"
+        "        new_hdr->capacity = new_cap;\n"
+        "        return (void *)(new_hdr + 1);\n"
+        "    }\n"
+        "    return ptr;\n"
+        "}\n\n",
+        deps_arr_maybe_grow
     },
     {
         "bounds_check",
@@ -177,7 +257,7 @@ static const PreludeChunk PRELUDE_CHUNKS[] = {
         "        fprintf(stderr, \"Runtime Error: array indexing null pointer\\n\");\n"
         "        exit(1);\n"
         "    }\n"
-        "    int len = __cco_arr_len(ptr);\n"
+        "    int len = __cco_arr_len_raw(ptr);\n"
         "    if (idx < 0 || idx >= len) {\n"
         "        fprintf(stderr, \"Runtime Error: array index %d out of bounds (length %d)\\n\", idx, len);\n"
         "        exit(1);\n"

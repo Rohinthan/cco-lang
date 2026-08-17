@@ -1,0 +1,13 @@
+fn main() -> void {
+    let nums: int[] = list_new(int);
+    nums = push(nums, 100);
+    nums = push(nums, 200);
+    nums = push(nums, 300);
+    print(len(nums));
+    let last: int = pop(nums);
+    print(last);
+    print(len(nums));
+    let second: int = pop(nums);
+    print(second);
+    print(len(nums));
+}

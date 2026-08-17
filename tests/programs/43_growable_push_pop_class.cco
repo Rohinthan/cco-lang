@@ -1,0 +1,19 @@
+class Point {
+    x: int;
+    y: int;
+    fn print_pt(self) -> void {
+        print(self.x);
+        print(self.y);
+    }
+}
+
+fn main() -> void {
+    let pts: Point[] = list_new(Point);
+    pts = push(pts, Point { x: 10, y: 20 });
+    pts = push(pts, Point { x: 30, y: 40 });
+    print(len(pts));
+    let last: Point = pop(pts);
+    last.print_pt();
+    print(len(pts));
+    pts[0].print_pt();
+}

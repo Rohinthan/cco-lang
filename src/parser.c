@@ -142,6 +142,7 @@ static AstNode *parse_primary(Parser *p) {
     }
 
     if (match(p, TOKEN_ALLOC)) {
+        Token tok = previous(p);
         consume(p, TOKEN_LPAREN, "Expected '(' after 'alloc'");
         char *alloc_cls = NULL;
         Type elem_type = parse_type_with_class(p, &alloc_cls, NULL, NULL);
@@ -153,6 +154,22 @@ static AstNode *parse_primary(Parser *p) {
         node->as.alloc.elem_type = elem_type;
         node->as.alloc.class_name = alloc_cls;
         node->as.alloc.count_expr = count_expr;
+        node->as.alloc.is_list = false;
+        return node;
+    }
+
+    if (match(p, TOKEN_LIST_NEW)) {
+        Token tok = previous(p);
+        consume(p, TOKEN_LPAREN, "Expected '(' after 'list_new'");
+        char *alloc_cls = NULL;
+        Type elem_type = parse_type_with_class(p, &alloc_cls, NULL, NULL);
+        consume(p, TOKEN_RPAREN, "Expected ')' after list_new type");
+
+        AstNode *node = arena_alloc_node(p->arena, NODE_ALLOC, tok.line, tok.col);
+        node->as.alloc.elem_type = elem_type;
+        node->as.alloc.class_name = alloc_cls;
+        node->as.alloc.count_expr = NULL;
+        node->as.alloc.is_list = true;
         return node;
     }
 

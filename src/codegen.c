@@ -212,6 +212,12 @@ static const char *get_expr_elem_class_name(CodegenCtx *ctx, AstNode *expr) {
             }
         }
     }
+    if (expr->type == NODE_CALL && expr->as.call.arg_count > 0) {
+        const char *name = expr->as.call.callee;
+        if (strcmp(name, "pop") == 0 || strcmp(name, "push") == 0) {
+            return get_expr_elem_class_name(ctx, expr->as.call.args[0]);
+        }
+    }
     return NULL;
 }
 
@@ -228,6 +234,12 @@ static Type infer_expr_type(AstNode *program, AstNode *fn, AstNode *expr) {
     }
     if (expr->type == NODE_CALL) {
         const char *name = expr->as.call.callee;
+        if (strcmp(name, "pop") == 0 && expr->as.call.arg_count > 0) {
+            return infer_expr_type(program, fn, expr->as.call.args[0]);
+        }
+        if (strcmp(name, "push") == 0 && expr->as.call.arg_count > 0) {
+            return infer_expr_type(program, fn, expr->as.call.args[0]);
+        }
         if (strcmp(name, "len") == 0 || strcmp(name, "abs_int") == 0 || strcmp(name, "min_int") == 0 || strcmp(name, "max_int") == 0) return TY_INT;
         if (strcmp(name, "sqrt") == 0 || strcmp(name, "pow") == 0 || strcmp(name, "abs_float") == 0 || strcmp(name, "floor") == 0 || strcmp(name, "ceil") == 0 || strcmp(name, "min_float") == 0 || strcmp(name, "max_float") == 0) return TY_FLOAT;
         if (strcmp(name, "concat") == 0 || strcmp(name, "substring") == 0 || strcmp(name, "read_file") == 0) return TY_STRING;
@@ -317,6 +329,65 @@ static Type infer_expr_type(AstNode *program, AstNode *fn, AstNode *expr) {
     return TY_INT;
 }
 
+static bool infer_expr_is_array(AstNode *program, AstNode *fn, AstNode *expr) {
+    if (!expr) return false;
+    if (expr->type == NODE_ALLOC) return true;
+
+    if (expr->type == NODE_IDENT && fn) {
+        const char *var_name = expr->as.ident.name;
+        if (fn->type == NODE_FUNCTION) {
+            for (int p = 0; p < fn->as.function.param_count; p++) {
+                if (strcmp(fn->as.function.param_names[p], var_name) == 0) {
+                    return fn->as.function.param_is_array ? fn->as.function.param_is_array[p] : false;
+                }
+            }
+        } else if (fn->type == NODE_METHOD) {
+            for (int p = 0; p < fn->as.method.param_count; p++) {
+                if (strcmp(fn->as.method.param_names[p], var_name) == 0) {
+                    return fn->as.method.param_is_array ? fn->as.method.param_is_array[p] : false;
+                }
+            }
+        }
+        AstNode *body = (fn->type == NODE_FUNCTION) ? fn->as.function.body : fn->as.method.body;
+        if (body && body->type == NODE_BLOCK) {
+            for (int i = 0; i < body->as.block.count; i++) {
+                AstNode *stmt = body->as.block.stmts[i];
+                if (stmt->type == NODE_LET && strcmp(stmt->as.let.name, var_name) == 0) {
+                    return stmt->as.let.is_array;
+                }
+            }
+        }
+    }
+    if (expr->type == NODE_CALL && program && program->type == NODE_PROGRAM) {
+        const char *name = expr->as.call.callee;
+        if (strcmp(name, "push") == 0) return true;
+        for (int f = 0; f < program->as.program.count; f++) {
+            AstNode *target_fn = program->as.program.functions[f];
+            if (strcmp(target_fn->as.function.name, name) == 0) {
+                return target_fn->as.function.return_is_array;
+            }
+        }
+    }
+    if (expr->type == NODE_METHOD_CALL && program && program->type == NODE_PROGRAM) {
+        const char *mname = expr->as.method_call.method_name;
+        const char *cname = expr->as.method_call.target_class_name;
+        if (cname) {
+            for (int c = 0; c < program->as.program.class_count; c++) {
+                AstNode *cls = program->as.program.classes[c];
+                if (strcmp(cls->as.class_decl.name, cname) == 0) {
+                    for (int m = 0; m < cls->as.class_decl.method_count; m++) {
+                        AstNode *mn = cls->as.class_decl.methods[m];
+                        if (strcmp(mn->as.method.name, mname) == 0) {
+                            return mn->as.method.return_is_array;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return false;
+}
+
 static void gen_stmt(CodegenCtx *ctx, AstNode *stmt);
 static void gen_block(CodegenCtx *ctx, AstNode *block_node);
 
@@ -324,7 +395,11 @@ static void emit_frees(CodegenCtx *ctx, AstNode *node) {
     if (!node || node->frees_count == 0) return;
     for (int i = 0; i < node->frees_count; i++) {
         emit_indent(ctx);
-        sb_appendf(&ctx->sb, "free(%s);\n", node->frees_to_emit[i]);
+        if (node->frees_to_emit[i].is_array) {
+            sb_appendf(&ctx->sb, "__cco_free_arr(%s);\n", node->frees_to_emit[i].var_name);
+        } else {
+            sb_appendf(&ctx->sb, "free(%s);\n", node->frees_to_emit[i].var_name);
+        }
     }
 }
 
@@ -395,14 +470,24 @@ static void gen_expr(CodegenCtx *ctx, AstNode *expr) {
             break;
 
         case NODE_ALLOC:
-            if (expr->as.alloc.elem_type == TY_CLASS) {
-                sb_appendf(&ctx->sb, "(%s **)__cco_alloc_arr(sizeof(%s *), ", expr->as.alloc.class_name, expr->as.alloc.class_name);
-                gen_expr(ctx, expr->as.alloc.count_expr);
-                sb_append(&ctx->sb, ")");
+            if (expr->as.alloc.is_list) {
+                if (expr->as.alloc.elem_type == TY_CLASS && !is_struct_name(ctx, expr->as.alloc.class_name)) {
+                    sb_appendf(&ctx->sb, "(%s **)__cco_list_new(sizeof(%s *))", expr->as.alloc.class_name, expr->as.alloc.class_name);
+                } else {
+                    const char *elem_str = c_type_str_full(ctx, expr->as.alloc.elem_type, expr->as.alloc.class_name, false, false);
+                    sb_appendf(&ctx->sb, "(%s *)__cco_list_new(sizeof(%s))", elem_str, elem_str);
+                }
             } else {
-                sb_appendf(&ctx->sb, "(%s *)malloc((", c_type_str_full(ctx, expr->as.alloc.elem_type, expr->as.alloc.class_name, false, false));
-                gen_expr(ctx, expr->as.alloc.count_expr);
-                sb_appendf(&ctx->sb, ") * sizeof(%s))", c_type_str_full(ctx, expr->as.alloc.elem_type, expr->as.alloc.class_name, false, false));
+                if (expr->as.alloc.elem_type == TY_CLASS && !is_struct_name(ctx, expr->as.alloc.class_name)) {
+                    sb_appendf(&ctx->sb, "(%s **)__cco_alloc_arr(sizeof(%s *), ", expr->as.alloc.class_name, expr->as.alloc.class_name);
+                    gen_expr(ctx, expr->as.alloc.count_expr);
+                    sb_append(&ctx->sb, ")");
+                } else {
+                    const char *elem_str = c_type_str_full(ctx, expr->as.alloc.elem_type, expr->as.alloc.class_name, false, false);
+                    sb_appendf(&ctx->sb, "(%s *)__cco_alloc_arr(sizeof(%s), ", elem_str, elem_str);
+                    gen_expr(ctx, expr->as.alloc.count_expr);
+                    sb_append(&ctx->sb, ")");
+                }
             }
             break;
 
@@ -447,10 +532,11 @@ static void gen_expr(CodegenCtx *ctx, AstNode *expr) {
         case NODE_MEMBER:
             gen_expr(ctx, expr->as.member.object);
             if (is_expr_pointer(ctx, expr->as.member.object)) {
-                sb_appendf(&ctx->sb, "->%s", expr->as.member.member_name);
+                sb_append(&ctx->sb, "->");
             } else {
-                sb_appendf(&ctx->sb, ".%s", expr->as.member.member_name);
+                sb_append(&ctx->sb, ".");
             }
+            sb_append(&ctx->sb, expr->as.member.member_name);
             break;
 
         case NODE_METHOD_CALL:
@@ -491,9 +577,56 @@ static void gen_expr(CodegenCtx *ctx, AstNode *expr) {
         case NODE_CALL: {
             const char *callee = expr->as.call.callee;
             if (strcmp(callee, "len") == 0) {
-                sb_append(&ctx->sb, "((int)strlen(");
-                gen_expr(ctx, expr->as.call.args[0]);
-                sb_append(&ctx->sb, "))");
+                AstNode *arg = expr->as.call.args[0];
+                Type arg_t = infer_expr_type(ctx->program, ctx->current_function, arg);
+                bool is_arr = infer_expr_is_array(ctx->program, ctx->current_function, arg);
+                if (is_arr || arg_t != TY_STRING) {
+                    sb_append(&ctx->sb, "((int)__cco_arr_len_raw(");
+                    gen_expr(ctx, arg);
+                    sb_append(&ctx->sb, "))");
+                } else {
+                    sb_append(&ctx->sb, "((int)strlen(");
+                    gen_expr(ctx, arg);
+                    sb_append(&ctx->sb, "))");
+                }
+            } else if (strcmp(callee, "push") == 0) {
+                AstNode *arr_arg = expr->as.call.args[0];
+                AstNode *val_arg = expr->as.call.args[1];
+                Type elem_type = infer_expr_type(ctx->program, ctx->current_function, arr_arg);
+                const char *elem_cls = get_expr_elem_class_name(ctx, arr_arg);
+                const char *elem_c_type = c_type_str_full(ctx, elem_type, elem_cls, false, false);
+                const char *arr_ptr_type = c_type_str_decl(ctx, elem_type, elem_cls, true, false);
+
+                sb_append(&ctx->sb, "(");
+                gen_expr(ctx, arr_arg);
+                sb_appendf(&ctx->sb, " = (%s)__cco_arr_maybe_grow(", arr_ptr_type);
+                gen_expr(ctx, arr_arg);
+                sb_appendf(&ctx->sb, ", sizeof(%s)), (", elem_c_type);
+
+                sb_appendf(&ctx->sb, "(%s)", arr_ptr_type);
+                gen_expr(ctx, arr_arg);
+                sb_append(&ctx->sb, ")[__cco_arr_len_raw(");
+                gen_expr(ctx, arr_arg);
+                sb_append(&ctx->sb, ")] = ");
+                gen_expr(ctx, val_arg);
+                sb_append(&ctx->sb, ", __cco_arr_incr_len(");
+                gen_expr(ctx, arr_arg);
+                sb_append(&ctx->sb, "), ");
+                gen_expr(ctx, arr_arg);
+                sb_append(&ctx->sb, ")");
+            } else if (strcmp(callee, "pop") == 0) {
+                AstNode *arr_arg = expr->as.call.args[0];
+                Type elem_type = infer_expr_type(ctx->program, ctx->current_function, arr_arg);
+                const char *elem_cls = get_expr_elem_class_name(ctx, arr_arg);
+                const char *arr_ptr_type = c_type_str_decl(ctx, elem_type, elem_cls, true, false);
+
+                sb_append(&ctx->sb, "(__cco_arr_decr_len(");
+                gen_expr(ctx, arr_arg);
+                sb_appendf(&ctx->sb, "), ((%s)", arr_ptr_type);
+                gen_expr(ctx, arr_arg);
+                sb_append(&ctx->sb, ")[__cco_arr_len_raw(");
+                gen_expr(ctx, arr_arg);
+                sb_append(&ctx->sb, ")])");
             } else if (strcmp(callee, "concat") == 0) {
                 sb_append(&ctx->sb, "__cco_concat(");
                 gen_expr(ctx, expr->as.call.args[0]);
@@ -771,9 +904,25 @@ static void gen_stmt(CodegenCtx *ctx, AstNode *stmt) {
             if (stmt->as.return_stmt.value) {
                 if (stmt->frees_count > 0 || stmt->releases_count > 0) {
                     emit_indent(ctx);
-                    sb_append(&ctx->sb, "__typeof__(");
-                    gen_expr(ctx, stmt->as.return_stmt.value);
-                    sb_append(&ctx->sb, ") __cco_ret_val = ");
+                    Type ret_type = TY_INT;
+                    const char *ret_class = NULL;
+                    bool ret_is_array = false;
+                    bool ret_heap = false;
+                    if (ctx->current_function) {
+                        if (ctx->current_function->type == NODE_FUNCTION) {
+                            ret_type = ctx->current_function->as.function.return_type;
+                            ret_class = ctx->current_function->as.function.return_class_name;
+                            ret_is_array = ctx->current_function->as.function.return_is_array;
+                            ret_heap = ctx->current_function->as.function.returns_heap_pointer;
+                        } else if (ctx->current_function->type == NODE_METHOD) {
+                            ret_type = ctx->current_function->as.method.return_type;
+                            ret_class = ctx->current_function->as.method.return_class_name;
+                            ret_is_array = ctx->current_function->as.method.return_is_array;
+                            ret_heap = ctx->current_function->as.method.returns_heap_pointer;
+                        }
+                    }
+                    const char *ret_type_str = c_type_str_decl(ctx, ret_type, ret_class, ret_is_array, ret_heap);
+                    sb_appendf(&ctx->sb, "%s __cco_ret_val = ", ret_type_str);
                     gen_expr(ctx, stmt->as.return_stmt.value);
                     sb_append(&ctx->sb, ";\n");
 
@@ -1026,6 +1175,9 @@ static void scan_node_usage(AstNode *node, bool *used_chunks) {
     if (!node) return;
 
     check_releases_usage(node, used_chunks);
+    if (node->frees_count > 0) {
+        mark_chunk_used(used_chunks, "free_arr");
+    }
 
     switch (node->type) {
         case NODE_PROGRAM:

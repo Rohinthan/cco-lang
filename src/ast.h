@@ -58,6 +58,11 @@ typedef enum {
 
 typedef struct AstNode AstNode;
 
+typedef struct {
+    char *var_name;
+    bool is_array;
+} RawFree;
+
 struct AstNode {
     NodeType type;
     int line;
@@ -67,7 +72,7 @@ struct AstNode {
     // Scope Analysis annotations (alloc based)
     bool is_heap_owner;           // True if let statement binds an alloc() call
     bool is_transferred;          // True if ownership moved to caller/outer variable
-    char **frees_to_emit;         // Variable names to emit free() for before exit/jump
+    RawFree *frees_to_emit;       // Variable names and array flags to emit free() for before exit/jump
     int frees_count;
     bool free_old_on_reassign;    // True if assign stmt overwrites an existing owned pointer
 
@@ -295,6 +300,7 @@ struct AstNode {
             Type elem_type;
             char *class_name;
             AstNode *count_expr;
+            bool is_list;
         } alloc;
     } as;
 };

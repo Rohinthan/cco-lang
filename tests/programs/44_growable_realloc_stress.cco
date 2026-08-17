@@ -1,0 +1,12 @@
+fn main() -> void {
+    let nums: int[] = list_new(int);
+    let i: int = 0;
+    while (i < 25) {
+        nums = push(nums, i * 2);
+        i = i + 1;
+    }
+    print(len(nums));
+    print(nums[0]);
+    print(nums[12]);
+    print(nums[24]);
+}

@@ -42,8 +42,8 @@ void test_early_return_frees() {
     assert(ret_stmt->frees_count == 2); // nums and temp must be freed before early return!
     bool found_nums = false, found_temp = false;
     for (int i = 0; i < ret_stmt->frees_count; i++) {
-        if (strcmp(ret_stmt->frees_to_emit[i], "nums") == 0) found_nums = true;
-        if (strcmp(ret_stmt->frees_to_emit[i], "temp") == 0) found_temp = true;
+        if (strcmp(ret_stmt->frees_to_emit[i].var_name, "nums") == 0) found_nums = true;
+        if (strcmp(ret_stmt->frees_to_emit[i].var_name, "temp") == 0) found_temp = true;
     }
     assert(found_nums && found_temp);
 
@@ -74,7 +74,7 @@ void test_ownership_transfer() {
     assert(ret_stmt->type == NODE_RETURN);
     // arr is returned so ownership is transferred out. unused must be freed!
     assert(ret_stmt->frees_count == 1);
-    assert(strcmp(ret_stmt->frees_to_emit[0], "unused") == 0);
+    assert(strcmp(ret_stmt->frees_to_emit[0].var_name, "unused") == 0);
 
     free_ast_arena(arena);
     free_tokens(&tokens);

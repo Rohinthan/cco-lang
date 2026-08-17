@@ -1,8 +1,29 @@
-# Cco (C--) Compiler: A C-like Language with Compile-Time Single Ownership, Selective Prelude Emission, Lightweight Structs, Minimal Module/Import System & Standard Library (v8.0)
+# Cco (C--) Compiler: A C-like Language with Compile-Time Single Ownership, Growable Arrays, Selective Prelude Emission, Lightweight Structs & Standard Library (v9.0)
 
-**Cco (C--)** is a lightweight, systems programming language with explicit C-like syntax, **scope-exit auto-free for raw allocations**, **compile-time single ownership with move semantics**, **Selective Prelude Emission** (only emitting used stdlib helpers for clean generated C), **Lightweight Structs (Value Types)** (`struct Point2D { x: int; y: int; }`), **Arrays of Objects with for-each iteration** (`alloc(Point, n)`, `for p in pts`), **Minimal Multi-file Module/Import System** (`import "file.cco";`), and a **built-in Standard Library** (Strings, Math, File I/O). It transpiles Cco source code (`.cco`) into portable, standard C11 source code (`.c`), which is compiled to native machine binaries using `gcc` or `clang`.
+**Cco (C--)** is a lightweight, systems programming language with explicit C-like syntax, **scope-exit auto-free for raw allocations**, **compile-time single ownership with move semantics**, **Growable Arrays (`list_new`, `push`, `pop`, `len`)**, **Selective Prelude Emission** (only emitting used stdlib helpers for clean generated C), **Lightweight Structs (Value Types)** (`struct Point2D { x: int; y: int; }`), **Arrays of Objects with for-each iteration** (`alloc(Point, n)`, `for p in pts`), **Minimal Multi-file Module/Import System** (`import "file.cco";`), and a **built-in Standard Library** (Strings, Math, File I/O). It transpiles Cco source code (`.cco`) into portable, standard C11 source code (`.c`), which is compiled to native machine binaries using `gcc` or `clang`.
 
 > **Write it like Python's class/struct syntax reads. Compile it and it runs like C with zero runtime reference counting overhead, zero GC pauses, clean inspectable generated C via selective prelude emission, stack-allocated value structs, Rust-like compile-time ownership safety across multi-file programs, and GCC/Rust-style diagnostic error messages.**
+
+---
+
+## 🚀 Growable Arrays (v9.0)
+
+Cco v9.0 introduces unified growable array semantics (`list_new`, `push`, `pop`, `len`):
+
+- **Single Unified Array Representation**: Both `alloc(Type, n)` and `list_new(Type)` share the exact same underlying header representation carrying capacity and length (`__cco_arr_header { capacity, length }`).
+- **Dynamic Array Construction**: `let arr: int[] = list_new(int);` initializes an empty growable array with capacity 4 and length 0.
+- **`push(arr, value)` Reassignment**: `arr = push(arr, value)` grows capacity via `realloc` when length equals capacity, moves owned class objects or copies primitive/struct values into the new slot, and returns the updated array pointer.
+- **`pop(arr)` End-of-Array Removal**: `let p: Point = pop(pts)` removes and returns the last element, decrementing length. For class objects, `pop()` transfers sole ownership of the popped object to the caller (the one sanctioned exception to array element move-out rules, safely maintaining continuous element occupancy below length).
+- **Overloaded Builtin `len()`**: `len(arr)` returns array length at runtime, unifying array length queries with string `len(s)`.
+
+---
+
+## 🗺️ Self-Hosting Roadmap
+
+1. **v9.0**: Growable Arrays (`list_new`, `push`, `pop`, `len`) — *Completed*
+2. **v10.0**: Hash Maps (`map_new`, `map_put`, `map_get`, `map_has`, `map_remove`) — *Next*
+3. **v11.0**: Tagged Unions / Pattern Matching — *Upcoming*
+4. **v12.0**: Self-Hosted Lexer & Parser Proof-of-Concept — *Goal*
 
 ---
 
@@ -216,10 +237,27 @@ make test
 | `38_prelude_minimal` | Program using zero stdlib functions; asserts prelude section contains 0 `__cco_` helpers | **PASS** | 0 Bytes Leaked |
 | `39_prelude_partial` | Program using `concat()` only; asserts generated C contains `__cco_concat` but no unused helpers | **PASS** | 0 Bytes Leaked |
 | `40_prelude_transitive` | Array indexing; asserts transitive emission of `__cco_bounds_check` AND `__cco_arr_len` | **PASS** | 0 Bytes Leaked |
+| `41_growable_push_primitive` | `list_new(int)` creation, repeated `push()`, `len()` dynamic count | **PASS** | 0 Bytes Leaked |
+| `42_growable_pop_primitive` | `pop()` elements from primitive array, length decrement, returned value verification | **PASS** | 0 Bytes Leaked |
+| `43_growable_push_pop_class` | Growable object array, `push()` ownership transfer, `pop()` sole ownership move out | **PASS** | 0 Bytes Leaked |
+| `44_growable_realloc_stress` | 25 element pushes triggering 3+ buffer reallocations with 0 memory leaks | **PASS** | 0 Bytes Leaked |
+| `45_pop_empty_RUNTIME_ERROR` | Runtime error when `pop()` called on empty array (`capacity == 0` or `length == 0`) | **PASS** | Runtime Error (As Expected) |
+
+---
+
+## 🌐 Strict C11 Portability & Multi-Compiler Conformance
+
+Cco-generated C output is strictly conformant **standard C11** code (`-std=c11 -pedantic-errors`).
+
+- **No Compiler Extensions in Generated Output**: Non-standard GNU extensions (such as `__typeof__`) have been eliminated from generated output in favor of explicit, statically-known type emission.
+- **Multi-Compiler Conformance**: Generated C output compiles cleanly under `gcc`, `clang`, `tcc`, and MSVC without requiring GNU-specific or compiler-specific extensions.
+- **Strict Pedantic Compliance**: All build and test pipelines compile generated output with `-Wall -Wextra -Werror -pedantic-errors -std=c11`.
+- **Compiler Binary Platform Note**: While Cco-generated C code is strictly portable standard C11, the Cco compiler executable itself currently relies on POSIX APIs (`realpath()`) for canonical module resolution and requires a POSIX environment (Linux/macOS/WSL) to run.
 
 ---
 
 ## 📄 License
 MIT License. Developed for the Cco Source-to-Source Transpiler Sprint.
+
 
 
