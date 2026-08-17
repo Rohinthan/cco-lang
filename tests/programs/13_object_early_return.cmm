@@ -1,0 +1,18 @@
+class Box {
+    val: int;
+}
+
+fn find(target: int, n: int) -> int {
+    for (let i: int = 0; i < n; i = i + 1) {
+        let b: Box = Box { val: i * 2 };
+        if (b.val == target) {
+            return b.val;
+        }
+    }
+    return -1;
+}
+
+fn main() -> int {
+    print(find(4, 10));
+    return 0;
+}
