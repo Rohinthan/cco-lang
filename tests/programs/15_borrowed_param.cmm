@@ -1,0 +1,19 @@
+class Point {
+    x: int;
+    y: int;
+
+    fn sum(self) -> int {
+        return self.x + self.y;
+    }
+}
+
+fn describe(p: &Point) -> void {
+    print(p.sum());
+}
+
+fn main() -> int {
+    let a: Point = Point { x: 10, y: 20 };
+    describe(a);
+    print(a.sum());
+    return 0;
+}

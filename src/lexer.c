@@ -239,6 +239,7 @@ TokenArray lex_source(const char *source) {
             case '%': single_type = TOKEN_PERCENT; break;
             case '!': single_type = TOKEN_NOT; break;
             case '.': single_type = TOKEN_DOT; break;
+            case '&': single_type = TOKEN_AMP; break;
             default: break;
         }
 
@@ -315,6 +316,7 @@ const char *token_type_to_string(TokenType type) {
         case TOKEN_AND: return "&&";
         case TOKEN_OR: return "||";
         case TOKEN_DOT: return ".";
+        case TOKEN_AMP: return "&";
         case TOKEN_EOF: return "EOF";
         case TOKEN_ERROR: return "ERROR";
         default: return "UNKNOWN";

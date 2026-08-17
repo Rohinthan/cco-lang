@@ -19,6 +19,29 @@ for prog in tests/programs/*.cmm; do
 
     echo -n "Testing ${base}... "
 
+    if [[ "$base" == *"_ERROR"* ]]; then
+        err_out="build/${base}_err.txt"
+        exp_err="tests/expected_output/${base}_stderr.txt"
+        set +e
+        ./cmm "$prog" -o "$c_out" 2> "$err_out"
+        code=$?
+        set -e
+        if [ "$code" -eq 0 ]; then
+            echo "FAILED (Expected compilation failure with exit code 1, got 0)"
+            FAILED=$((FAILED + 1))
+            continue
+        fi
+        if ! diff -u "$err_out" "$exp_err" > /dev/null; then
+            echo "FAILED (Stderr error message mismatch)"
+            diff -u "$err_out" "$exp_err"
+            FAILED=$((FAILED + 1))
+            continue
+        fi
+        echo "PASSED (Compilation Failed as Expected)"
+        PASSED=$((PASSED + 1))
+        continue
+    fi
+
     # 1. Transpile CMM -> C
     ./cmm "$prog" -o "$c_out"
 

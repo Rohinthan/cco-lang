@@ -1,0 +1,1 @@
+Scope Analysis Error at line 7: cannot return borrowed value 'p'

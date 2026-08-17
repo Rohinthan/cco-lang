@@ -1,0 +1,1 @@
+Scope Analysis Error at line 9: use of moved value 'a' (moved at line 8)

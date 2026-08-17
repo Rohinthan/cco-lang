@@ -4,9 +4,8 @@ class Point {
 }
 
 fn main() -> int {
-    let a: Point = Point { x: 5, y: 10 };
+    let a: Point = Point { x: 0, y: 0 };
     let b: Point = a;
-    print(b.x);
-    print(b.y);
+    print(a.x);
     return 0;
 }

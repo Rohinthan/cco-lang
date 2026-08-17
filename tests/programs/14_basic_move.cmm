@@ -1,0 +1,15 @@
+class Point {
+    x: int;
+    y: int;
+
+    fn sum(self) -> int {
+        return self.x + self.y;
+    }
+}
+
+fn main() -> int {
+    let a: Point = Point { x: 3, y: 4 };
+    let b: Point = a;
+    print(b.sum());
+    return 0;
+}

@@ -1,0 +1,15 @@
+class Point {
+    x: int;
+    y: int;
+}
+
+fn consume(p: Point) -> void {
+    print(p.x);
+}
+
+fn main() -> int {
+    let a: Point = Point { x: 1, y: 2 };
+    consume(a);
+    consume(a);
+    return 0;
+}

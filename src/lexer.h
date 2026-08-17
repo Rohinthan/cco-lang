@@ -58,6 +58,7 @@ typedef enum {
     TOKEN_AND,        // &&
     TOKEN_OR,         // ||
     TOKEN_DOT,        // .
+    TOKEN_AMP,        // &
 
     // Special
     TOKEN_EOF,

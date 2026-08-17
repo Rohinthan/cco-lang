@@ -1,0 +1,1 @@
+Scope Analysis Error at line 11: 'a' may have been moved (conditionally at line 9)

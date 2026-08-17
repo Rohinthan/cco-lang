@@ -107,11 +107,32 @@ void test_parse_class() {
     printf("[PASS] test_parse_class\n");
 }
 
+void test_parse_borrowed_param() {
+    const char *src = "fn f(p: &Point, q: Point) -> void {}";
+    TokenArray tokens = lex_source(src);
+    AstArena *arena = create_ast_arena();
+    Parser parser = create_parser(tokens, arena);
+
+    AstNode *prog = parse_program(&parser);
+    assert(prog != NULL);
+    assert(prog->as.program.count == 1);
+
+    AstNode *fn = prog->as.program.functions[0];
+    assert(fn->as.function.param_count == 2);
+    assert(fn->as.function.param_is_borrowed[0] == true);
+    assert(fn->as.function.param_is_borrowed[1] == false);
+
+    free_ast_arena(arena);
+    free_tokens(&tokens);
+    printf("[PASS] test_parse_borrowed_param\n");
+}
+
 int main() {
     printf("Running Parser Unit Tests...\n");
     test_parse_simple_func();
     test_parse_alloc_and_for();
     test_parse_class();
+    test_parse_borrowed_param();
     printf("All Parser tests passed!\n");
     return 0;
 }

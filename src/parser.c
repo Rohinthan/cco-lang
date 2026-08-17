@@ -63,8 +63,12 @@ Parser create_parser(TokenArray tokens, AstArena *arena) {
 static AstNode *parse_expr(Parser *p);
 static AstNode *parse_block(Parser *p);
 static AstNode *parse_statement(Parser *p);
-static Type parse_type_with_class(Parser *p, char **out_class_name) {
+static Type parse_type_with_class(Parser *p, char **out_class_name, bool *out_is_borrowed) {
     if (out_class_name) *out_class_name = NULL;
+    if (out_is_borrowed) *out_is_borrowed = false;
+
+    bool is_borrowed = match(p, TOKEN_AMP);
+
     if (match(p, TOKEN_TYPE_INT)) return TY_INT;
     if (match(p, TOKEN_TYPE_FLOAT)) return TY_FLOAT;
     if (match(p, TOKEN_TYPE_CHAR)) return TY_CHAR;
@@ -75,6 +79,9 @@ static Type parse_type_with_class(Parser *p, char **out_class_name) {
         Token tok = previous(p);
         if (out_class_name) {
             *out_class_name = arena_strdup(p->arena, tok.lexeme);
+        }
+        if (out_is_borrowed) {
+            *out_is_borrowed = is_borrowed;
         }
         return TY_CLASS;
     }
@@ -123,7 +130,7 @@ static AstNode *parse_primary(Parser *p) {
     if (match(p, TOKEN_ALLOC)) {
         consume(p, TOKEN_LPAREN, "Expected '(' after 'alloc'");
         char *alloc_cls = NULL;
-        Type elem_type = parse_type_with_class(p, &alloc_cls);
+        Type elem_type = parse_type_with_class(p, &alloc_cls, NULL);
         consume(p, TOKEN_COMMA, "Expected ',' after alloc type");
         AstNode *count_expr = parse_expr(p);
         consume(p, TOKEN_RPAREN, "Expected ')' after alloc count expression");
@@ -399,7 +406,7 @@ static AstNode *parse_let_stmt(Parser *p) {
     Type var_type = TY_INT;
     char *class_name = NULL;
     if (match(p, TOKEN_COLON)) {
-        var_type = parse_type_with_class(p, &class_name);
+        var_type = parse_type_with_class(p, &class_name, NULL);
     }
 
     consume(p, TOKEN_ASSIGN, "Expected '=' in variable declaration");
@@ -666,6 +673,7 @@ static AstNode *parse_class(Parser *p) {
             char **param_names = NULL;
             Type *param_types = NULL;
             char **param_class_names = NULL;
+            bool *param_is_borrowed = NULL;
             int param_count = 0;
             int param_cap = 0;
 
@@ -678,10 +686,12 @@ static AstNode *parse_class(Parser *p) {
                     param_names = (char **)arena_alloc_array(p->arena, param_cap, sizeof(char *));
                     param_types = (Type *)arena_alloc_array(p->arena, param_cap, sizeof(Type));
                     param_class_names = (char **)arena_alloc_array(p->arena, param_cap, sizeof(char *));
+                    param_is_borrowed = (bool *)arena_alloc_array(p->arena, param_cap, sizeof(bool));
 
                     param_names[0] = arena_strdup(p->arena, "self");
                     param_types[0] = TY_CLASS;
                     param_class_names[0] = arena_strdup(p->arena, name_tok.lexeme);
+                    param_is_borrowed[0] = true; // self is borrowed by default
                     param_count = 1;
 
                     if (match(p, TOKEN_COMMA)) {
@@ -689,23 +699,28 @@ static AstNode *parse_class(Parser *p) {
                             Token p_name = consume(p, TOKEN_IDENT, "Expected parameter name");
                             consume(p, TOKEN_COLON, "Expected ':' after parameter name");
                             char *p_cls = NULL;
-                            Type p_type = parse_type_with_class(p, &p_cls);
+                            bool p_borrowed = false;
+                            Type p_type = parse_type_with_class(p, &p_cls, &p_borrowed);
 
                             if (param_count >= param_cap) {
                                 param_cap *= 2;
                                 char **n_names = (char **)arena_alloc_array(p->arena, param_cap, sizeof(char *));
                                 Type *n_types = (Type *)arena_alloc_array(p->arena, param_cap, sizeof(Type));
                                 char **n_cls = (char **)arena_alloc_array(p->arena, param_cap, sizeof(char *));
+                                bool *n_bor = (bool *)arena_alloc_array(p->arena, param_cap, sizeof(bool));
                                 memcpy(n_names, param_names, param_count * sizeof(char *));
                                 memcpy(n_types, param_types, param_count * sizeof(Type));
                                 memcpy(n_cls, param_class_names, param_count * sizeof(char *));
+                                memcpy(n_bor, param_is_borrowed, param_count * sizeof(bool));
                                 param_names = n_names;
                                 param_types = n_types;
                                 param_class_names = n_cls;
+                                param_is_borrowed = n_bor;
                             }
                             param_names[param_count] = arena_strdup(p->arena, p_name.lexeme);
                             param_types[param_count] = p_type;
                             param_class_names[param_count] = p_cls;
+                            param_is_borrowed[param_count] = p_borrowed;
                             param_count++;
                         } while (match(p, TOKEN_COMMA));
                     }
@@ -714,25 +729,30 @@ static AstNode *parse_class(Parser *p) {
                         Token p_name = consume(p, TOKEN_IDENT, "Expected parameter name");
                         consume(p, TOKEN_COLON, "Expected ':' after parameter name");
                         char *p_cls = NULL;
-                        Type p_type = parse_type_with_class(p, &p_cls);
+                        bool p_borrowed = false;
+                        Type p_type = parse_type_with_class(p, &p_cls, &p_borrowed);
 
                         if (param_count >= param_cap) {
                             param_cap = param_cap == 0 ? 4 : param_cap * 2;
                             char **n_names = (char **)arena_alloc_array(p->arena, param_cap, sizeof(char *));
                             Type *n_types = (Type *)arena_alloc_array(p->arena, param_cap, sizeof(Type));
                             char **n_cls = (char **)arena_alloc_array(p->arena, param_cap, sizeof(char *));
+                            bool *n_bor = (bool *)arena_alloc_array(p->arena, param_cap, sizeof(bool));
                             if (param_names) {
                                 memcpy(n_names, param_names, param_count * sizeof(char *));
                                 memcpy(n_types, param_types, param_count * sizeof(Type));
                                 memcpy(n_cls, param_class_names, param_count * sizeof(char *));
+                                memcpy(n_bor, param_is_borrowed, param_count * sizeof(bool));
                             }
                             param_names = n_names;
                             param_types = n_types;
                             param_class_names = n_cls;
+                            param_is_borrowed = n_bor;
                         }
                         param_names[param_count] = arena_strdup(p->arena, p_name.lexeme);
                         param_types[param_count] = p_type;
                         param_class_names[param_count] = p_cls;
+                        param_is_borrowed[param_count] = p_borrowed;
                         param_count++;
                     } while (match(p, TOKEN_COMMA));
                 }
@@ -741,7 +761,7 @@ static AstNode *parse_class(Parser *p) {
             consume(p, TOKEN_RPAREN, "Expected ')' after method parameters");
             consume(p, TOKEN_ARROW, "Expected '->' after method signature");
             char *ret_cls = NULL;
-            Type ret_type = parse_type_with_class(p, &ret_cls);
+            Type ret_type = parse_type_with_class(p, &ret_cls, NULL);
             AstNode *body = parse_block(p);
 
             AstNode *m_node = arena_alloc_node(p->arena, NODE_METHOD, m_tok.line);
@@ -750,6 +770,7 @@ static AstNode *parse_class(Parser *p) {
             m_node->as.method.param_names = param_names;
             m_node->as.method.param_types = param_types;
             m_node->as.method.param_class_names = param_class_names;
+            m_node->as.method.param_is_borrowed = param_is_borrowed;
             m_node->as.method.param_count = param_count;
             m_node->as.method.return_type = ret_type;
             m_node->as.method.return_class_name = ret_cls;
@@ -767,7 +788,7 @@ static AstNode *parse_class(Parser *p) {
             Token f_name = consume(p, TOKEN_IDENT, "Expected field or method declaration in class");
             consume(p, TOKEN_COLON, "Expected ':' after field name");
             char *f_cls = NULL;
-            Type f_type = parse_type_with_class(p, &f_cls);
+            Type f_type = parse_type_with_class(p, &f_cls, NULL);
             consume(p, TOKEN_SEMICOLON, "Expected ';' after field declaration");
 
             AstNode *f_node = arena_alloc_node(p->arena, NODE_FIELD, f_name.line);
@@ -804,6 +825,7 @@ static AstNode *parse_function(Parser *p) {
     char **param_names = NULL;
     Type *param_types = NULL;
     char **param_class_names = NULL;
+    bool *param_is_borrowed = NULL;
     int param_count = 0;
     int param_cap = 0;
 
@@ -812,25 +834,30 @@ static AstNode *parse_function(Parser *p) {
             Token p_name = consume(p, TOKEN_IDENT, "Expected parameter name");
             consume(p, TOKEN_COLON, "Expected ':' after parameter name");
             char *p_cls = NULL;
-            Type p_type = parse_type_with_class(p, &p_cls);
+            bool p_borrowed = false;
+            Type p_type = parse_type_with_class(p, &p_cls, &p_borrowed);
 
             if (param_count >= param_cap) {
                 param_cap = param_cap == 0 ? 4 : param_cap * 2;
                 char **new_names = (char **)arena_alloc_array(p->arena, param_cap, sizeof(char *));
                 Type *new_types = (Type *)arena_alloc_array(p->arena, param_cap, sizeof(Type));
                 char **new_cls = (char **)arena_alloc_array(p->arena, param_cap, sizeof(char *));
+                bool *new_bor = (bool *)arena_alloc_array(p->arena, param_cap, sizeof(bool));
                 if (param_names) {
                     memcpy(new_names, param_names, param_count * sizeof(char *));
                     memcpy(new_types, param_types, param_count * sizeof(Type));
                     memcpy(new_cls, param_class_names, param_count * sizeof(char *));
+                    memcpy(new_bor, param_is_borrowed, param_count * sizeof(bool));
                 }
                 param_names = new_names;
                 param_types = new_types;
                 param_class_names = new_cls;
+                param_is_borrowed = new_bor;
             }
             param_names[param_count] = arena_strdup(p->arena, p_name.lexeme);
             param_types[param_count] = p_type;
             param_class_names[param_count] = p_cls;
+            param_is_borrowed[param_count] = p_borrowed;
             param_count++;
         } while (match(p, TOKEN_COMMA));
     }
@@ -838,7 +865,7 @@ static AstNode *parse_function(Parser *p) {
     consume(p, TOKEN_RPAREN, "Expected ')' after parameters");
     consume(p, TOKEN_ARROW, "Expected '->' after function signature");
     char *ret_cls = NULL;
-    Type return_type = parse_type_with_class(p, &ret_cls);
+    Type return_type = parse_type_with_class(p, &ret_cls, NULL);
     AstNode *body = parse_block(p);
 
     AstNode *node = arena_alloc_node(p->arena, NODE_FUNCTION, tok.line);
@@ -846,6 +873,7 @@ static AstNode *parse_function(Parser *p) {
     node->as.function.param_names = param_names;
     node->as.function.param_types = param_types;
     node->as.function.param_class_names = param_class_names;
+    node->as.function.param_is_borrowed = param_is_borrowed;
     node->as.function.param_count = param_count;
     node->as.function.return_type = return_type;
     node->as.function.return_class_name = ret_cls;

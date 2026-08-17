@@ -64,9 +64,11 @@ struct AstNode {
     int frees_count;
     bool free_old_on_reassign;    // True if assign stmt overwrites an existing owned pointer
 
-    // Scope Analysis annotations (refcount based)
-    RefRelease *releases_to_emit; // Class vars to emit _release() for
+    // Scope Analysis annotations (ownership based)
+    RefRelease *releases_to_emit; // Class vars to emit _free() for
     int releases_count;
+    bool is_moved_from;           // True if variable was moved out
+    int move_line;                // Line number where move occurred
 
     union {
         struct {
@@ -96,6 +98,7 @@ struct AstNode {
             char **param_names;
             Type *param_types;
             char **param_class_names;
+            bool *param_is_borrowed;
             int param_count;
             Type return_type;
             char *return_class_name;
@@ -108,6 +111,7 @@ struct AstNode {
             char **param_names;
             Type *param_types;
             char **param_class_names;
+            bool *param_is_borrowed;
             int param_count;
             Type return_type;
             char *return_class_name;

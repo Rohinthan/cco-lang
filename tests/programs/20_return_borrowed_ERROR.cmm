@@ -1,0 +1,12 @@
+class Point {
+    x: int;
+    y: int;
+}
+
+fn bad(p: &Point) -> Point {
+    return p;
+}
+
+fn main() -> int {
+    return 0;
+}

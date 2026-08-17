@@ -81,7 +81,7 @@ void test_ownership_transfer() {
     printf("[PASS] test_ownership_transfer\n");
 }
 
-void test_refcount_aliasing() {
+void test_single_ownership_move() {
     const char *src =
         "class Point { x: int; y: int; }\n"
         "fn main() -> void {\n"
@@ -98,17 +98,14 @@ void test_refcount_aliasing() {
 
     AstNode *fn = prog->as.program.functions[0];
     AstNode *body = fn->as.function.body;
-    AstNode *let_b = body->as.block.stmts[1];
 
-    assert(let_b->type == NODE_LET);
-    assert(let_b->as.let.retain_rhs == true);
-
-    // End of block releases both a and b
-    assert(body->releases_count == 2);
+    // End of block frees ONLY b (since a was moved into b)
+    assert(body->releases_count == 1);
+    assert(strcmp(body->releases_to_emit[0].var_name, "b") == 0);
 
     free_ast_arena(arena);
     free_tokens(&tokens);
-    printf("[PASS] test_refcount_aliasing\n");
+    printf("[PASS] test_single_ownership_move\n");
 }
 
 void test_refcount_reassignment() {
@@ -182,7 +179,7 @@ int main() {
     printf("Running Scope Analysis Unit Tests...\n");
     test_early_return_frees();
     test_ownership_transfer();
-    test_refcount_aliasing();
+    test_single_ownership_move();
     test_refcount_reassignment();
     test_refcount_early_return();
     printf("All Scope Analysis tests passed!\n");
