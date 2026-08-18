@@ -1,0 +1,7 @@
+error: match bindings must use the field's own name — expected 'value', found 'v'
+  --> tests/programs/61_enum_field_rename_ERROR.cco:8:32
+    |
+  8 |         NodeKind.Number { value: v } => {
+    |                                ^ field renaming not allowed in v11
+    |
+note: bound local variable names must exactly match the variant's declared field names in v11

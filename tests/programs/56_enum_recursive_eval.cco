@@ -1,0 +1,33 @@
+enum Expr {
+    Num { val: int },
+    Add { left: Expr, right: Expr },
+    Mul { left: Expr, right: Expr },
+}
+
+fn eval(e: &Expr) -> int {
+    match e {
+        Expr.Num { val } => {
+            return val;
+        }
+        Expr.Add { left, right } => {
+            return eval(left) + eval(right);
+        }
+        Expr.Mul { left, right } => {
+            return eval(left) * eval(right);
+        }
+    }
+}
+
+fn main() -> void {
+    // (3 + 4) * 5 = 35
+    let tree: Expr = Expr.Mul {
+        left: Expr.Add {
+            left: Expr.Num { val: 3 },
+            right: Expr.Num { val: 4 },
+        },
+        right: Expr.Num { val: 5 },
+    };
+
+    let result: int = eval(&tree);
+    print(result);
+}

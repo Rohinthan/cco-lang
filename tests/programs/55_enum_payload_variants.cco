@@ -1,0 +1,29 @@
+enum Shape {
+    Circle { radius: int },
+    Rectangle { width: int, height: int },
+    Point,
+}
+
+fn area(s: &Shape) -> int {
+    match s {
+        Shape.Circle { radius } => {
+            return 3 * radius * radius;
+        }
+        Shape.Rectangle { width, height } => {
+            return width * height;
+        }
+        Shape.Point => {
+            return 0;
+        }
+    }
+}
+
+fn main() -> void {
+    let c: Shape = Shape.Circle { radius: 10 };
+    let r: Shape = Shape.Rectangle { width: 4, height: 6 };
+    let p: Shape = Shape.Point;
+
+    print(area(&c));
+    print(area(&r));
+    print(area(&p));
+}

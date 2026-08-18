@@ -1,0 +1,23 @@
+enum Option {
+    Some { value: int },
+    None,
+}
+
+fn unwrap_or(opt: &Option, default_val: int) -> int {
+    match opt {
+        Option.Some { value } => {
+            return value;
+        }
+        Option.Some { value } => {
+            return value;
+        }
+        Option.None => {
+            return default_val;
+        }
+    }
+}
+
+fn main() -> void {
+    let opt: Option = Option.None;
+    print(unwrap_or(&opt, 0));
+}

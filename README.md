@@ -1,34 +1,55 @@
-# Cco (C--) Compiler: A C-like Language with Compile-Time Single Ownership, Hash Maps, Growable Arrays, Selective Prelude Emission, Lightweight Structs & Standard Library (v10.0)
+# Cco (C--) Compiler: A C-like Language with Tagged Unions, Pattern Matching, Hash Maps, Growable Arrays, Selective Prelude Emission, Lightweight Structs & Standard Library (v11.0)
 
-**Cco (C--)** is a lightweight, systems programming language with explicit C-like syntax, **scope-exit auto-free for raw allocations**, **compile-time single ownership with move semantics**, **Hash Maps (`map[K]V`, `map_new`, `put`, `get`, `has`, `remove`, `keys`, `len`)**, **Growable Arrays (`list_new`, `push`, `pop`, `len`)**, **Selective Prelude Emission** (only emitting used stdlib helpers for clean generated C), **Lightweight Structs (Value Types)** (`struct Point2D { x: int; y: int; }`), **Arrays of Objects with for-each iteration** (`alloc(Point, n)`, `for p in pts`), **Minimal Multi-file Module/Import System** (`import "file.cco";`), and a **built-in Standard Library** (Strings, Math, File I/O). It transpiles Cco source code (`.cco`) into portable, standard C11 source code (`.c`), which is compiled to native machine binaries using `gcc` or `clang`.
+**Cco (C--)** is a lightweight, systems programming language with explicit C-like syntax, **scope-exit auto-free for raw allocations**, **compile-time single ownership with move semantics**, **Tagged Unions (`enum`) and Pattern Matching (`match`)**, **Hash Maps (`map[K]V`, `map_new`, `put`, `get`, `has`, `remove`, `keys`, `len`)**, **Growable Arrays (`list_new`, `push`, `pop`, `len`)**, **Selective Prelude Emission** (only emitting used stdlib helpers for clean generated C), **Lightweight Structs (Value Types)** (`struct Point2D { x: int; y: int; }`), **Arrays of Objects with for-each iteration** (`alloc(Point, n)`, `for p in pts`), **Minimal Multi-file Module/Import System** (`import "file.cco";`), and a **built-in Standard Library** (Strings, Math, File I/O). It transpiles Cco source code (`.cco`) into portable, standard C11 source code (`.c`), which is compiled to native machine binaries using `gcc` or `clang`.
 
-> **Write it like Python's class/struct/map syntax reads. Compile it and it runs like C with zero runtime reference counting overhead, zero GC pauses, clean inspectable generated C via selective prelude emission, stack-allocated value structs, Rust-like compile-time ownership safety across multi-file programs, and GCC/Rust-style diagnostic error messages.**
-
----
-
-## 🗺️ Hash Maps (v10.0)
-
-Cco v10.0 introduces native open-addressing hash maps with tombstone deletion (`map[K]V`):
-
-- **Key-Type Restriction**: Keys may be `int` or `string`. All other types produce friendly compile-time diagnostics.
-- **Dynamic Map Construction**: `let m: map[string]int = map_new(string, int);` initializes a map with initial capacity 8.
-- **`put(m, key, value)` Reassignment**: `m = put(m, key, value)` inserts or updates a key. Keys are borrowed (internally cloned for strings); class values are moved into the map with automatic destruction of old values on key overwrite. The result must be reassigned (`m = put(...)`).
-- **`get(m, key)` & `has(m, key)`**: `get(m, key)` retrieves a value (borrowed for class values; runtime error if key missing); `has(m, key)` checks key existence without failing.
-- **`remove(m, key)`**: Removes the entry, marks the bucket as a tombstone, frees internal string keys, and transfers ownership of class values back to the caller.
-- **`keys(m)` & `len(m)`**: `keys(m)` returns an owned `string[]` or `int[]` of currently occupied keys; `len(m)` returns the number of active entries.
-- **Automated Free Cascade**: At scope exit, all active string keys, active class values, and the underlying bucket array are automatically cleaned up with zero leaks.
+> **Write it like Python's class/struct/enum/map syntax reads. Compile it and it runs like C with zero runtime reference counting overhead, zero GC pauses, clean inspectable generated C via selective prelude emission, stack-allocated value structs, Rust-like compile-time ownership safety across multi-file programs, exhaustive pattern matching, and GCC/Rust-style diagnostic error messages.**
 
 ---
 
-## 🚀 Growable Arrays (v9.0)
+## 🏷️ Tagged Unions / Enums & Pattern Matching (v11.0)
 
-Cco v9.0 introduces unified growable array semantics (`list_new`, `push`, `pop`, `len`):
+Cco v11.0 introduces native heap-allocated tagged unions (`enum`) and compile-time checked pattern matching (`match`):
 
-- **Single Unified Array Representation**: Both `alloc(Type, n)` and `list_new(Type)` share the exact same underlying header representation carrying capacity and length (`__cco_arr_header { capacity, length }`).
-- **Dynamic Array Construction**: `let arr: int[] = list_new(int);` initializes an empty growable array with capacity 4 and length 0.
-- **`push(arr, value)` Reassignment**: `arr = push(arr, value)` grows capacity via `realloc` when length equals capacity, moves owned class objects or copies primitive/struct values into the new slot, and returns the updated array pointer.
-- **`pop(arr)` End-of-Array Removal**: `let p: Point = pop(pts)` removes and returns the last element, decrementing length. For class objects, `pop()` transfers sole ownership of the popped object to the caller (the one sanctioned exception to array element move-out rules, safely maintaining continuous element occupancy below length).
-- **Overloaded Builtin `len()`**: `len(arr)` returns array length at runtime, unifying array length queries with string `len(s)`.
+- **Enum Declaration**: Define tagged unions supporting both unit and payload variants:
+  ```cco
+  enum Expr {
+      Num { value: int },
+      Add { left: Expr, right: Expr },
+      Mul { left: Expr, right: Expr },
+      Eof,
+  }
+  ```
+- **Variant Instantiation**: Constructed via `<Enum>.<Variant> { field: value }` or `<Enum>.<Variant>` for unit variants:
+  ```cco
+  let tree: Expr = Expr.Add {
+      left: Expr.Num { value: 10 },
+      right: Expr.Num { value: 20 },
+  };
+  ```
+- **Pattern Matching (`match`)**: Desugars to C tag switches with field binding:
+  ```cco
+  fn eval(e: &Expr) -> int {
+      match e {
+          Expr.Num { value } => {
+              return value;
+          }
+          Expr.Add { left, right } => {
+              return eval(left) + eval(right);
+          }
+          Expr.Mul { left, right } => {
+              return eval(left) * eval(right);
+          }
+          Expr.Eof => {
+              return 0;
+          }
+      }
+  }
+  ```
+- **Borrow-Only Semantics in `match`**: The match scrutinee is borrowed (`&Enum`), and bound pattern variables are borrowed references to the variant's inner fields, ensuring no premature frees at arm exits.
+- **Compile-Time Exhaustiveness Checking**: Matching without a wildcard `_ => { ... }` arm requires all declared variants to be covered. Missing variants produce friendly compiler diagnostics listing the unhandled cases.
+- **Duplicate Arm Detection**: Redundant variant patterns are rejected at compile time with a secondary note pointing to the first handled location.
+- **Strict Field Binding**: Bound variable names in pattern arms must match declared field names. Renaming (`left: l`) produces clear compile-time error diagnostics.
+- **Automated Free Cascade**: Nested and recursive tagged union trees (like ASTs) are cleanly freed recursively at scope exit with zero Valgrind leaks.
 
 ---
 
@@ -36,8 +57,8 @@ Cco v9.0 introduces unified growable array semantics (`list_new`, `push`, `pop`,
 
 1. **v9.0**: Growable Arrays (`list_new`, `push`, `pop`, `len`) — *Completed*
 2. **v10.0**: Hash Maps (`map[K]V`, `map_new`, `put`, `get`, `has`, `remove`, `keys`, `len`) — *Completed*
-3. **v11.0**: Tagged Unions / Pattern Matching — *Next*
-4. **v12.0**: Self-Hosted Lexer & Parser Proof-of-Concept — *Goal*
+3. **v11.0**: Tagged Unions / Pattern Matching (`enum`, `match`) — *Completed*
+4. **v12.0**: Self-Hosted Lexer & Parser Proof-of-Concept — *Next Goal*
 
 ---
 

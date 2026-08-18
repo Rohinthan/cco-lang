@@ -34,6 +34,10 @@ typedef struct {
     int struct_count;
     int struct_cap;
 
+    AstNode **merged_enums;
+    int enum_count;
+    int enum_cap;
+
     AstNode **merged_functions;
     int fn_count;
     int fn_cap;
@@ -177,6 +181,53 @@ static void check_and_add_struct(ResolverCtx *ctx, AstNode *st, const char *cano
     ctx->merged_structs[ctx->struct_count++] = st;
 }
 
+static void check_and_add_enum(ResolverCtx *ctx, AstNode *en, const char *canonical_path) {
+    en->source_file = canonical_path;
+    const char *ename = en->as.enum_decl.name;
+    for (int i = 0; i < ctx->enum_count; i++) {
+        AstNode *existing = ctx->merged_enums[i];
+        if (strcmp(existing->as.enum_decl.name, ename) == 0) {
+            char short_msg[256];
+            snprintf(short_msg, sizeof(short_msg), "duplicate definition of '%s'", ename);
+
+            ErrorLocation primary = {en->source_file, en->line, en->col};
+            ErrorLocation note_loc = {existing->source_file, existing->line, existing->col};
+
+            print_formatted_error(short_msg, primary, "duplicate definition", "first defined here:", &note_loc, "first defined here", NULL);
+        }
+    }
+    for (int i = 0; i < ctx->class_count; i++) {
+        AstNode *existing = ctx->merged_classes[i];
+        if (strcmp(existing->as.class_decl.name, ename) == 0) {
+            char short_msg[256];
+            snprintf(short_msg, sizeof(short_msg), "duplicate definition of '%s'", ename);
+
+            ErrorLocation primary = {en->source_file, en->line, en->col};
+            ErrorLocation note_loc = {existing->source_file, existing->line, existing->col};
+
+            print_formatted_error(short_msg, primary, "duplicate definition", "first defined here:", &note_loc, "first defined here", NULL);
+        }
+    }
+    for (int i = 0; i < ctx->struct_count; i++) {
+        AstNode *existing = ctx->merged_structs[i];
+        if (strcmp(existing->as.struct_decl.name, ename) == 0) {
+            char short_msg[256];
+            snprintf(short_msg, sizeof(short_msg), "duplicate definition of '%s'", ename);
+
+            ErrorLocation primary = {en->source_file, en->line, en->col};
+            ErrorLocation note_loc = {existing->source_file, existing->line, existing->col};
+
+            print_formatted_error(short_msg, primary, "duplicate definition", "first defined here:", &note_loc, "first defined here", NULL);
+        }
+    }
+
+    if (ctx->enum_count >= ctx->enum_cap) {
+        ctx->enum_cap = ctx->enum_cap == 0 ? 4 : ctx->enum_cap * 2;
+        ctx->merged_enums = realloc(ctx->merged_enums, ctx->enum_cap * sizeof(AstNode *));
+    }
+    ctx->merged_enums[ctx->enum_count++] = en;
+}
+
 static void check_and_add_function(ResolverCtx *ctx, AstNode *fn, const char *canonical_path) {
     fn->source_file = canonical_path;
     const char *fname = fn->as.function.name;
@@ -240,32 +291,34 @@ static void resolve_file_rec(ResolverCtx *ctx, const char *raw_path, const char 
         exit(1);
     }
 
+    // If already fully resolved, skip
     if (is_already_resolved(ctx, canonical)) {
         free(canonical);
         free(display_path);
         return;
     }
 
-    // Push frame onto stack
-    StackFrame frame;
-    frame.canonical_path = canonical;
-    frame.rel_path = strdup(display_path);
-    frame.imported_by = importing_canonical ? strdup(importing_canonical) : NULL;
-    frame.import_line = import_line;
-    frame.import_col = import_col;
-    ctx->stack[ctx->stack_count++] = frame;
+    // Push onto resolution stack
+    ctx->stack[ctx->stack_count].canonical_path = canonical;
+    ctx->stack[ctx->stack_count].rel_path = display_path;
+    ctx->stack[ctx->stack_count].imported_by = importing_display_path ? strdup(importing_display_path) : NULL;
+    ctx->stack[ctx->stack_count].import_line = import_line;
+    ctx->stack[ctx->stack_count].import_col = import_col;
+    ctx->stack_count++;
 
     // Read and parse
-    char *source = read_file_text(canonical);
-    if (!source) {
-        fprintf(stderr, "error: could not read file '%s'\n", canonical);
-        exit(1);
+    char *source_text = read_file_text(canonical);
+    if (!source_text) {
+        char short_msg[256];
+        snprintf(short_msg, sizeof(short_msg), "cannot read module file '%s'", raw_path);
+        ErrorLocation primary = {importing_display_path ? importing_display_path : "entry", import_line, import_col};
+        print_formatted_error(short_msg, primary, "read error", NULL, NULL, NULL, NULL);
     }
 
-    register_file_source(canonical, source);
-    register_file_source(display_path, source);
+    register_file_source(canonical, source_text);
+    register_file_source(display_path, source_text);
 
-    TokenArray tokens = lex_source(source);
+    TokenArray tokens = lex_source(source_text);
     Parser parser = create_parser(tokens, arena);
     AstNode *file_ast = parse_program(&parser);
 
@@ -290,6 +343,12 @@ static void resolve_file_rec(ResolverCtx *ctx, const char *raw_path, const char 
         check_and_add_struct(ctx, st, arena_display_path);
     }
 
+    for (int i = 0; i < file_ast->as.program.enum_count; i++) {
+        AstNode *en = file_ast->as.program.enums[i];
+        tag_nodes_with_source(en, arena_display_path);
+        check_and_add_enum(ctx, en, arena_display_path);
+    }
+
     for (int i = 0; i < file_ast->as.program.count; i++) {
         AstNode *fn = file_ast->as.program.functions[i];
         tag_nodes_with_source(fn, arena_display_path);
@@ -305,7 +364,6 @@ static void resolve_file_rec(ResolverCtx *ctx, const char *raw_path, const char 
         free(ctx->stack[ctx->stack_count - 1].imported_by);
     }
     ctx->stack_count--;
-    free(display_path);
 }
 
 AstNode *resolve_program(const char *entry_path, AstArena *arena) {
@@ -328,6 +386,12 @@ AstNode *resolve_program(const char *entry_path, AstArena *arena) {
     }
     merged_prog->as.program.struct_count = ctx.struct_count;
 
+    merged_prog->as.program.enums = (AstNode **)arena_alloc_array(arena, ctx.enum_count, sizeof(AstNode *));
+    if (ctx.enum_count > 0 && ctx.merged_enums) {
+        memcpy(merged_prog->as.program.enums, ctx.merged_enums, ctx.enum_count * sizeof(AstNode *));
+    }
+    merged_prog->as.program.enum_count = ctx.enum_count;
+
     merged_prog->as.program.functions = (AstNode **)arena_alloc_array(arena, ctx.fn_count, sizeof(AstNode *));
     if (ctx.fn_count > 0 && ctx.merged_functions) {
         memcpy(merged_prog->as.program.functions, ctx.merged_functions, ctx.fn_count * sizeof(AstNode *));
@@ -336,6 +400,7 @@ AstNode *resolve_program(const char *entry_path, AstArena *arena) {
 
     if (ctx.merged_classes) free(ctx.merged_classes);
     if (ctx.merged_structs) free(ctx.merged_structs);
+    if (ctx.merged_enums) free(ctx.merged_enums);
     if (ctx.merged_functions) free(ctx.merged_functions);
     for (int i = 0; i < ctx.resolved_count; i++) {
         free(ctx.resolved_paths[i]);

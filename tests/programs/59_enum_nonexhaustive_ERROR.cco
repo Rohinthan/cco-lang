@@ -1,0 +1,21 @@
+enum Color {
+    Red,
+    Green,
+    Blue,
+}
+
+fn describe(c: &Color) -> void {
+    match c {
+        Color.Red => {
+            print("red");
+        }
+        Color.Green => {
+            print("green");
+        }
+    }
+}
+
+fn main() -> void {
+    let c: Color = Color.Red;
+    describe(&c);
+}

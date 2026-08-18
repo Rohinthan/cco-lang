@@ -1,0 +1,18 @@
+enum NodeKind {
+    Number { value: int },
+    Eof,
+}
+
+fn inspect(n: &NodeKind) -> void {
+    match n {
+        NodeKind.Number { value: v } => {
+            print(v);
+        }
+        NodeKind.Eof => {}
+    }
+}
+
+fn main() -> void {
+    let n: NodeKind = NodeKind.Number { value: 10 };
+    inspect(&n);
+}

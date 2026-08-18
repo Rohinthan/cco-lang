@@ -1,0 +1,12 @@
+error: duplicate match arm for variant 'Some'
+  --> tests/programs/60_enum_duplicate_arm_ERROR.cco:11:9
+    |
+ 11 |         Option.Some { value } => {
+    |         ^ duplicate match arm
+    |
+note: first handled here:
+  --> tests/programs/60_enum_duplicate_arm_ERROR.cco:8:9
+    |
+  8 |         Option.Some { value } => {
+    |         ^ first handled here
+    |

@@ -53,6 +53,9 @@ static TokenType check_keyword(const char *str) {
     if (strcmp(str, "list_new") == 0) return TOKEN_LIST_NEW;
     if (strcmp(str, "map") == 0) return TOKEN_MAP;
     if (strcmp(str, "map_new") == 0) return TOKEN_MAP_NEW;
+    if (strcmp(str, "enum") == 0) return TOKEN_ENUM;
+    if (strcmp(str, "match") == 0) return TOKEN_MATCH;
+    if (strcmp(str, "_") == 0) return TOKEN_UNDERSCORE;
     if (strcmp(str, "int") == 0) return TOKEN_TYPE_INT;
     if (strcmp(str, "float") == 0) return TOKEN_TYPE_FLOAT;
     if (strcmp(str, "char") == 0) return TOKEN_TYPE_CHAR;
@@ -221,6 +224,11 @@ TokenArray lex_source(const char *source) {
             append_token(&array, (Token){TOKEN_ARROW, strdup("->"), line, start_col});
             continue;
         }
+        if (c == '=' && source[pos + 1] == '>') {
+            pos += 2; col += 2;
+            append_token(&array, (Token){TOKEN_FAT_ARROW, strdup("=>"), line, start_col});
+            continue;
+        }
         if (c == '=' && source[pos + 1] == '=') {
             pos += 2; col += 2;
             append_token(&array, (Token){TOKEN_EQ, strdup("=="), line, start_col});
@@ -313,6 +321,12 @@ const char *token_type_to_string(TokenType type) {
         case TOKEN_CONTINUE: return "continue";
         case TOKEN_PRINT: return "print";
         case TOKEN_ALLOC: return "alloc";
+        case TOKEN_LIST_NEW: return "list_new";
+        case TOKEN_MAP: return "map";
+        case TOKEN_MAP_NEW: return "map_new";
+        case TOKEN_ENUM: return "enum";
+        case TOKEN_MATCH: return "match";
+        case TOKEN_UNDERSCORE: return "_";
         case TOKEN_TYPE_INT: return "int";
         case TOKEN_TYPE_FLOAT: return "float";
         case TOKEN_TYPE_CHAR: return "char";
@@ -336,6 +350,7 @@ const char *token_type_to_string(TokenType type) {
         case TOKEN_COLON: return ":";
         case TOKEN_SEMICOLON: return ";";
         case TOKEN_ARROW: return "->";
+        case TOKEN_FAT_ARROW: return "=>";
         case TOKEN_ASSIGN: return "=";
         case TOKEN_EQ: return "==";
         case TOKEN_NE: return "!=";

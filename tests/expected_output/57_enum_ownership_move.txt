@@ -1,0 +1,3 @@
+30
+hello from function
+quitting

@@ -22,6 +22,8 @@ typedef enum {
     TOKEN_LIST_NEW,
     TOKEN_MAP,
     TOKEN_MAP_NEW,
+    TOKEN_ENUM,
+    TOKEN_MATCH,
     TOKEN_TYPE_INT,
     TOKEN_TYPE_FLOAT,
     TOKEN_TYPE_CHAR,
@@ -49,6 +51,7 @@ typedef enum {
     TOKEN_COLON,      // :
     TOKEN_SEMICOLON,  // ;
     TOKEN_ARROW,      // ->
+    TOKEN_FAT_ARROW,  // =>
     TOKEN_ASSIGN,     // =
     TOKEN_EQ,         // ==
     TOKEN_NE,         // !=
@@ -66,6 +69,7 @@ typedef enum {
     TOKEN_OR,         // ||
     TOKEN_DOT,        // .
     TOKEN_AMP,        // &
+    TOKEN_UNDERSCORE, // _
 
     // Special
     TOKEN_EOF,

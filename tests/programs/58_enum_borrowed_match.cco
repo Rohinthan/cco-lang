@@ -1,0 +1,39 @@
+enum Token {
+    Number { value: int },
+    Identifier { name: string },
+    Plus,
+    Eof,
+}
+
+fn is_numeric(t: &Token) -> bool {
+    match t {
+        Token.Number { value } => {
+            return true;
+        }
+        _ => {
+            return false;
+        }
+    }
+}
+
+fn get_val_or_default(t: &Token, default_val: int) -> int {
+    match t {
+        Token.Number { value } => {
+            return value;
+        }
+        _ => {
+            return default_val;
+        }
+    }
+}
+
+fn main() -> void {
+    let t1: Token = Token.Number { value: 42 };
+    let t2: Token = Token.Plus;
+
+    print(is_numeric(&t1));
+    print(get_val_or_default(&t1, 0));
+
+    print(is_numeric(&t2));
+    print(get_val_or_default(&t2, 999));
+}

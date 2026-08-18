@@ -72,6 +72,45 @@ ClassTable *build_class_table(AstNode *program, AstArena *arena) {
         }
     }
 
+    ct->enum_count = program->as.program.enum_count;
+    ct->enum_capacity = ct->enum_count;
+    if (ct->enum_count > 0) {
+        ct->enums = (EnumDef *)arena_alloc_array(arena, ct->enum_count, sizeof(EnumDef));
+    } else {
+        ct->enums = NULL;
+    }
+
+    for (int i = 0; i < program->as.program.enum_count; i++) {
+        AstNode *e_node = program->as.program.enums[i];
+        EnumDef *edef = &ct->enums[i];
+        edef->name = arena_strdup(arena, e_node->as.enum_decl.name);
+        edef->variant_count = e_node->as.enum_decl.variant_count;
+        edef->enum_node = e_node;
+        if (edef->variant_count > 0) {
+            edef->variants = (EnumVariantDef *)arena_alloc_array(arena, edef->variant_count, sizeof(EnumVariantDef));
+            for (int v = 0; v < edef->variant_count; v++) {
+                AstNode *v_node = e_node->as.enum_decl.variants[v];
+                EnumVariantDef *vdef = &edef->variants[v];
+                vdef->name = arena_strdup(arena, v_node->as.variant_decl.name);
+                vdef->is_unit = v_node->as.variant_decl.is_unit;
+                vdef->field_count = v_node->as.variant_decl.field_count;
+                if (vdef->field_count > 0) {
+                    vdef->fields = (FieldInfo *)arena_alloc_array(arena, vdef->field_count, sizeof(FieldInfo));
+                    for (int f = 0; f < vdef->field_count; f++) {
+                        AstNode *f_node = v_node->as.variant_decl.fields[f];
+                        vdef->fields[f].name = arena_strdup(arena, f_node->as.field.name);
+                        vdef->fields[f].type = f_node->as.field.type;
+                        vdef->fields[f].class_name = f_node->as.field.class_name ? arena_strdup(arena, f_node->as.field.class_name) : NULL;
+                    }
+                } else {
+                    vdef->fields = NULL;
+                }
+            }
+        } else {
+            edef->variants = NULL;
+        }
+    }
+
     return ct;
 }
 
@@ -95,10 +134,41 @@ StructDef *find_struct(ClassTable *ct, const char *name) {
     return NULL;
 }
 
+EnumDef *find_enum(ClassTable *ct, const char *name) {
+    if (!ct || !name) return NULL;
+    for (int i = 0; i < ct->enum_count; i++) {
+        if (strcmp(ct->enums[i].name, name) == 0) {
+            return &ct->enums[i];
+        }
+    }
+    return NULL;
+}
+
+EnumVariantDef *find_enum_variant(EnumDef *edef, const char *variant_name) {
+    if (!edef || !variant_name) return NULL;
+    for (int i = 0; i < edef->variant_count; i++) {
+        if (strcmp(edef->variants[i].name, variant_name) == 0) {
+            return &edef->variants[i];
+        }
+    }
+    return NULL;
+}
+
+FieldInfo *find_variant_field(EnumVariantDef *vdef, const char *field_name) {
+    if (!vdef || !field_name) return NULL;
+    for (int i = 0; i < vdef->field_count; i++) {
+        if (strcmp(vdef->fields[i].name, field_name) == 0) {
+            return &vdef->fields[i];
+        }
+    }
+    return NULL;
+}
+
 TypeKind resolve_type_name(ClassTable *ct, const char *name) {
     if (!ct || !name) return TYPE_KIND_UNKNOWN;
     if (find_class(ct, name) != NULL) return TYPE_KIND_CLASS;
     if (find_struct(ct, name) != NULL) return TYPE_KIND_STRUCT;
+    if (find_enum(ct, name) != NULL) return TYPE_KIND_ENUM;
     return TYPE_KIND_UNKNOWN;
 }
 

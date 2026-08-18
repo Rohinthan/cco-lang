@@ -1,0 +1,57 @@
+// Cco v11 Example: Recursive AST Expression Evaluator with Pattern Matching
+// Demonstrates Tagged Unions (enum), Pattern Matching (match), Borrowing (&),
+// and automatic recursive free cascades.
+
+enum Expr {
+    Num { value: int },
+    Add { left: Expr, right: Expr },
+    Sub { left: Expr, right: Expr },
+    Mul { left: Expr, right: Expr },
+    Div { left: Expr, right: Expr },
+}
+
+fn eval(e: &Expr) -> int {
+    match e {
+        Expr.Num { value } => {
+            return value;
+        }
+        Expr.Add { left, right } => {
+            return eval(left) + eval(right);
+        }
+        Expr.Sub { left, right } => {
+            return eval(left) - eval(right);
+        }
+        Expr.Mul { left, right } => {
+            return eval(left) * eval(right);
+        }
+        Expr.Div { left, right } => {
+            let denom: int = eval(right);
+            if (denom == 0) {
+                print("Error: division by zero");
+                return 0;
+            }
+            return eval(left) / denom;
+        }
+    }
+}
+
+fn main() -> void {
+    // Construct AST for: (10 + 20) * (50 - 30) / 2
+    // Expected: 30 * 20 / 2 = 600 / 2 = 300
+    let ast: Expr = Expr.Div {
+        left: Expr.Mul {
+            left: Expr.Add {
+                left: Expr.Num { value: 10 },
+                right: Expr.Num { value: 20 },
+            },
+            right: Expr.Sub {
+                left: Expr.Num { value: 50 },
+                right: Expr.Num { value: 30 },
+            },
+        },
+        right: Expr.Num { value: 2 },
+    };
+
+    let result: int = eval(&ast);
+    print(result);
+}

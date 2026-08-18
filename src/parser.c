@@ -260,6 +260,50 @@ static AstNode *parse_primary(Parser *p) {
 
     if (match(p, TOKEN_IDENT) || match(p, TOKEN_SELF)) {
         Token id_tok = previous(p);
+        if (isupper((unsigned char)id_tok.lexeme[0]) && check(p, TOKEN_DOT) && p->current + 1 < p->tokens.count && p->tokens.tokens[p->current + 1].type == TOKEN_IDENT && isupper((unsigned char)p->tokens.tokens[p->current + 1].lexeme[0])) {
+            advance(p); // consume '.'
+            Token var_tok = advance(p); // consume variant name
+            char **field_names = NULL;
+            AstNode **field_values = NULL;
+            int field_count = 0;
+            int field_cap = 0;
+
+            if (match(p, TOKEN_LBRACE)) {
+                if (!check(p, TOKEN_RBRACE)) {
+                    do {
+                        if (check(p, TOKEN_RBRACE)) break;
+                        Token f_tok = consume(p, TOKEN_IDENT, "Expected field name in variant instantiation");
+                        consume(p, TOKEN_COLON, "Expected ':' after field name");
+                        AstNode *val = parse_expr(p);
+
+                        if (field_count >= field_cap) {
+                            field_cap = field_cap == 0 ? 4 : field_cap * 2;
+                            char **new_names = (char **)arena_alloc_array(p->arena, field_cap, sizeof(char *));
+                            AstNode **new_vals = (AstNode **)arena_alloc_array(p->arena, field_cap, sizeof(AstNode *));
+                            if (field_names) memcpy(new_names, field_names, field_count * sizeof(char *));
+                            if (field_values) memcpy(new_vals, field_values, field_count * sizeof(AstNode *));
+                            field_names = new_names;
+                            field_values = new_vals;
+                        }
+                        field_names[field_count] = arena_strdup(p->arena, f_tok.lexeme);
+                        field_values[field_count] = val;
+                        field_count++;
+                    } while (match(p, TOKEN_COMMA));
+                }
+                consume(p, TOKEN_RBRACE, "Expected '}' after variant field initializers");
+            }
+
+            AstNode *node = arena_alloc_node(p->arena, NODE_NEW, id_tok.line, id_tok.col);
+            node->as.new_expr.class_name = arena_strdup(p->arena, id_tok.lexeme);
+            node->as.new_expr.variant_name = arena_strdup(p->arena, var_tok.lexeme);
+            node->as.new_expr.field_names = field_names;
+            node->as.new_expr.field_values = field_values;
+            node->as.new_expr.field_count = field_count;
+            node->as.new_expr.constructs_enum = true;
+            node->as.new_expr.constructs_struct = false;
+            return node;
+        }
+
         if (isupper((unsigned char)id_tok.lexeme[0]) && match(p, TOKEN_LBRACE)) {
             // New expression: ClassName { field1: expr1, field2: expr2 }
             char **field_names = NULL;
@@ -269,6 +313,7 @@ static AstNode *parse_primary(Parser *p) {
 
             if (!check(p, TOKEN_RBRACE)) {
                 do {
+                    if (check(p, TOKEN_RBRACE)) break;
                     Token f_tok = consume(p, TOKEN_IDENT, "Expected field name in object instantiation");
                     consume(p, TOKEN_COLON, "Expected ':' after field name");
                     AstNode *val = parse_expr(p);
@@ -292,9 +337,12 @@ static AstNode *parse_primary(Parser *p) {
 
             AstNode *node = arena_alloc_node(p->arena, NODE_NEW, id_tok.line, id_tok.col);
             node->as.new_expr.class_name = arena_strdup(p->arena, id_tok.lexeme);
+            node->as.new_expr.variant_name = NULL;
             node->as.new_expr.field_names = field_names;
             node->as.new_expr.field_values = field_values;
             node->as.new_expr.field_count = field_count;
+            node->as.new_expr.constructs_enum = false;
+            node->as.new_expr.constructs_struct = false;
             return node;
         }
 
@@ -754,6 +802,100 @@ static AstNode *parse_for_each_stmt(Parser *p) {
     return node;
 }
 
+static AstNode *parse_match_stmt(Parser *p) {
+    Token tok = consume(p, TOKEN_MATCH, "Expected 'match'");
+    AstNode *expr = parse_expr(p);
+    consume(p, TOKEN_LBRACE, "Expected '{' after match expression");
+
+    AstNode **arms = NULL;
+    int arm_count = 0;
+    int arm_cap = 0;
+
+    while (!check(p, TOKEN_RBRACE) && !is_at_end(p)) {
+        Token arm_tok = peek(p);
+        bool is_wildcard = false;
+        char *enum_name = NULL;
+        char *variant_name = NULL;
+        char **bind_names = NULL;
+        int bind_count = 0;
+        int bind_cap = 0;
+
+        if (match(p, TOKEN_UNDERSCORE)) {
+            is_wildcard = true;
+        } else {
+            Token e_tok = consume(p, TOKEN_IDENT, "Expected enum name or '_' in match arm");
+            enum_name = arena_strdup(p->arena, e_tok.lexeme);
+            consume(p, TOKEN_DOT, "Expected '.' after enum name in match arm");
+            Token v_tok = consume(p, TOKEN_IDENT, "Expected variant name after '.'");
+            variant_name = arena_strdup(p->arena, v_tok.lexeme);
+
+            if (match(p, TOKEN_LBRACE)) {
+                if (!check(p, TOKEN_RBRACE)) {
+                    do {
+                        Token b_tok = consume(p, TOKEN_IDENT, "Expected field name in pattern binding");
+                        if (check(p, TOKEN_COLON)) {
+                            Token col_tok = advance(p);
+                            Token ren_tok = peek(p);
+                            char short_msg[256];
+                            snprintf(short_msg, sizeof(short_msg), "match bindings must use the field's own name — expected '%s', found '%s'", b_tok.lexeme, ren_tok.lexeme ? ren_tok.lexeme : "");
+                            ErrorLocation loc = {get_error_filename(), col_tok.line, col_tok.col};
+                            print_formatted_error(
+                                short_msg,
+                                loc,
+                                "field renaming not allowed in v11",
+                                "bound local variable names must exactly match the variant's declared field names in v11",
+                                NULL,
+                                NULL,
+                                NULL
+                            );
+                            exit(1);
+                        }
+
+                        if (bind_count >= bind_cap) {
+                            bind_cap = bind_cap == 0 ? 4 : bind_cap * 2;
+                            char **new_b = (char **)arena_alloc_array(p->arena, bind_cap, sizeof(char *));
+                            if (bind_names) memcpy(new_b, bind_names, bind_count * sizeof(char *));
+                            bind_names = new_b;
+                        }
+                        bind_names[bind_count++] = arena_strdup(p->arena, b_tok.lexeme);
+                    } while (match(p, TOKEN_COMMA));
+                }
+                consume(p, TOKEN_RBRACE, "Expected '}' after pattern bindings");
+            }
+        }
+
+        consume(p, TOKEN_FAT_ARROW, "Expected '=>' after pattern");
+        AstNode *body = parse_block(p);
+
+        AstNode *arm_node = arena_alloc_node(p->arena, NODE_MATCH_ARM, arm_tok.line, arm_tok.col);
+        arm_node->as.match_arm.enum_name = enum_name;
+        arm_node->as.match_arm.variant_name = variant_name;
+        arm_node->as.match_arm.is_wildcard = is_wildcard;
+        arm_node->as.match_arm.bind_names = bind_names;
+        arm_node->as.match_arm.bind_count = bind_count;
+        arm_node->as.match_arm.body = body;
+        arm_node->as.match_arm.arm_line = arm_tok.line;
+        arm_node->as.match_arm.arm_col = arm_tok.col;
+
+        if (arm_count >= arm_cap) {
+            arm_cap = arm_cap == 0 ? 4 : arm_cap * 2;
+            AstNode **new_arms = (AstNode **)arena_alloc_array(p->arena, arm_cap, sizeof(AstNode *));
+            if (arms) memcpy(new_arms, arms, arm_count * sizeof(AstNode *));
+            arms = new_arms;
+        }
+        arms[arm_count++] = arm_node;
+    }
+
+    consume(p, TOKEN_RBRACE, "Expected '}' after match arms");
+
+    AstNode *match_node = arena_alloc_node(p->arena, NODE_MATCH, tok.line, tok.col);
+    match_node->as.match_stmt.expr = expr;
+    match_node->as.match_stmt.arms = arms;
+    match_node->as.match_stmt.arm_count = arm_count;
+    match_node->as.match_stmt.enum_name = NULL;
+    return match_node;
+}
+
 static AstNode *parse_statement(Parser *p) {
     if (check(p, TOKEN_LET)) return parse_let_stmt(p);
     if (check(p, TOKEN_IF)) return parse_if_stmt(p);
@@ -765,6 +907,7 @@ static AstNode *parse_statement(Parser *p) {
             return parse_for_each_stmt(p);
         }
     }
+    if (check(p, TOKEN_MATCH)) return parse_match_stmt(p);
     if (check(p, TOKEN_RETURN)) return parse_return_stmt(p);
     if (check(p, TOKEN_BREAK)) return parse_break_stmt(p);
     if (check(p, TOKEN_CONTINUE)) return parse_continue_stmt(p);
@@ -1053,6 +1196,103 @@ static AstNode *parse_struct(Parser *p) {
     return s_node;
 }
 
+static AstNode *parse_enum(Parser *p) {
+    Token tok = consume(p, TOKEN_ENUM, "Expected 'enum'");
+    Token name_tok = consume(p, TOKEN_IDENT, "Expected enum name");
+    consume(p, TOKEN_LBRACE, "Expected '{' after enum name");
+
+    AstNode **variants = NULL;
+    int variant_count = 0;
+    int variant_cap = 0;
+
+    while (!check(p, TOKEN_RBRACE) && !is_at_end(p)) {
+        Token v_name = consume(p, TOKEN_IDENT, "Expected variant name in enum");
+        bool is_unit = true;
+        AstNode **fields = NULL;
+        int field_count = 0;
+        int field_cap = 0;
+
+        if (match(p, TOKEN_LBRACE)) {
+            is_unit = false;
+            while (!check(p, TOKEN_RBRACE) && !is_at_end(p)) {
+                Token f_name = consume(p, TOKEN_IDENT, "Expected field name in variant");
+                consume(p, TOKEN_COLON, "Expected ':' after field name");
+
+                char *f_cls = NULL;
+                bool f_bor = false;
+                bool f_is_arr = false;
+                bool f_is_map = false;
+                Type f_key_t = TY_INT;
+                Token type_tok = peek(p);
+                Type f_type = parse_type_with_class(p, &f_cls, &f_bor, &f_is_arr, &f_is_map, &f_key_t);
+
+                if (f_is_arr || f_is_map) {
+                    char short_msg[256];
+                    snprintf(short_msg, sizeof(short_msg), "enum variant fields cannot be array or map types in v11");
+                    ErrorLocation loc = {get_error_filename(), type_tok.line, type_tok.col};
+                    print_formatted_error(
+                        short_msg,
+                        loc,
+                        "array/map field not supported in enum variant",
+                        "enum variants support primitive types, strings, structs, classes, and recursive enums in v11",
+                        NULL,
+                        NULL,
+                        NULL
+                    );
+                    exit(1);
+                }
+
+                AstNode *f_node = arena_alloc_node(p->arena, NODE_FIELD, f_name.line, f_name.col);
+                f_node->as.field.name = arena_strdup(p->arena, f_name.lexeme);
+                f_node->as.field.type = f_type;
+                f_node->as.field.is_array = false;
+                f_node->as.field.is_map = false;
+                f_node->as.field.class_name = f_cls ? arena_strdup(p->arena, f_cls) : NULL;
+
+                if (field_count >= field_cap) {
+                    field_cap = field_cap == 0 ? 4 : field_cap * 2;
+                    AstNode **new_f = (AstNode **)arena_alloc_array(p->arena, field_cap, sizeof(AstNode *));
+                    if (fields) memcpy(new_f, fields, field_count * sizeof(AstNode *));
+                    fields = new_f;
+                }
+                fields[field_count++] = f_node;
+
+                if (!check(p, TOKEN_RBRACE)) {
+                    consume(p, TOKEN_COMMA, "Expected ',' between variant fields");
+                }
+            }
+            consume(p, TOKEN_RBRACE, "Expected '}' after variant fields");
+        }
+
+        AstNode *v_node = arena_alloc_node(p->arena, NODE_VARIANT, v_name.line, v_name.col);
+        v_node->as.variant_decl.name = arena_strdup(p->arena, v_name.lexeme);
+        v_node->as.variant_decl.enum_name = arena_strdup(p->arena, name_tok.lexeme);
+        v_node->as.variant_decl.fields = fields;
+        v_node->as.variant_decl.field_count = field_count;
+        v_node->as.variant_decl.is_unit = is_unit;
+
+        if (variant_count >= variant_cap) {
+            variant_cap = variant_cap == 0 ? 4 : variant_cap * 2;
+            AstNode **new_v = (AstNode **)arena_alloc_array(p->arena, variant_cap, sizeof(AstNode *));
+            if (variants) memcpy(new_v, variants, variant_count * sizeof(AstNode *));
+            variants = new_v;
+        }
+        variants[variant_count++] = v_node;
+
+        if (!check(p, TOKEN_RBRACE)) {
+            consume(p, TOKEN_COMMA, "Expected ',' between enum variants");
+        }
+    }
+
+    consume(p, TOKEN_RBRACE, "Expected '}' at end of enum declaration");
+
+    AstNode *e_node = arena_alloc_node(p->arena, NODE_ENUM, tok.line, tok.col);
+    e_node->as.enum_decl.name = arena_strdup(p->arena, name_tok.lexeme);
+    e_node->as.enum_decl.variants = variants;
+    e_node->as.enum_decl.variant_count = variant_count;
+    return e_node;
+}
+
 static AstNode *parse_function(Parser *p) {
     Token tok = consume(p, TOKEN_FN, "Expected 'fn'");
     Token name_tok = consume(p, TOKEN_IDENT, "Expected function name");
@@ -1161,6 +1401,10 @@ AstNode *parse_program(Parser *p) {
     int struct_count = 0;
     int struct_cap = 0;
 
+    AstNode **enums = NULL;
+    int enum_count = 0;
+    int enum_cap = 0;
+
     AstNode **functions = NULL;
     int fn_count = 0;
     int fn_cap = 0;
@@ -1200,6 +1444,16 @@ AstNode *parse_program(Parser *p) {
                 structs = new_st;
             }
             structs[struct_count++] = st;
+        } else if (check(p, TOKEN_ENUM)) {
+            seen_decl = true;
+            AstNode *en = parse_enum(p);
+            if (enum_count >= enum_cap) {
+                enum_cap = enum_cap == 0 ? 4 : enum_cap * 2;
+                AstNode **new_en = (AstNode **)arena_alloc_array(p->arena, enum_cap, sizeof(AstNode *));
+                if (enums) memcpy(new_en, enums, enum_count * sizeof(AstNode *));
+                enums = new_en;
+            }
+            enums[enum_count++] = en;
         } else if (check(p, TOKEN_FN)) {
             seen_decl = true;
             AstNode *fn = parse_function(p);
@@ -1211,7 +1465,7 @@ AstNode *parse_program(Parser *p) {
             }
             functions[fn_count++] = fn;
         } else {
-            fatal_parser_error(peek(p).line, peek(p).col, peek(p).lexeme, "Expected 'import', 'class', 'struct', or 'fn'");
+            fatal_parser_error(peek(p).line, peek(p).col, peek(p).lexeme, "Expected 'import', 'class', 'struct', 'enum', or 'fn'");
         }
     }
 
@@ -1222,6 +1476,8 @@ AstNode *parse_program(Parser *p) {
     prog->as.program.class_count = class_count;
     prog->as.program.structs = structs;
     prog->as.program.struct_count = struct_count;
+    prog->as.program.enums = enums;
+    prog->as.program.enum_count = enum_count;
     prog->as.program.functions = functions;
     prog->as.program.count = fn_count;
     return prog;

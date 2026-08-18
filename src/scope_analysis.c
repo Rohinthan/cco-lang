@@ -242,6 +242,20 @@ static void analyze_node(ScopeStack *stack, AstNode *node) {
             analyze_block(stack, node->as.while_stmt.body, true);
             break;
 
+        case NODE_MATCH:
+            analyze_node(stack, node->as.match_stmt.expr);
+            for (int a = 0; a < node->as.match_stmt.arm_count; a++) {
+                AstNode *arm = node->as.match_stmt.arms[a];
+                if (arm->as.match_arm.body) {
+                    if (arm->as.match_arm.body->type == NODE_BLOCK) {
+                        analyze_block(stack, arm->as.match_arm.body, false);
+                    } else {
+                        analyze_node(stack, arm->as.match_arm.body);
+                    }
+                }
+            }
+            break;
+
         case NODE_FOR:
             push_scope(stack, node, true);
             if (node->as.for_stmt.init) analyze_node(stack, node->as.for_stmt.init);
@@ -712,6 +726,12 @@ static char *get_expr_class_type(OwnScopeStack *stack, AstNode *expr) {
             return NULL;
         }
 
+        case NODE_UNARY:
+            if (strcmp(expr->as.unary.op, "&") == 0) {
+                return get_expr_class_type(stack, expr->as.unary.operand);
+            }
+            return NULL;
+
         case NODE_ALLOC:
             if (expr->as.alloc.elem_type == TY_CLASS) {
                 return expr->as.alloc.class_name;
@@ -721,6 +741,11 @@ static char *get_expr_class_type(OwnScopeStack *stack, AstNode *expr) {
         default:
             return NULL;
     }
+}
+
+static bool is_heap_class_or_enum(ClassTable *ct, const char *name) {
+    if (!ct || !name) return false;
+    return (find_class(ct, name) != NULL || find_enum(ct, name) != NULL);
 }
 
 static void analyze_own_node(OwnScopeStack *stack, AstNode *node);
@@ -733,7 +758,7 @@ static void analyze_own_block(OwnScopeStack *stack, AstNode *block_node, bool is
         if (stack->current_function->type == NODE_METHOD) {
             AstNode *m = stack->current_function;
             for (int p = 0; p < m->as.method.param_count; p++) {
-                if (m->as.method.param_types[p] == TY_CLASS && m->as.method.param_class_names[p] && find_class(stack->ct, m->as.method.param_class_names[p]) != NULL) {
+                if (m->as.method.param_types[p] == TY_CLASS && m->as.method.param_class_names[p] && is_heap_class_or_enum(stack->ct, m->as.method.param_class_names[p])) {
                     bool is_bor = m->as.method.param_is_borrowed ? m->as.method.param_is_borrowed[p] : (p == 0);
                     own_scope_add_var(stack, s, m->as.method.param_names[p], m->as.method.param_class_names[p], m->as.method.param_lines ? m->as.method.param_lines[p] : m->line, m->as.method.param_cols ? m->as.method.param_cols[p] : m->col, true, is_bor);
                 }
@@ -741,7 +766,7 @@ static void analyze_own_block(OwnScopeStack *stack, AstNode *block_node, bool is
         } else if (stack->current_function->type == NODE_FUNCTION) {
             AstNode *f = stack->current_function;
             for (int p = 0; p < f->as.function.param_count; p++) {
-                if (f->as.function.param_types[p] == TY_CLASS && f->as.function.param_class_names[p] && find_class(stack->ct, f->as.function.param_class_names[p]) != NULL) {
+                if (f->as.function.param_types[p] == TY_CLASS && f->as.function.param_class_names[p] && is_heap_class_or_enum(stack->ct, f->as.function.param_class_names[p])) {
                     bool is_bor = f->as.function.param_is_borrowed ? f->as.function.param_is_borrowed[p] : false;
                     own_scope_add_var(stack, s, f->as.function.param_names[p], f->as.function.param_class_names[p], f->as.function.param_lines ? f->as.function.param_lines[p] : f->line, f->as.function.param_cols ? f->as.function.param_cols[p] : f->col, true, is_bor);
                 }
@@ -787,8 +812,8 @@ static void analyze_own_block(OwnScopeStack *stack, AstNode *block_node, bool is
                 }
             }
 
-            if (stmt->as.let.is_map || stmt->as.let.is_array || (cls_name && find_class(stack->ct, cls_name) != NULL)) {
-                if (cls_name && find_class(stack->ct, cls_name) != NULL) {
+            if (stmt->as.let.is_map || stmt->as.let.is_array || (cls_name && is_heap_class_or_enum(stack->ct, cls_name))) {
+                if (cls_name && is_heap_class_or_enum(stack->ct, cls_name)) {
                     stmt->as.let.class_name = arena_strdup(stack->arena, cls_name);
                     stmt->as.let.var_type = TY_CLASS;
                 }
@@ -1415,6 +1440,174 @@ static void analyze_own_node(OwnScopeStack *stack, AstNode *node) {
                     }
                 }
                 if (s->is_loop_scope) break;
+            }
+            break;
+        }
+
+        case NODE_MATCH: {
+            // 1. Scrutinee expression: Borrowed!
+            AstNode *scrut = node->as.match_stmt.expr;
+            if (scrut->type == NODE_IDENT) {
+                check_use_var(stack, scrut->as.ident.name, scrut->line, scrut->col);
+            } else if (scrut->type == NODE_UNARY && strcmp(scrut->as.unary.op, "&") == 0 && scrut->as.unary.operand->type == NODE_IDENT) {
+                check_use_var(stack, scrut->as.unary.operand->as.ident.name, scrut->as.unary.operand->line, scrut->as.unary.operand->col);
+            } else {
+                analyze_own_node(stack, scrut);
+            }
+
+            // 2. Identify the enum type of scrutinee
+            const char *enum_name = node->as.match_stmt.enum_name;
+            if (!enum_name) {
+                if (scrut->type == NODE_IDENT) {
+                    OwnVar *ov = find_own_var(stack, scrut->as.ident.name, NULL, NULL);
+                    if (ov) enum_name = ov->class_name;
+                } else if (scrut->type == NODE_UNARY && strcmp(scrut->as.unary.op, "&") == 0 && scrut->as.unary.operand->type == NODE_IDENT) {
+                    OwnVar *ov = find_own_var(stack, scrut->as.unary.operand->as.ident.name, NULL, NULL);
+                    if (ov) enum_name = ov->class_name;
+                }
+            }
+            if (!enum_name) {
+                for (int a = 0; a < node->as.match_stmt.arm_count; a++) {
+                    if (!node->as.match_stmt.arms[a]->as.match_arm.is_wildcard) {
+                        enum_name = node->as.match_stmt.arms[a]->as.match_arm.enum_name;
+                        break;
+                    }
+                }
+            }
+            if (enum_name) {
+                node->as.match_stmt.enum_name = arena_strdup(stack->arena, enum_name);
+            }
+
+            EnumDef *edef = enum_name ? find_enum(stack->ct, enum_name) : NULL;
+
+            // 3. Check duplicate arms, unknown variants, bindings, and exhaustiveness
+            int total_variants = edef ? edef->variant_count : 0;
+            bool *handled = calloc(total_variants > 0 ? total_variants : 1, sizeof(bool));
+            ErrorLocation *arm_locs = calloc(total_variants > 0 ? total_variants : 1, sizeof(ErrorLocation));
+            bool has_wildcard = false;
+
+            for (int a = 0; a < node->as.match_stmt.arm_count; a++) {
+                AstNode *arm = node->as.match_stmt.arms[a];
+                if (arm->as.match_arm.is_wildcard) {
+                    if (has_wildcard) {
+                        free(handled); free(arm_locs);
+                        char short_msg[256];
+                        snprintf(short_msg, sizeof(short_msg), "duplicate match arm for wildcard '_'");
+                        ErrorLocation primary = {arm->source_file ? arm->source_file : get_error_filename(), arm->as.match_arm.arm_line, arm->as.match_arm.arm_col};
+                        print_formatted_error(short_msg, primary, "duplicate wildcard arm", NULL, NULL, NULL, NULL);
+                    }
+                    has_wildcard = true;
+                } else {
+                    if (edef && strcmp(arm->as.match_arm.enum_name, edef->name) != 0) {
+                        free(handled); free(arm_locs);
+                        char short_msg[256];
+                        snprintf(short_msg, sizeof(short_msg), "'%s' has no variant named '%s'", edef->name, arm->as.match_arm.variant_name);
+                        ErrorLocation primary = {arm->source_file ? arm->source_file : get_error_filename(), arm->as.match_arm.arm_line, arm->as.match_arm.arm_col};
+                        print_formatted_error(short_msg, primary, "mismatched enum variant", NULL, NULL, NULL, NULL);
+                    }
+
+                    EnumVariantDef *vdef = edef ? find_enum_variant(edef, arm->as.match_arm.variant_name) : NULL;
+                    if (!vdef) {
+                        free(handled); free(arm_locs);
+                        char short_msg[256];
+                        snprintf(short_msg, sizeof(short_msg), "'%s' has no variant named '%s'", enum_name ? enum_name : "Enum", arm->as.match_arm.variant_name);
+                        ErrorLocation primary = {arm->source_file ? arm->source_file : get_error_filename(), arm->as.match_arm.arm_line, arm->as.match_arm.arm_col};
+                        print_formatted_error(short_msg, primary, "unknown variant", NULL, NULL, NULL, NULL);
+                    }
+
+                    int v_idx = -1;
+                    for (int vi = 0; vi < edef->variant_count; vi++) {
+                        if (strcmp(edef->variants[vi].name, arm->as.match_arm.variant_name) == 0) {
+                            v_idx = vi;
+                            break;
+                        }
+                    }
+
+                    if (v_idx != -1 && handled[v_idx]) {
+                        ErrorLocation primary = {arm->source_file ? arm->source_file : get_error_filename(), arm->as.match_arm.arm_line, arm->as.match_arm.arm_col};
+                        ErrorLocation note_loc = arm_locs[v_idx];
+                        char short_msg[256];
+                        snprintf(short_msg, sizeof(short_msg), "duplicate match arm for variant '%s'", arm->as.match_arm.variant_name);
+                        free(handled); free(arm_locs);
+                        print_formatted_error(short_msg, primary, "duplicate match arm", "first handled here:", &note_loc, "first handled here", NULL);
+                    }
+
+                    if (v_idx != -1) {
+                        handled[v_idx] = true;
+                        arm_locs[v_idx] = (ErrorLocation){arm->source_file ? arm->source_file : get_error_filename(), arm->as.match_arm.arm_line, arm->as.match_arm.arm_col};
+                    }
+                }
+            }
+
+            // Check exhaustiveness
+            if (edef && !has_wildcard) {
+                int missing_count = 0;
+                char missing_buf[256] = {0};
+                for (int vi = 0; vi < edef->variant_count; vi++) {
+                    if (!handled[vi]) {
+                        if (missing_count > 0) strncat(missing_buf, ", ", sizeof(missing_buf) - strlen(missing_buf) - 1);
+                        strncat(missing_buf, "'", sizeof(missing_buf) - strlen(missing_buf) - 1);
+                        strncat(missing_buf, edef->variants[vi].name, sizeof(missing_buf) - strlen(missing_buf) - 1);
+                        strncat(missing_buf, "'", sizeof(missing_buf) - strlen(missing_buf) - 1);
+                        missing_count++;
+                    }
+                }
+                if (missing_count > 0) {
+                    free(handled); free(arm_locs);
+                    char short_msg[512];
+                    snprintf(short_msg, sizeof(short_msg), "match is not exhaustive — missing variant(s): %s", missing_buf);
+                    ErrorLocation primary = {node->source_file ? node->source_file : get_error_filename(), node->line, node->col};
+                    print_formatted_error(short_msg, primary, "non-exhaustive match", "add arms for the missing variants, or a catch-all '_ => { }' arm", NULL, NULL, NULL);
+                }
+            }
+            free(handled);
+            free(arm_locs);
+
+            // 4. Analyze each arm body with bound variables registered as borrowed
+            int orig_moved_count = stack->moved_count;
+            MovedVar orig_moved[128];
+            memcpy(orig_moved, stack->moved, orig_moved_count * sizeof(MovedVar));
+
+            for (int a = 0; a < node->as.match_stmt.arm_count; a++) {
+                AstNode *arm = node->as.match_stmt.arms[a];
+                push_own_scope(stack, arm->as.match_arm.body, false);
+                OwnScope *s = current_own_scope(stack);
+
+                if (!arm->as.match_arm.is_wildcard && edef) {
+                    EnumVariantDef *vdef = find_enum_variant(edef, arm->as.match_arm.variant_name);
+                    if (vdef && vdef->field_count > 0) {
+                        for (int b = 0; b < arm->as.match_arm.bind_count; b++) {
+                            const char *bname = arm->as.match_arm.bind_names[b];
+                            FieldInfo *fi = find_variant_field(vdef, bname);
+                            if (fi) {
+                                bool is_heap_type = (fi->type == TY_CLASS && fi->class_name && is_heap_class_or_enum(stack->ct, fi->class_name));
+                                if (is_heap_type) {
+                                    // Registered as borrowed!
+                                    own_scope_add_var(stack, s, bname, fi->class_name, arm->as.match_arm.arm_line, arm->as.match_arm.arm_col, false, true);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Analyze statements inside arm body
+                if (arm->as.match_arm.body && arm->as.match_arm.body->type == NODE_BLOCK) {
+                    for (int st = 0; st < arm->as.match_arm.body->as.block.count; st++) {
+                        analyze_own_node(stack, arm->as.match_arm.body->as.block.stmts[st]);
+                    }
+
+                    // Emit frees for any owned allocations created inside the arm
+                    for (int i = 0; i < s->count; i++) {
+                        if (!s->vars[i].is_param && !s->vars[i].is_borrowed_param && !is_var_transferred(stack, &s->vars[i])) {
+                            add_free_release_to_node_map(stack, arm->as.match_arm.body, s->vars[i].name, s->vars[i].class_name, s->vars[i].is_array, s->vars[i].is_map, s->vars[i].key_type);
+                        }
+                    }
+                }
+                pop_own_scope(stack);
+
+                // Match is borrow-only: restore moved state across arms
+                stack->moved_count = orig_moved_count;
+                memcpy(stack->moved, orig_moved, orig_moved_count * sizeof(MovedVar));
             }
             break;
         }

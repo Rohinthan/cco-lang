@@ -12,7 +12,8 @@ typedef enum {
     TY_STRING,
     TY_VOID,
     TY_CLASS,
-    TY_MAP
+    TY_MAP,
+    TY_ENUM
 } Type;
 
 typedef struct RefRelease {
@@ -56,7 +57,11 @@ typedef enum {
     NODE_MEMBER_ASSIGN,
     NODE_IMPORT,
     NODE_STRUCT,
-    NODE_STRUCT_FIELD
+    NODE_STRUCT_FIELD,
+    NODE_ENUM,
+    NODE_VARIANT,
+    NODE_MATCH,
+    NODE_MATCH_ARM
 } NodeType;
 
 typedef struct AstNode AstNode;
@@ -95,6 +100,8 @@ struct AstNode {
             int class_count;
             AstNode **structs;
             int struct_count;
+            AstNode **enums;
+            int enum_count;
             AstNode **functions;
             int count;
         } program;
@@ -102,6 +109,38 @@ struct AstNode {
         struct {
             char *path;
         } import_stmt;
+
+        struct {
+            char *name;
+            AstNode **variants;
+            int variant_count;
+        } enum_decl;
+
+        struct {
+            char *name;
+            char *enum_name;
+            AstNode **fields;
+            int field_count;
+            bool is_unit;
+        } variant_decl;
+
+        struct {
+            AstNode *expr;
+            AstNode **arms;
+            int arm_count;
+            char *enum_name;
+        } match_stmt;
+
+        struct {
+            char *enum_name;
+            char *variant_name;
+            bool is_wildcard;
+            char **bind_names;
+            int bind_count;
+            AstNode *body;
+            int arm_line;
+            int arm_col;
+        } match_arm;
 
         struct {
             char *name;
@@ -264,10 +303,12 @@ struct AstNode {
 
         struct {
             char *class_name;
+            char *variant_name;
             char **field_names;
             AstNode **field_values;
             int field_count;
             bool constructs_struct;
+            bool constructs_enum;
         } new_expr;
 
         struct {

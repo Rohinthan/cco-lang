@@ -1,0 +1,35 @@
+enum Status {
+    Pending,
+    Running,
+    Success,
+    Failed,
+}
+
+fn describe(s: &Status) -> void {
+    match s {
+        Status.Pending => {
+            print("status: pending");
+        }
+        Status.Running => {
+            print("status: running");
+        }
+        Status.Success => {
+            print("status: success");
+        }
+        Status.Failed => {
+            print("status: failed");
+        }
+    }
+}
+
+fn main() -> void {
+    let s1: Status = Status.Pending;
+    let s2: Status = Status.Running;
+    let s3: Status = Status.Success;
+    let s4: Status = Status.Failed;
+
+    describe(&s1);
+    describe(&s2);
+    describe(&s3);
+    describe(&s4);
+}

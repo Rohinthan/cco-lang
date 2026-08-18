@@ -91,6 +91,7 @@ const char *type_to_string(Type type) {
         case TY_VOID: return "void";
         case TY_CLASS: return "class";
         case TY_MAP: return "map";
+        case TY_ENUM: return "enum";
         default: return "unknown";
     }
 }

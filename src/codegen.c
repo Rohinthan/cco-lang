@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>
+#include <ctype.h>
 
 typedef struct {
     char *buffer;
@@ -188,6 +189,84 @@ static bool is_expr_pointer(CodegenCtx *ctx, AstNode *expr) {
     return true;
 }
 
+static Type infer_expr_type(AstNode *program, AstNode *fn, AstNode *expr);
+
+static const char *find_ident_class_in_node(AstNode *program, AstNode *node, const char *var_name) {
+    if (!node) return NULL;
+
+    if (node->type == NODE_BLOCK) {
+        for (int i = 0; i < node->as.block.count; i++) {
+            const char *c = find_ident_class_in_node(program, node->as.block.stmts[i], var_name);
+            if (c) return c;
+        }
+        return NULL;
+    }
+
+    if (node->type == NODE_LET) {
+        if (strcmp(node->as.let.name, var_name) == 0) {
+            return node->as.let.class_name;
+        }
+        return NULL;
+    }
+
+    if (node->type == NODE_FOR_EACH) {
+        return find_ident_class_in_node(program, node->as.for_each.body, var_name);
+    }
+
+    if (node->type == NODE_IF) {
+        const char *c1 = find_ident_class_in_node(program, node->as.if_stmt.then_b, var_name);
+        if (c1) return c1;
+        if (node->as.if_stmt.else_b) {
+            return find_ident_class_in_node(program, node->as.if_stmt.else_b, var_name);
+        }
+        return NULL;
+    }
+
+    if (node->type == NODE_WHILE) {
+        return find_ident_class_in_node(program, node->as.while_stmt.body, var_name);
+    }
+
+    if (node->type == NODE_FOR) {
+        const char *c_init = find_ident_class_in_node(program, node->as.for_stmt.init, var_name);
+        if (c_init) return c_init;
+        return find_ident_class_in_node(program, node->as.for_stmt.body, var_name);
+    }
+
+    if (node->type == NODE_MATCH) {
+        for (int a = 0; a < node->as.match_stmt.arm_count; a++) {
+            AstNode *arm = node->as.match_stmt.arms[a];
+            if (!arm->as.match_arm.is_wildcard && program && program->type == NODE_PROGRAM) {
+                const char *ename = arm->as.match_arm.enum_name;
+                const char *vname = arm->as.match_arm.variant_name;
+                for (int e = 0; e < program->as.program.enum_count; e++) {
+                    AstNode *en = program->as.program.enums[e];
+                    if (strcmp(en->as.enum_decl.name, ename) == 0) {
+                        for (int v = 0; v < en->as.enum_decl.variant_count; v++) {
+                            AstNode *vn = en->as.enum_decl.variants[v];
+                            if (strcmp(vn->as.variant_decl.name, vname) == 0) {
+                                for (int b = 0; b < arm->as.match_arm.bind_count; b++) {
+                                    if (strcmp(arm->as.match_arm.bind_names[b], var_name) == 0) {
+                                        for (int f = 0; f < vn->as.variant_decl.field_count; f++) {
+                                            if (strcmp(vn->as.variant_decl.fields[f]->as.field.name, var_name) == 0) {
+                                                return vn->as.variant_decl.fields[f]->as.field.class_name;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            const char *c_arm = find_ident_class_in_node(program, arm->as.match_arm.body, var_name);
+            if (c_arm) return c_arm;
+        }
+        return NULL;
+    }
+
+    return NULL;
+}
+
 static const char *get_expr_elem_class_name(CodegenCtx *ctx, AstNode *expr) {
     if (!expr) return NULL;
     if (expr->type == NODE_ALLOC && expr->as.alloc.elem_type == TY_CLASS) {
@@ -210,14 +289,8 @@ static const char *get_expr_elem_class_name(CodegenCtx *ctx, AstNode *expr) {
             }
         }
         AstNode *body = (fn->type == NODE_FUNCTION) ? fn->as.function.body : fn->as.method.body;
-        if (body && body->type == NODE_BLOCK) {
-            for (int i = 0; i < body->as.block.count; i++) {
-                AstNode *stmt = body->as.block.stmts[i];
-                if (stmt->type == NODE_LET && strcmp(stmt->as.let.name, var_name) == 0) {
-                    return stmt->as.let.class_name;
-                }
-            }
-        }
+        const char *found_cls = find_ident_class_in_node(ctx->program, body, var_name);
+        if (found_cls) return found_cls;
     }
     if (expr->type == NODE_CALL && expr->as.call.arg_count > 0) {
         const char *name = expr->as.call.callee;
@@ -229,6 +302,85 @@ static const char *get_expr_elem_class_name(CodegenCtx *ctx, AstNode *expr) {
 }
 
 static void gen_expr(CodegenCtx *ctx, AstNode *expr);
+
+static Type find_ident_type_in_node(AstNode *program, AstNode *node, const char *var_name) {
+    if (!node) return (Type)-1;
+
+    if (node->type == NODE_BLOCK) {
+        for (int i = 0; i < node->as.block.count; i++) {
+            Type t = find_ident_type_in_node(program, node->as.block.stmts[i], var_name);
+            if (t != (Type)-1) return t;
+        }
+        return (Type)-1;
+    }
+
+    if (node->type == NODE_LET) {
+        if (strcmp(node->as.let.name, var_name) == 0) {
+            return node->as.let.var_type;
+        }
+        return (Type)-1;
+    }
+
+    if (node->type == NODE_FOR_EACH) {
+        if (strcmp(node->as.for_each.loop_var_name, var_name) == 0) {
+            return infer_expr_type(program, NULL, node->as.for_each.collection_expr);
+        }
+        return find_ident_type_in_node(program, node->as.for_each.body, var_name);
+    }
+
+    if (node->type == NODE_IF) {
+        Type t1 = find_ident_type_in_node(program, node->as.if_stmt.then_b, var_name);
+        if (t1 != (Type)-1) return t1;
+        if (node->as.if_stmt.else_b) {
+            return find_ident_type_in_node(program, node->as.if_stmt.else_b, var_name);
+        }
+        return (Type)-1;
+    }
+
+    if (node->type == NODE_WHILE) {
+        return find_ident_type_in_node(program, node->as.while_stmt.body, var_name);
+    }
+
+    if (node->type == NODE_FOR) {
+        Type t_init = find_ident_type_in_node(program, node->as.for_stmt.init, var_name);
+        if (t_init != (Type)-1) return t_init;
+        return find_ident_type_in_node(program, node->as.for_stmt.body, var_name);
+    }
+
+    if (node->type == NODE_MATCH) {
+        for (int a = 0; a < node->as.match_stmt.arm_count; a++) {
+            AstNode *arm = node->as.match_stmt.arms[a];
+            if (!arm->as.match_arm.is_wildcard && program && program->type == NODE_PROGRAM) {
+                const char *ename = arm->as.match_arm.enum_name;
+                const char *vname = arm->as.match_arm.variant_name;
+                for (int e = 0; e < program->as.program.enum_count; e++) {
+                    AstNode *en = program->as.program.enums[e];
+                    if (strcmp(en->as.enum_decl.name, ename) == 0) {
+                        for (int v = 0; v < en->as.enum_decl.variant_count; v++) {
+                            AstNode *vn = en->as.enum_decl.variants[v];
+                            if (strcmp(vn->as.variant_decl.name, vname) == 0) {
+                                for (int b = 0; b < arm->as.match_arm.bind_count; b++) {
+                                    if (strcmp(arm->as.match_arm.bind_names[b], var_name) == 0) {
+                                        for (int f = 0; f < vn->as.variant_decl.field_count; f++) {
+                                            if (strcmp(vn->as.variant_decl.fields[f]->as.field.name, var_name) == 0) {
+                                                return vn->as.variant_decl.fields[f]->as.field.type;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Type t_arm = find_ident_type_in_node(program, arm->as.match_arm.body, var_name);
+            if (t_arm != (Type)-1) return t_arm;
+        }
+        return (Type)-1;
+    }
+
+    return (Type)-1;
+}
 
 static Type infer_expr_type(AstNode *program, AstNode *fn, AstNode *expr) {
     if (!expr) return TY_INT;
@@ -323,17 +475,8 @@ static Type infer_expr_type(AstNode *program, AstNode *fn, AstNode *expr) {
             }
         }
         AstNode *body = (fn->type == NODE_FUNCTION) ? fn->as.function.body : fn->as.method.body;
-        if (body && body->type == NODE_BLOCK) {
-            for (int i = 0; i < body->as.block.count; i++) {
-                AstNode *stmt = body->as.block.stmts[i];
-                if (stmt->type == NODE_LET && strcmp(stmt->as.let.name, var_name) == 0) {
-                    return stmt->as.let.var_type;
-                }
-                if (stmt->type == NODE_FOR_EACH && strcmp(stmt->as.for_each.loop_var_name, var_name) == 0) {
-                    return infer_expr_type(program, fn, stmt->as.for_each.collection_expr);
-                }
-            }
-        }
+        Type found_t = find_ident_type_in_node(program, body, var_name);
+        if (found_t != (Type)-1) return found_t;
     }
 
     return TY_INT;
@@ -609,7 +752,35 @@ static void gen_expr(CodegenCtx *ctx, AstNode *expr) {
 
         case NODE_NEW: {
             const char *cname = expr->as.new_expr.class_name;
-            if (is_struct_name(ctx, cname)) {
+            if (expr->as.new_expr.constructs_enum || find_enum(ctx->ct, cname) != NULL) {
+                const char *vname = expr->as.new_expr.variant_name;
+                EnumDef *edef = find_enum(ctx->ct, cname);
+                EnumVariantDef *vdef = edef ? find_enum_variant(edef, vname) : NULL;
+                sb_appendf(&ctx->sb, "%s_new_%s(", cname, vname);
+                if (vdef && vdef->field_count > 0) {
+                    for (int f = 0; f < vdef->field_count; f++) {
+                        if (f > 0) sb_append(&ctx->sb, ", ");
+                        const char *target_fname = vdef->fields[f].name;
+                        AstNode *fval = NULL;
+                        for (int k = 0; k < expr->as.new_expr.field_count; k++) {
+                            if (strcmp(expr->as.new_expr.field_names[k], target_fname) == 0) {
+                                fval = expr->as.new_expr.field_values[k];
+                                break;
+                            }
+                        }
+                        if (fval) {
+                            if (vdef->fields[f].type == TY_STRING && fval->type == NODE_LITERAL) {
+                                sb_appendf(&ctx->sb, "strdup(\"%s\")", fval->as.literal.val.s);
+                            } else {
+                                gen_expr(ctx, fval);
+                            }
+                        } else {
+                            sb_append(&ctx->sb, "0");
+                        }
+                    }
+                }
+                sb_append(&ctx->sb, ")");
+            } else if (is_struct_name(ctx, cname)) {
                 sb_appendf(&ctx->sb, "(%s){ ", cname);
                 for (int k = 0; k < expr->as.new_expr.field_count; k++) {
                     if (k > 0) sb_append(&ctx->sb, ", ");
@@ -685,6 +856,14 @@ static void gen_expr(CodegenCtx *ctx, AstNode *expr) {
             break;
 
         case NODE_UNARY:
+            if (strcmp(expr->as.unary.op, "&") == 0) {
+                Type ot = infer_expr_type(ctx->program, ctx->current_function, expr->as.unary.operand);
+                const char *ocls = get_expr_elem_class_name(ctx, expr->as.unary.operand);
+                if (ot == TY_CLASS && ocls && !is_struct_name(ctx, ocls)) {
+                    gen_expr(ctx, expr->as.unary.operand);
+                    break;
+                }
+            }
             sb_appendf(&ctx->sb, "(%s", expr->as.unary.op);
             gen_expr(ctx, expr->as.unary.operand);
             sb_append(&ctx->sb, ")");
@@ -1236,6 +1415,95 @@ static void gen_stmt(CodegenCtx *ctx, AstNode *stmt) {
             break;
         }
 
+        case NODE_MATCH: {
+            AstNode *scrut = stmt->as.match_stmt.expr;
+            const char *ename = stmt->as.match_stmt.enum_name;
+            if (!ename && scrut->type == NODE_IDENT) {
+                ename = get_expr_elem_class_name(ctx, scrut);
+            }
+            if (!ename) {
+                for (int a = 0; a < stmt->as.match_stmt.arm_count; a++) {
+                    if (!stmt->as.match_stmt.arms[a]->as.match_arm.is_wildcard) {
+                        ename = stmt->as.match_stmt.arms[a]->as.match_arm.enum_name;
+                        break;
+                    }
+                }
+            }
+
+            char *upper_ename = NULL;
+            if (ename) {
+                upper_ename = strdup(ename);
+                for (int c = 0; upper_ename[c]; c++) {
+                    upper_ename[c] = (char)toupper((unsigned char)upper_ename[c]);
+                }
+            }
+
+            static int match_tmp_counter = 0;
+            int cur_tmp = ++match_tmp_counter;
+
+            emit_indent(ctx);
+            sb_appendf(&ctx->sb, "%s *__match_scrut_%d = ", ename ? ename : "void", cur_tmp);
+            gen_expr(ctx, scrut);
+            sb_append(&ctx->sb, ";\n");
+
+            emit_indent(ctx);
+            sb_appendf(&ctx->sb, "switch (__match_scrut_%d->tag) {\n", cur_tmp);
+            ctx->indent_level++;
+
+            EnumDef *edef = ename ? find_enum(ctx->ct, ename) : NULL;
+
+            for (int a = 0; a < stmt->as.match_stmt.arm_count; a++) {
+                AstNode *arm = stmt->as.match_stmt.arms[a];
+                emit_indent(ctx);
+                if (arm->as.match_arm.is_wildcard) {
+                    sb_append(&ctx->sb, "default: {\n");
+                } else {
+                    sb_appendf(&ctx->sb, "case %s_TAG_%s: {\n", upper_ename ? upper_ename : "ENUM", arm->as.match_arm.variant_name);
+                }
+                ctx->indent_level++;
+
+                if (!arm->as.match_arm.is_wildcard && edef) {
+                    EnumVariantDef *vdef = find_enum_variant(edef, arm->as.match_arm.variant_name);
+                    if (vdef && vdef->field_count > 0) {
+                        for (int b = 0; b < arm->as.match_arm.bind_count; b++) {
+                            const char *bname = arm->as.match_arm.bind_names[b];
+                            FieldInfo *fi = find_variant_field(vdef, bname);
+                            if (fi) {
+                                emit_indent(ctx);
+                                const char *ftype_str = c_type_str_full(ctx, fi->type, fi->class_name, false, false);
+                                sb_appendf(&ctx->sb, "%s %s = __match_scrut_%d->as.%s.%s;\n",
+                                           ftype_str, bname, cur_tmp, arm->as.match_arm.variant_name, bname);
+                                emit_indent(ctx);
+                                sb_appendf(&ctx->sb, "(void)%s;\n", bname);
+                            }
+                        }
+                    }
+                }
+
+                AstNode *arm_body = arm->as.match_arm.body;
+                if (arm_body && arm_body->type == NODE_BLOCK) {
+                    for (int s = 0; s < arm_body->as.block.count; s++) {
+                        gen_stmt(ctx, arm_body->as.block.stmts[s]);
+                    }
+                    emit_frees(ctx, arm_body);
+                    emit_releases(ctx, arm_body);
+                }
+
+                emit_indent(ctx);
+                sb_append(&ctx->sb, "break;\n");
+                ctx->indent_level--;
+                emit_indent(ctx);
+                sb_append(&ctx->sb, "}\n");
+            }
+
+            ctx->indent_level--;
+            emit_indent(ctx);
+            sb_append(&ctx->sb, "}\n");
+
+            if (upper_ename) free(upper_ename);
+            break;
+        }
+
         case NODE_EXPR_STMT:
             emit_indent(ctx);
             gen_expr(ctx, stmt->as.expr_stmt.expr);
@@ -1270,9 +1538,39 @@ static void gen_block(CodegenCtx *ctx, AstNode *block_node) {
     if (!last_is_jump) {
         emit_frees(ctx, block_node);
         emit_releases(ctx, block_node);
-        if (ctx->current_function && ctx->current_function->type == NODE_FUNCTION && strcmp(ctx->current_function->as.function.name, "main") == 0 && ctx->current_function->as.function.body == block_node) {
-            emit_indent(ctx);
-            sb_append(&ctx->sb, "return 0;\n");
+        if (ctx->current_function) {
+            bool is_fn = (ctx->current_function->type == NODE_FUNCTION && ctx->current_function->as.function.body == block_node);
+            bool is_meth = (ctx->current_function->type == NODE_METHOD && ctx->current_function->as.method.body == block_node);
+            if (is_fn) {
+                if (strcmp(ctx->current_function->as.function.name, "main") == 0) {
+                    emit_indent(ctx);
+                    sb_append(&ctx->sb, "return 0;\n");
+                } else if (ctx->current_function->as.function.return_type != TY_VOID) {
+                    emit_indent(ctx);
+                    Type rt = ctx->current_function->as.function.return_type;
+                    if (rt == TY_INT || rt == TY_BOOL || rt == TY_CHAR) {
+                        sb_append(&ctx->sb, "return 0;\n");
+                    } else if (rt == TY_FLOAT) {
+                        sb_append(&ctx->sb, "return 0.0;\n");
+                    } else if (rt == TY_CLASS && is_struct_name(ctx, ctx->current_function->as.function.return_class_name)) {
+                        sb_appendf(&ctx->sb, "return (%s){0};\n", ctx->current_function->as.function.return_class_name);
+                    } else {
+                        sb_append(&ctx->sb, "return NULL;\n");
+                    }
+                }
+            } else if (is_meth && ctx->current_function->as.method.return_type != TY_VOID) {
+                emit_indent(ctx);
+                Type rt = ctx->current_function->as.method.return_type;
+                if (rt == TY_INT || rt == TY_BOOL || rt == TY_CHAR) {
+                    sb_append(&ctx->sb, "return 0;\n");
+                } else if (rt == TY_FLOAT) {
+                    sb_append(&ctx->sb, "return 0.0;\n");
+                } else if (rt == TY_CLASS && is_struct_name(ctx, ctx->current_function->as.method.return_class_name)) {
+                    sb_appendf(&ctx->sb, "return (%s){0};\n", ctx->current_function->as.method.return_class_name);
+                } else {
+                    sb_append(&ctx->sb, "return NULL;\n");
+                }
+            }
         }
     }
 
@@ -1294,6 +1592,138 @@ static void gen_struct_typedefs(CodegenCtx *ctx, AstNode *program) {
                        f_node->as.struct_field_decl.name);
         }
         sb_appendf(&ctx->sb, "} %s;\n\n", st->as.struct_decl.name);
+    }
+}
+
+static void gen_enum_helpers(CodegenCtx *ctx, AstNode *program) {
+    if (!program || program->type != NODE_PROGRAM) return;
+
+    // 1. Tag enums and forward typedefs
+    for (int i = 0; i < program->as.program.enum_count; i++) {
+        AstNode *en = program->as.program.enums[i];
+        const char *ename = en->as.enum_decl.name;
+        char *upper_ename = strdup(ename);
+        for (int c = 0; upper_ename[c]; c++) {
+            upper_ename[c] = (char)toupper((unsigned char)upper_ename[c]);
+        }
+
+        sb_appendf(&ctx->sb, "typedef enum {\n");
+        for (int v = 0; v < en->as.enum_decl.variant_count; v++) {
+            AstNode *vn = en->as.enum_decl.variants[v];
+            sb_appendf(&ctx->sb, "    %s_TAG_%s%s\n", upper_ename, vn->as.variant_decl.name, (v + 1 < en->as.enum_decl.variant_count) ? "," : "");
+        }
+        sb_appendf(&ctx->sb, "} __cco_%s_tag;\n\n", ename);
+        sb_appendf(&ctx->sb, "typedef struct %s %s;\n\n", ename, ename);
+        free(upper_ename);
+    }
+
+    // 2. Struct definitions with unions
+    for (int i = 0; i < program->as.program.enum_count; i++) {
+        AstNode *en = program->as.program.enums[i];
+        const char *ename = en->as.enum_decl.name;
+
+        sb_appendf(&ctx->sb, "struct %s {\n", ename);
+        sb_appendf(&ctx->sb, "    __cco_%s_tag tag;\n", ename);
+        sb_append(&ctx->sb, "    union {\n");
+
+        bool has_payload = false;
+        for (int v = 0; v < en->as.enum_decl.variant_count; v++) {
+            AstNode *vn = en->as.enum_decl.variants[v];
+            if (!vn->as.variant_decl.is_unit && vn->as.variant_decl.field_count > 0) {
+                has_payload = true;
+                sb_appendf(&ctx->sb, "        struct {\n");
+                for (int f = 0; f < vn->as.variant_decl.field_count; f++) {
+                    AstNode *fn = vn->as.variant_decl.fields[f];
+                    sb_appendf(&ctx->sb, "            %s %s;\n",
+                               c_type_str_full(ctx, fn->as.field.type, fn->as.field.class_name, false, false),
+                               fn->as.field.name);
+                }
+                sb_appendf(&ctx->sb, "        } %s;\n", vn->as.variant_decl.name);
+            }
+        }
+        if (!has_payload) {
+            sb_append(&ctx->sb, "        int _dummy;\n");
+        }
+        sb_append(&ctx->sb, "    } as;\n");
+        sb_append(&ctx->sb, "};\n\n");
+    }
+
+    // 3. Destructors
+    for (int i = 0; i < program->as.program.enum_count; i++) {
+        AstNode *en = program->as.program.enums[i];
+        const char *ename = en->as.enum_decl.name;
+        char *upper_ename = strdup(ename);
+        for (int c = 0; upper_ename[c]; c++) {
+            upper_ename[c] = (char)toupper((unsigned char)upper_ename[c]);
+        }
+
+        sb_appendf(&ctx->sb, "static inline void %s_free(%s *p) {\n", ename, ename);
+        sb_append(&ctx->sb, "    if (!p) return;\n");
+        sb_append(&ctx->sb, "    switch (p->tag) {\n");
+        for (int v = 0; v < en->as.enum_decl.variant_count; v++) {
+            AstNode *vn = en->as.enum_decl.variants[v];
+            sb_appendf(&ctx->sb, "        case %s_TAG_%s:\n", upper_ename, vn->as.variant_decl.name);
+            if (!vn->as.variant_decl.is_unit && vn->as.variant_decl.field_count > 0) {
+                for (int f = 0; f < vn->as.variant_decl.field_count; f++) {
+                    AstNode *fn = vn->as.variant_decl.fields[f];
+                    if (fn->as.field.type == TY_CLASS && fn->as.field.class_name) {
+                        if (is_struct_name(ctx, fn->as.field.class_name)) {
+                            // Value struct: no free needed
+                        } else {
+                            // Class or Enum pointer
+                            sb_appendf(&ctx->sb, "            %s_free(p->as.%s.%s);\n", fn->as.field.class_name, vn->as.variant_decl.name, fn->as.field.name);
+                        }
+                    } else if (fn->as.field.type == TY_STRING) {
+                        sb_appendf(&ctx->sb, "            if (p->as.%s.%s) free(p->as.%s.%s);\n", vn->as.variant_decl.name, fn->as.field.name, vn->as.variant_decl.name, fn->as.field.name);
+                    }
+                }
+            }
+            sb_append(&ctx->sb, "            break;\n");
+        }
+        sb_append(&ctx->sb, "    }\n");
+        sb_append(&ctx->sb, "    free(p);\n");
+        sb_append(&ctx->sb, "}\n\n");
+        free(upper_ename);
+    }
+
+    // 4. Variant Constructor helper functions
+    for (int i = 0; i < program->as.program.enum_count; i++) {
+        AstNode *en = program->as.program.enums[i];
+        const char *ename = en->as.enum_decl.name;
+        char *upper_ename = strdup(ename);
+        for (int c = 0; upper_ename[c]; c++) {
+            upper_ename[c] = (char)toupper((unsigned char)upper_ename[c]);
+        }
+
+        for (int v = 0; v < en->as.enum_decl.variant_count; v++) {
+            AstNode *vn = en->as.enum_decl.variants[v];
+            const char *vname = vn->as.variant_decl.name;
+
+            sb_appendf(&ctx->sb, "static inline %s *%s_new_%s(", ename, ename, vname);
+            if (vn->as.variant_decl.is_unit || vn->as.variant_decl.field_count == 0) {
+                sb_append(&ctx->sb, "void");
+            } else {
+                for (int f = 0; f < vn->as.variant_decl.field_count; f++) {
+                    if (f > 0) sb_append(&ctx->sb, ", ");
+                    AstNode *fn = vn->as.variant_decl.fields[f];
+                    sb_appendf(&ctx->sb, "%s %s",
+                               c_type_str_full(ctx, fn->as.field.type, fn->as.field.class_name, false, false),
+                               fn->as.field.name);
+                }
+            }
+            sb_append(&ctx->sb, ") {\n");
+            sb_appendf(&ctx->sb, "    %s *p = (%s *)malloc(sizeof(%s));\n", ename, ename, ename);
+            sb_appendf(&ctx->sb, "    p->tag = %s_TAG_%s;\n", upper_ename, vname);
+            if (!vn->as.variant_decl.is_unit && vn->as.variant_decl.field_count > 0) {
+                for (int f = 0; f < vn->as.variant_decl.field_count; f++) {
+                    AstNode *fn = vn->as.variant_decl.fields[f];
+                    sb_appendf(&ctx->sb, "    p->as.%s.%s = %s;\n", vname, fn->as.field.name, fn->as.field.name);
+                }
+            }
+            sb_append(&ctx->sb, "    return p;\n");
+            sb_append(&ctx->sb, "}\n\n");
+        }
+        free(upper_ename);
     }
 }
 
@@ -1516,6 +1946,13 @@ static void scan_node_usage(AstNode *node, bool *used_chunks) {
             scan_node_usage(node->as.for_each.body, used_chunks);
             break;
 
+        case NODE_MATCH:
+            scan_node_usage(node->as.match_stmt.expr, used_chunks);
+            for (int a = 0; a < node->as.match_stmt.arm_count; a++) {
+                scan_node_usage(node->as.match_stmt.arms[a]->as.match_arm.body, used_chunks);
+            }
+            break;
+
         case NODE_RETURN:
             scan_node_usage(node->as.return_stmt.value, used_chunks);
             break;
@@ -1669,6 +2106,9 @@ char *generate_c_code(AstNode *program, AstArena *arena) {
 
     // Struct definitions
     gen_struct_typedefs(&ctx, program);
+
+    // Enum definitions, tag enum, union struct, _free, and _new_<variant> helpers
+    gen_enum_helpers(&ctx, program);
 
     // Class struct definitions, retain/release/new helpers
     gen_class_helpers(&ctx, program);

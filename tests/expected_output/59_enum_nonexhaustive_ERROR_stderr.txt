@@ -1,0 +1,7 @@
+error: match is not exhaustive — missing variant(s): 'Blue'
+  --> tests/programs/59_enum_nonexhaustive_ERROR.cco:8:5
+    |
+  8 |     match c {
+    |     ^ non-exhaustive match
+    |
+note: add arms for the missing variants, or a catch-all '_ => { }' arm
