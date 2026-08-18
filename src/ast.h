@@ -4,12 +4,6 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-typedef struct RefRelease {
-    char *var_name;
-    char *class_name;
-    bool is_array;
-} RefRelease;
-
 typedef enum {
     TY_INT,
     TY_FLOAT,
@@ -17,8 +11,17 @@ typedef enum {
     TY_BOOL,
     TY_STRING,
     TY_VOID,
-    TY_CLASS
+    TY_CLASS,
+    TY_MAP
 } Type;
+
+typedef struct RefRelease {
+    char *var_name;
+    char *class_name;
+    bool is_array;
+    bool is_map;
+    Type key_type;
+} RefRelease;
 
 typedef enum {
     NODE_PROGRAM,
@@ -61,6 +64,8 @@ typedef struct AstNode AstNode;
 typedef struct {
     char *var_name;
     bool is_array;
+    bool is_map;
+    Type key_type;
 } RawFree;
 
 struct AstNode {
@@ -121,6 +126,8 @@ struct AstNode {
             char *name;
             Type type;
             bool is_array;
+            bool is_map;
+            Type key_type;
             char *class_name;
         } field;
 
@@ -171,6 +178,8 @@ struct AstNode {
             char *name;
             Type var_type;
             bool is_array;
+            bool is_map;
+            Type key_type;
             char *class_name;
             AstNode *value;
             bool retain_rhs;
@@ -301,6 +310,8 @@ struct AstNode {
             char *class_name;
             AstNode *count_expr;
             bool is_list;
+            bool is_map;
+            Type key_type;
         } alloc;
     } as;
 };

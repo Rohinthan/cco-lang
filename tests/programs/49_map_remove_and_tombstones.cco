@@ -1,0 +1,35 @@
+fn main() -> void {
+    let m: map[string]int = map_new(string, int);
+    m = put(m, "a", 1);
+    m = put(m, "b", 2);
+    m = put(m, "c", 3);
+    m = put(m, "d", 4);
+    m = put(m, "e", 5);
+
+    print(len(m));
+    if (has(m, "b")) {
+        print(1);
+    } else {
+        print(0);
+    }
+
+    let removed_val: int = remove(m, "b");
+    print(removed_val);
+
+    if (has(m, "b")) {
+        print(1);
+    } else {
+        print(0);
+    }
+
+    let removed_d: int = remove(m, "d");
+    print(removed_d);
+
+    print(len(m));
+
+    m = put(m, "f", 6);
+    m = put(m, "g", 7);
+    print(len(m));
+    print(get(m, "f"));
+    print(get(m, "g"));
+}

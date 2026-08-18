@@ -1,0 +1,15 @@
+fn main() -> void {
+    let m: map[int]int = map_new(int, int);
+    m = put(m, 1, 100);
+    m = put(m, 2, 200);
+    m = put(m, 3, 300);
+
+    print(len(m));
+    print(get(m, 1));
+    print(get(m, 2));
+    print(get(m, 3));
+
+    m = put(m, 2, 250);
+    print(len(m));
+    print(get(m, 2));
+}

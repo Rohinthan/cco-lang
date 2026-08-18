@@ -1,0 +1,29 @@
+class Point {
+    x: int;
+    y: int;
+    fn print_coords(self) -> void {
+        print(self.x);
+        print(self.y);
+    }
+}
+
+fn main() -> void {
+    let m: map[string]Point = map_new(string, Point);
+    let p1: Point = Point { x: 1, y: 2 };
+    let p2: Point = Point { x: 3, y: 4 };
+    let p3: Point = Point { x: 5, y: 6 };
+
+    m = put(m, "p1", p1);
+    m = put(m, "p2", p2);
+    m = put(m, "p3", p3);
+
+    print(len(m));
+    let ref_p: Point = get(m, "p2");
+    ref_p.print_coords();
+
+    let p2_new: Point = Point { x: 10, y: 20 };
+    m = put(m, "p2", p2_new);
+
+    let ref_p2_new: Point = get(m, "p2");
+    ref_p2_new.print_coords();
+}

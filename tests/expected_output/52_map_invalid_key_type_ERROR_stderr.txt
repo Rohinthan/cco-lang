@@ -1,0 +1,7 @@
+error: map keys must be 'int' or 'string' — 'float' is not allowed in v10
+  --> tests/programs/52_map_invalid_key_type_ERROR.cco:2:16
+    |
+  2 |     let m: map[float]int = map_new(float, int);
+    |                ^ not allowed in v10
+    |
+note: map keys must be hashable and comparable — only 'int' and 'string' keys are supported in v10

@@ -90,6 +90,7 @@ const char *type_to_string(Type type) {
         case TY_STRING: return "string";
         case TY_VOID: return "void";
         case TY_CLASS: return "class";
+        case TY_MAP: return "map";
         default: return "unknown";
     }
 }

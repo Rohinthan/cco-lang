@@ -1,0 +1,11 @@
+fn main() -> void {
+    let m: map[int]int = map_new(int, int);
+    for (let i: int = 0; i < 100; i = i + 1) {
+        m = put(m, i, i * 2);
+    }
+
+    print(len(m));
+    print(get(m, 0));
+    print(get(m, 50));
+    print(get(m, 99));
+}

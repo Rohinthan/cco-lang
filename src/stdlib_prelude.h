@@ -19,6 +19,16 @@ static const char *deps_arr_decr_len[] = { "arr_header", NULL };
 static const char *deps_arr_maybe_grow[] = { "arr_header", NULL };
 static const char *deps_bounds_check[] = { "arr_len", "arr_header", NULL };
 
+static const char *deps_map_hash[] = { "map_bucket", NULL };
+static const char *deps_map_new[] = { "map_bucket", NULL };
+static const char *deps_map_rehash[] = { "map_hash", "map_bucket", NULL };
+static const char *deps_map_put[] = { "map_rehash", "map_hash", "map_bucket", NULL };
+static const char *deps_map_get[] = { "map_hash", "map_bucket", NULL };
+static const char *deps_map_has[] = { "map_hash", "map_bucket", NULL };
+static const char *deps_map_remove[] = { "map_hash", "map_bucket", NULL };
+static const char *deps_map_keys[] = { "list_new", "arr_maybe_grow", "arr_len_raw", "arr_incr_len", "map_bucket", NULL };
+static const char *deps_map_free[] = { "map_bucket", NULL };
+
 static const PreludeChunk PRELUDE_CHUNKS[] = {
     {
         "concat",
@@ -264,6 +274,294 @@ static const PreludeChunk PRELUDE_CHUNKS[] = {
         "    }\n"
         "}\n\n",
         deps_bounds_check
+    },
+    {
+        "map_bucket",
+        "#ifndef CCO_MAP_BUCKET_DEF\n"
+        "#define CCO_MAP_BUCKET_DEF\n"
+        "#include <stddef.h>\n"
+        "#include <stdint.h>\n"
+        "#include <stdbool.h>\n"
+        "#include <stdlib.h>\n"
+        "#include <stdio.h>\n"
+        "#include <string.h>\n"
+        "typedef enum {\n"
+        "    __CCO_BUCKET_EMPTY = 0,\n"
+        "    __CCO_BUCKET_OCCUPIED = 1,\n"
+        "    __CCO_BUCKET_TOMBSTONE = 2\n"
+        "} __cco_bucket_state;\n\n"
+        "typedef struct {\n"
+        "    __cco_bucket_state state;\n"
+        "    void *key;\n"
+        "    void *value;\n"
+        "} __cco_map_bucket;\n\n"
+        "typedef struct {\n"
+        "    size_t capacity;\n"
+        "    size_t occupied;\n"
+        "    size_t tombstones;\n"
+        "    int key_type;\n"
+        "    __cco_map_bucket *buckets;\n"
+        "} __cco_map;\n\n"
+        "typedef void (*__cco_val_free_fn)(void *);\n"
+        "#endif\n\n",
+        NULL
+    },
+    {
+        "map_hash",
+        "static inline uint32_t __cco_hash_str(const char *str) {\n"
+        "    uint32_t hash = 2166136261u;\n"
+        "    for (const char *p = str; *p; p++) {\n"
+        "        hash ^= (uint8_t)*p;\n"
+        "        hash *= 16777619u;\n"
+        "    }\n"
+        "    return hash;\n"
+        "}\n\n"
+        "static inline uint32_t __cco_hash_int(int key) {\n"
+        "    uint32_t x = (uint32_t)key;\n"
+        "    x = ((x >> 16) ^ x) * 0x45d9f3b;\n"
+        "    x = ((x >> 16) ^ x) * 0x45d9f3b;\n"
+        "    x = (x >> 16) ^ x;\n"
+        "    return x;\n"
+        "}\n\n"
+        "static inline bool __cco_key_eq(int key_type, void *k1, void *k2) {\n"
+        "    if (key_type == 1) {\n"
+        "        if (!k1 || !k2) return k1 == k2;\n"
+        "        return strcmp((const char *)k1, (const char *)k2) == 0;\n"
+        "    } else {\n"
+        "        return (intptr_t)k1 == (intptr_t)k2;\n"
+        "    }\n"
+        "}\n\n"
+        "static inline uint32_t __cco_hash_key(int key_type, void *key) {\n"
+        "    if (key_type == 1) return __cco_hash_str((const char *)key);\n"
+        "    else return __cco_hash_int((int)(intptr_t)key);\n"
+        "}\n\n",
+        deps_map_hash
+    },
+    {
+        "map_new",
+        "static inline __cco_map *__cco_map_new(int key_type) {\n"
+        "    __cco_map *m = (__cco_map *)malloc(sizeof(__cco_map));\n"
+        "    if (!m) {\n"
+        "        fprintf(stderr, \"Memory allocation failed in map_new()\\n\");\n"
+        "        exit(1);\n"
+        "    }\n"
+        "    m->capacity = 8;\n"
+        "    m->occupied = 0;\n"
+        "    m->tombstones = 0;\n"
+        "    m->key_type = key_type;\n"
+        "    m->buckets = (__cco_map_bucket *)calloc(m->capacity, sizeof(__cco_map_bucket));\n"
+        "    if (!m->buckets) {\n"
+        "        fprintf(stderr, \"Memory allocation failed in map_new()\\n\");\n"
+        "        exit(1);\n"
+        "    }\n"
+        "    return m;\n"
+        "}\n\n",
+        deps_map_new
+    },
+    {
+        "map_rehash",
+        "static inline void __cco_map_rehash(__cco_map *m) {\n"
+        "    size_t old_cap = m->capacity;\n"
+        "    size_t new_cap = old_cap * 2;\n"
+        "    __cco_map_bucket *old_buckets = m->buckets;\n"
+        "    __cco_map_bucket *new_buckets = (__cco_map_bucket *)calloc(new_cap, sizeof(__cco_map_bucket));\n"
+        "    if (!new_buckets) {\n"
+        "        fprintf(stderr, \"Memory allocation failed during map rehash\\n\");\n"
+        "        exit(1);\n"
+        "    }\n"
+        "    m->buckets = new_buckets;\n"
+        "    m->capacity = new_cap;\n"
+        "    m->occupied = 0;\n"
+        "    m->tombstones = 0;\n"
+        "    for (size_t i = 0; i < old_cap; i++) {\n"
+        "        if (old_buckets[i].state == __CCO_BUCKET_OCCUPIED) {\n"
+        "            void *key = old_buckets[i].key;\n"
+        "            void *val = old_buckets[i].value;\n"
+        "            uint32_t h = __cco_hash_key(m->key_type, key);\n"
+        "            size_t idx = h & (new_cap - 1);\n"
+        "            while (m->buckets[idx].state == __CCO_BUCKET_OCCUPIED) {\n"
+        "                idx = (idx + 1) & (new_cap - 1);\n"
+        "            }\n"
+        "            m->buckets[idx].state = __CCO_BUCKET_OCCUPIED;\n"
+        "            m->buckets[idx].key = key;\n"
+        "            m->buckets[idx].value = val;\n"
+        "            m->occupied++;\n"
+        "        }\n"
+        "    }\n"
+        "    free(old_buckets);\n"
+        "}\n\n",
+        deps_map_rehash
+    },
+    {
+        "map_put",
+        "static inline __cco_map *__cco_map_put(__cco_map *m, void *key, void *val, __cco_val_free_fn free_fn) {\n"
+        "    if (!m) return NULL;\n"
+        "    if ((m->occupied + m->tombstones + 1) * 10 >= m->capacity * 7) {\n"
+        "        __cco_map_rehash(m);\n"
+        "    }\n"
+        "    uint32_t h = __cco_hash_key(m->key_type, key);\n"
+        "    size_t cap = m->capacity;\n"
+        "    size_t idx = h & (cap - 1);\n"
+        "    long first_tombstone = -1;\n"
+        "    while (m->buckets[idx].state != __CCO_BUCKET_EMPTY) {\n"
+        "        if (m->buckets[idx].state == __CCO_BUCKET_TOMBSTONE) {\n"
+        "            if (first_tombstone == -1) first_tombstone = (long)idx;\n"
+        "        } else if (m->buckets[idx].state == __CCO_BUCKET_OCCUPIED) {\n"
+        "            if (__cco_key_eq(m->key_type, m->buckets[idx].key, key)) {\n"
+        "                if (free_fn && m->buckets[idx].value) {\n"
+        "                    free_fn(m->buckets[idx].value);\n"
+        "                }\n"
+        "                m->buckets[idx].value = val;\n"
+        "                return m;\n"
+        "            }\n"
+        "        }\n"
+        "        idx = (idx + 1) & (cap - 1);\n"
+        "    }\n"
+        "    size_t insert_idx = (first_tombstone != -1) ? (size_t)first_tombstone : idx;\n"
+        "    void *key_to_store;\n"
+        "    if (m->key_type == 1) {\n"
+        "        key_to_store = strdup((const char *)key);\n"
+        "        if (!key_to_store) {\n"
+        "            fprintf(stderr, \"Memory allocation failed in strdup key\\n\");\n"
+        "            exit(1);\n"
+        "        }\n"
+        "    } else {\n"
+        "        key_to_store = key;\n"
+        "    }\n"
+        "    if (m->buckets[insert_idx].state == __CCO_BUCKET_TOMBSTONE) {\n"
+        "        m->tombstones--;\n"
+        "    }\n"
+        "    m->buckets[insert_idx].state = __CCO_BUCKET_OCCUPIED;\n"
+        "    m->buckets[insert_idx].key = key_to_store;\n"
+        "    m->buckets[insert_idx].value = val;\n"
+        "    m->occupied++;\n"
+        "    return m;\n"
+        "}\n\n",
+        deps_map_put
+    },
+    {
+        "map_get",
+        "static inline void *__cco_map_get(__cco_map *m, void *key) {\n"
+        "    if (!m) {\n"
+        "        fprintf(stderr, \"Runtime Error: map is null in get()\\n\");\n"
+        "        exit(1);\n"
+        "    }\n"
+        "    uint32_t h = __cco_hash_key(m->key_type, key);\n"
+        "    size_t cap = m->capacity;\n"
+        "    size_t idx = h & (cap - 1);\n"
+        "    while (m->buckets[idx].state != __CCO_BUCKET_EMPTY) {\n"
+        "        if (m->buckets[idx].state == __CCO_BUCKET_OCCUPIED) {\n"
+        "            if (__cco_key_eq(m->key_type, m->buckets[idx].key, key)) {\n"
+        "                return m->buckets[idx].value;\n"
+        "            }\n"
+        "        }\n"
+        "        idx = (idx + 1) & (cap - 1);\n"
+        "    }\n"
+        "    if (m->key_type == 1) {\n"
+        "        fprintf(stderr, \"Runtime Error: key '%s' not found in map\\n\", (const char *)key);\n"
+        "    } else {\n"
+        "        fprintf(stderr, \"Runtime Error: key '%d' not found in map\\n\", (int)(intptr_t)key);\n"
+        "    }\n"
+        "    exit(1);\n"
+        "}\n\n",
+        deps_map_get
+    },
+    {
+        "map_has",
+        "static inline bool __cco_map_has(__cco_map *m, void *key) {\n"
+        "    if (!m) return false;\n"
+        "    uint32_t h = __cco_hash_key(m->key_type, key);\n"
+        "    size_t cap = m->capacity;\n"
+        "    size_t idx = h & (cap - 1);\n"
+        "    while (m->buckets[idx].state != __CCO_BUCKET_EMPTY) {\n"
+        "        if (m->buckets[idx].state == __CCO_BUCKET_OCCUPIED) {\n"
+        "            if (__cco_key_eq(m->key_type, m->buckets[idx].key, key)) {\n"
+        "                return true;\n"
+        "            }\n"
+        "        }\n"
+        "        idx = (idx + 1) & (cap - 1);\n"
+        "    }\n"
+        "    return false;\n"
+        "}\n\n",
+        deps_map_has
+    },
+    {
+        "map_remove",
+        "static inline void *__cco_map_remove(__cco_map *m, void *key) {\n"
+        "    if (!m) {\n"
+        "        fprintf(stderr, \"Runtime Error: map is null in remove()\\n\");\n"
+        "        exit(1);\n"
+        "    }\n"
+        "    uint32_t h = __cco_hash_key(m->key_type, key);\n"
+        "    size_t cap = m->capacity;\n"
+        "    size_t idx = h & (cap - 1);\n"
+        "    while (m->buckets[idx].state != __CCO_BUCKET_EMPTY) {\n"
+        "        if (m->buckets[idx].state == __CCO_BUCKET_OCCUPIED) {\n"
+        "            if (__cco_key_eq(m->key_type, m->buckets[idx].key, key)) {\n"
+        "                void *val = m->buckets[idx].value;\n"
+        "                if (m->key_type == 1) free(m->buckets[idx].key);\n"
+        "                m->buckets[idx].key = NULL;\n"
+        "                m->buckets[idx].value = NULL;\n"
+        "                m->buckets[idx].state = __CCO_BUCKET_TOMBSTONE;\n"
+        "                m->occupied--;\n"
+        "                m->tombstones++;\n"
+        "                return val;\n"
+        "            }\n"
+        "        }\n"
+        "        idx = (idx + 1) & (cap - 1);\n"
+        "    }\n"
+        "    if (m->key_type == 1) {\n"
+        "        fprintf(stderr, \"Runtime Error: key '%s' not found in map\\n\", (const char *)key);\n"
+        "    } else {\n"
+        "        fprintf(stderr, \"Runtime Error: key '%d' not found in map\\n\", (int)(intptr_t)key);\n"
+        "    }\n"
+        "    exit(1);\n"
+        "}\n\n",
+        deps_map_remove
+    },
+    {
+        "map_keys",
+        "static inline void *__cco_map_keys(__cco_map *m) {\n"
+        "    if (!m) return NULL;\n"
+        "    size_t elem_size = (m->key_type == 1) ? sizeof(char *) : sizeof(int);\n"
+        "    void *arr = __cco_list_new(elem_size);\n"
+        "    if (m->occupied == 0) return arr;\n"
+        "    for (size_t i = 0; i < m->capacity; i++) {\n"
+        "        if (m->buckets[i].state == __CCO_BUCKET_OCCUPIED) {\n"
+        "            arr = __cco_arr_maybe_grow(arr, elem_size);\n"
+        "            int len = __cco_arr_len_raw(arr);\n"
+        "            if (m->key_type == 1) {\n"
+        "                ((char **)arr)[len] = (char *)m->buckets[i].key;\n"
+        "            } else {\n"
+        "                ((int *)arr)[len] = (int)(intptr_t)m->buckets[i].key;\n"
+        "            }\n"
+        "            __cco_arr_incr_len(arr);\n"
+        "        }\n"
+        "    }\n"
+        "    return arr;\n"
+        "}\n\n",
+        deps_map_keys
+    },
+    {
+        "map_free",
+        "static inline void __cco_map_free(__cco_map *m, __cco_val_free_fn val_free_fn) {\n"
+        "    if (!m) return;\n"
+        "    if (m->buckets) {\n"
+        "        for (size_t i = 0; i < m->capacity; i++) {\n"
+        "            if (m->buckets[i].state == __CCO_BUCKET_OCCUPIED) {\n"
+        "                if (m->key_type == 1 && m->buckets[i].key) {\n"
+        "                    free(m->buckets[i].key);\n"
+        "                }\n"
+        "                if (val_free_fn && m->buckets[i].value) {\n"
+        "                    val_free_fn(m->buckets[i].value);\n"
+        "                }\n"
+        "            }\n"
+        "        }\n"
+        "        free(m->buckets);\n"
+        "    }\n"
+        "    free(m);\n"
+        "}\n\n",
+        deps_map_free
     }
 };
 

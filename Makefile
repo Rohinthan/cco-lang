@@ -15,10 +15,12 @@ unit_tests: cco
 	$(CC) $(CFLAGS) $(SRC) tests/unit/test_lexer.c -o build/test_lexer $(LDFLAGS)
 	$(CC) $(CFLAGS) $(SRC) tests/unit/test_parser.c -o build/test_parser $(LDFLAGS)
 	$(CC) $(CFLAGS) $(SRC) tests/unit/test_scope.c -o build/test_scope $(LDFLAGS)
+	$(CC) $(CFLAGS) tests/unit/test_map_runtime.c -o build/test_map_runtime $(LDFLAGS)
 	@echo "--- Running Unit Tests under Valgrind ---"
 	valgrind --leak-check=full --error-exitcode=1 ./build/test_lexer
 	valgrind --leak-check=full --error-exitcode=1 ./build/test_parser
 	valgrind --leak-check=full --error-exitcode=1 ./build/test_scope
+	valgrind --leak-check=full --error-exitcode=1 ./build/test_map_runtime
 
 test: unit_tests
 	@bash tests/run_tests.sh

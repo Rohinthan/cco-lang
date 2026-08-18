@@ -60,12 +60,51 @@ Parser create_parser(TokenArray tokens, AstArena *arena) {
 static AstNode *parse_expr(Parser *p);
 static AstNode *parse_block(Parser *p);
 static AstNode *parse_statement(Parser *p);
-static Type parse_type_with_class(Parser *p, char **out_class_name, bool *out_is_borrowed, bool *out_is_array) {
+static Type parse_type_with_class(Parser *p, char **out_class_name, bool *out_is_borrowed, bool *out_is_array, bool *out_is_map, Type *out_key_type) {
     if (out_class_name) *out_class_name = NULL;
     if (out_is_borrowed) *out_is_borrowed = false;
     if (out_is_array) *out_is_array = false;
+    if (out_is_map) *out_is_map = false;
+    if (out_key_type) *out_key_type = TY_INT;
 
     bool is_borrowed = match(p, TOKEN_AMP);
+
+    if (match(p, TOKEN_MAP)) {
+        consume(p, TOKEN_LBRACKET, "Expected '[' after 'map'");
+        Type key_t = TY_INT;
+        if (match(p, TOKEN_TYPE_INT)) {
+            key_t = TY_INT;
+        } else if (match(p, TOKEN_TYPE_STRING)) {
+            key_t = TY_STRING;
+        } else {
+            Token err_tok = peek(p);
+            const char *got_name = err_tok.lexeme ? err_tok.lexeme : "unknown";
+            if (err_tok.type == TOKEN_TYPE_FLOAT) got_name = "float";
+            else if (err_tok.type == TOKEN_TYPE_CHAR) got_name = "char";
+            else if (err_tok.type == TOKEN_TYPE_BOOL) got_name = "bool";
+            else if (err_tok.type == TOKEN_TYPE_VOID) got_name = "void";
+
+            char short_msg[256];
+            snprintf(short_msg, sizeof(short_msg), "map keys must be 'int' or 'string' — '%s' is not allowed in v10", got_name);
+            ErrorLocation loc = {get_error_filename(), err_tok.line, err_tok.col};
+            print_formatted_error(
+                short_msg,
+                loc,
+                "not allowed in v10",
+                "map keys must be hashable and comparable — only 'int' and 'string' keys are supported in v10",
+                NULL,
+                NULL,
+                NULL
+            );
+            exit(1);
+        }
+        consume(p, TOKEN_RBRACKET, "Expected ']' after map key type");
+
+        Type val_t = parse_type_with_class(p, out_class_name, out_is_borrowed, out_is_array, NULL, NULL);
+        if (out_is_map) *out_is_map = true;
+        if (out_key_type) *out_key_type = key_t;
+        return val_t;
+    }
 
     Type t = TY_VOID;
     if (match(p, TOKEN_TYPE_INT)) t = TY_INT;
@@ -145,7 +184,7 @@ static AstNode *parse_primary(Parser *p) {
         Token tok = previous(p);
         consume(p, TOKEN_LPAREN, "Expected '(' after 'alloc'");
         char *alloc_cls = NULL;
-        Type elem_type = parse_type_with_class(p, &alloc_cls, NULL, NULL);
+        Type elem_type = parse_type_with_class(p, &alloc_cls, NULL, NULL, NULL, NULL);
         consume(p, TOKEN_COMMA, "Expected ',' after alloc type");
         AstNode *count_expr = parse_expr(p);
         consume(p, TOKEN_RPAREN, "Expected ')' after alloc count expression");
@@ -162,7 +201,7 @@ static AstNode *parse_primary(Parser *p) {
         Token tok = previous(p);
         consume(p, TOKEN_LPAREN, "Expected '(' after 'list_new'");
         char *alloc_cls = NULL;
-        Type elem_type = parse_type_with_class(p, &alloc_cls, NULL, NULL);
+        Type elem_type = parse_type_with_class(p, &alloc_cls, NULL, NULL, NULL, NULL);
         consume(p, TOKEN_RPAREN, "Expected ')' after list_new type");
 
         AstNode *node = arena_alloc_node(p->arena, NODE_ALLOC, tok.line, tok.col);
@@ -170,6 +209,52 @@ static AstNode *parse_primary(Parser *p) {
         node->as.alloc.class_name = alloc_cls;
         node->as.alloc.count_expr = NULL;
         node->as.alloc.is_list = true;
+        node->as.alloc.is_map = false;
+        return node;
+    }
+
+    if (match(p, TOKEN_MAP_NEW)) {
+        Token tok = previous(p);
+        consume(p, TOKEN_LPAREN, "Expected '(' after 'map_new'");
+        Type key_t = TY_INT;
+        if (match(p, TOKEN_TYPE_INT)) {
+            key_t = TY_INT;
+        } else if (match(p, TOKEN_TYPE_STRING)) {
+            key_t = TY_STRING;
+        } else {
+            Token err_tok = peek(p);
+            const char *got_name = err_tok.lexeme ? err_tok.lexeme : "unknown";
+            if (err_tok.type == TOKEN_TYPE_FLOAT) got_name = "float";
+            else if (err_tok.type == TOKEN_TYPE_CHAR) got_name = "char";
+            else if (err_tok.type == TOKEN_TYPE_BOOL) got_name = "bool";
+            else if (err_tok.type == TOKEN_TYPE_VOID) got_name = "void";
+
+            char short_msg[256];
+            snprintf(short_msg, sizeof(short_msg), "map keys must be 'int' or 'string' — '%s' is not allowed in v10", got_name);
+            ErrorLocation loc = {get_error_filename(), err_tok.line, err_tok.col};
+            print_formatted_error(
+                short_msg,
+                loc,
+                "not allowed in v10",
+                "map keys must be hashable and comparable — only 'int' and 'string' keys are supported in v10",
+                NULL,
+                NULL,
+                NULL
+            );
+            exit(1);
+        }
+        consume(p, TOKEN_COMMA, "Expected ',' after key type in map_new");
+        char *alloc_cls = NULL;
+        Type elem_type = parse_type_with_class(p, &alloc_cls, NULL, NULL, NULL, NULL);
+        consume(p, TOKEN_RPAREN, "Expected ')' after map_new types");
+
+        AstNode *node = arena_alloc_node(p->arena, NODE_ALLOC, tok.line, tok.col);
+        node->as.alloc.elem_type = elem_type;
+        node->as.alloc.class_name = alloc_cls;
+        node->as.alloc.count_expr = NULL;
+        node->as.alloc.is_list = false;
+        node->as.alloc.is_map = true;
+        node->as.alloc.key_type = key_t;
         return node;
     }
 
@@ -445,8 +530,10 @@ static AstNode *parse_let_stmt(Parser *p) {
     Type var_type = TY_INT;
     char *class_name = NULL;
     bool is_array = false;
+    bool is_map = false;
+    Type key_type = TY_INT;
     if (match(p, TOKEN_COLON)) {
-        var_type = parse_type_with_class(p, &class_name, NULL, &is_array);
+        var_type = parse_type_with_class(p, &class_name, NULL, &is_array, &is_map, &key_type);
     }
 
     consume(p, TOKEN_ASSIGN, "Expected '=' in variable declaration");
@@ -457,6 +544,8 @@ static AstNode *parse_let_stmt(Parser *p) {
     node->as.let.name = arena_strdup(p->arena, name_tok.lexeme);
     node->as.let.var_type = var_type;
     node->as.let.is_array = is_array;
+    node->as.let.is_map = is_map;
+    node->as.let.key_type = key_type;
     node->as.let.class_name = class_name;
     node->as.let.value = value;
     return node;
@@ -744,7 +833,7 @@ static AstNode *parse_class(Parser *p) {
                             char *p_cls = NULL;
                             bool p_borrowed = false;
                             bool p_is_arr = false;
-                            Type p_type = parse_type_with_class(p, &p_cls, &p_borrowed, &p_is_arr);
+                            Type p_type = parse_type_with_class(p, &p_cls, &p_borrowed, &p_is_arr, NULL, NULL);
 
                             if (param_count >= param_cap) {
                                 param_cap *= 2;
@@ -788,7 +877,7 @@ static AstNode *parse_class(Parser *p) {
                         char *p_cls = NULL;
                         bool p_borrowed = false;
                         bool p_is_arr = false;
-                        Type p_type = parse_type_with_class(p, &p_cls, &p_borrowed, &p_is_arr);
+                        Type p_type = parse_type_with_class(p, &p_cls, &p_borrowed, &p_is_arr, NULL, NULL);
 
                         if (param_count >= param_cap) {
                             param_cap = param_cap == 0 ? 4 : param_cap * 2;
@@ -832,7 +921,7 @@ static AstNode *parse_class(Parser *p) {
             consume(p, TOKEN_ARROW, "Expected '->' after method signature");
             char *ret_cls = NULL;
             bool ret_is_arr = false;
-            Type ret_type = parse_type_with_class(p, &ret_cls, NULL, &ret_is_arr);
+            Type ret_type = parse_type_with_class(p, &ret_cls, NULL, &ret_is_arr, NULL, NULL);
             AstNode *body = parse_block(p);
 
             AstNode *m_node = arena_alloc_node(p->arena, NODE_METHOD, m_tok.line, m_tok.col);
@@ -863,13 +952,17 @@ static AstNode *parse_class(Parser *p) {
             consume(p, TOKEN_COLON, "Expected ':' after field name");
             char *f_cls = NULL;
             bool f_is_arr = false;
-            Type f_type = parse_type_with_class(p, &f_cls, NULL, &f_is_arr);
+            bool f_is_map = false;
+            Type f_key_type = TY_INT;
+            Type f_type = parse_type_with_class(p, &f_cls, NULL, &f_is_arr, &f_is_map, &f_key_type);
             consume(p, TOKEN_SEMICOLON, "Expected ';' after field declaration");
 
             AstNode *f_node = arena_alloc_node(p->arena, NODE_FIELD, f_name.line, f_name.col);
             f_node->as.field.name = arena_strdup(p->arena, f_name.lexeme);
             f_node->as.field.type = f_type;
             f_node->as.field.is_array = f_is_arr;
+            f_node->as.field.is_map = f_is_map;
+            f_node->as.field.key_type = f_key_type;
             f_node->as.field.class_name = f_cls;
 
             if (field_count >= field_cap) {
@@ -982,7 +1075,7 @@ static AstNode *parse_function(Parser *p) {
             char *p_cls = NULL;
             bool p_borrowed = false;
             bool p_is_arr = false;
-            Type p_type = parse_type_with_class(p, &p_cls, &p_borrowed, &p_is_arr);
+            Type p_type = parse_type_with_class(p, &p_cls, &p_borrowed, &p_is_arr, NULL, NULL);
 
             if (param_count >= param_cap) {
                 param_cap = param_cap == 0 ? 4 : param_cap * 2;
@@ -1025,7 +1118,7 @@ static AstNode *parse_function(Parser *p) {
     consume(p, TOKEN_ARROW, "Expected '->' after function signature");
     char *ret_cls = NULL;
     bool ret_is_arr = false;
-    Type return_type = parse_type_with_class(p, &ret_cls, NULL, &ret_is_arr);
+    Type return_type = parse_type_with_class(p, &ret_cls, NULL, &ret_is_arr, NULL, NULL);
     AstNode *body = parse_block(p);
 
     AstNode *node = arena_alloc_node(p->arena, NODE_FUNCTION, tok.line, tok.col);

@@ -20,6 +20,8 @@ typedef enum {
     TOKEN_PRINT,
     TOKEN_ALLOC,
     TOKEN_LIST_NEW,
+    TOKEN_MAP,
+    TOKEN_MAP_NEW,
     TOKEN_TYPE_INT,
     TOKEN_TYPE_FLOAT,
     TOKEN_TYPE_CHAR,

@@ -1,0 +1,4 @@
+fn main() -> void {
+    let m: map[string]int = map_new(string, int);
+    put(m, "a", 1);
+}

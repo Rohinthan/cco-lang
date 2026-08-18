@@ -1,8 +1,22 @@
-# Cco (C--) Compiler: A C-like Language with Compile-Time Single Ownership, Growable Arrays, Selective Prelude Emission, Lightweight Structs & Standard Library (v9.0)
+# Cco (C--) Compiler: A C-like Language with Compile-Time Single Ownership, Hash Maps, Growable Arrays, Selective Prelude Emission, Lightweight Structs & Standard Library (v10.0)
 
-**Cco (C--)** is a lightweight, systems programming language with explicit C-like syntax, **scope-exit auto-free for raw allocations**, **compile-time single ownership with move semantics**, **Growable Arrays (`list_new`, `push`, `pop`, `len`)**, **Selective Prelude Emission** (only emitting used stdlib helpers for clean generated C), **Lightweight Structs (Value Types)** (`struct Point2D { x: int; y: int; }`), **Arrays of Objects with for-each iteration** (`alloc(Point, n)`, `for p in pts`), **Minimal Multi-file Module/Import System** (`import "file.cco";`), and a **built-in Standard Library** (Strings, Math, File I/O). It transpiles Cco source code (`.cco`) into portable, standard C11 source code (`.c`), which is compiled to native machine binaries using `gcc` or `clang`.
+**Cco (C--)** is a lightweight, systems programming language with explicit C-like syntax, **scope-exit auto-free for raw allocations**, **compile-time single ownership with move semantics**, **Hash Maps (`map[K]V`, `map_new`, `put`, `get`, `has`, `remove`, `keys`, `len`)**, **Growable Arrays (`list_new`, `push`, `pop`, `len`)**, **Selective Prelude Emission** (only emitting used stdlib helpers for clean generated C), **Lightweight Structs (Value Types)** (`struct Point2D { x: int; y: int; }`), **Arrays of Objects with for-each iteration** (`alloc(Point, n)`, `for p in pts`), **Minimal Multi-file Module/Import System** (`import "file.cco";`), and a **built-in Standard Library** (Strings, Math, File I/O). It transpiles Cco source code (`.cco`) into portable, standard C11 source code (`.c`), which is compiled to native machine binaries using `gcc` or `clang`.
 
-> **Write it like Python's class/struct syntax reads. Compile it and it runs like C with zero runtime reference counting overhead, zero GC pauses, clean inspectable generated C via selective prelude emission, stack-allocated value structs, Rust-like compile-time ownership safety across multi-file programs, and GCC/Rust-style diagnostic error messages.**
+> **Write it like Python's class/struct/map syntax reads. Compile it and it runs like C with zero runtime reference counting overhead, zero GC pauses, clean inspectable generated C via selective prelude emission, stack-allocated value structs, Rust-like compile-time ownership safety across multi-file programs, and GCC/Rust-style diagnostic error messages.**
+
+---
+
+## 🗺️ Hash Maps (v10.0)
+
+Cco v10.0 introduces native open-addressing hash maps with tombstone deletion (`map[K]V`):
+
+- **Key-Type Restriction**: Keys may be `int` or `string`. All other types produce friendly compile-time diagnostics.
+- **Dynamic Map Construction**: `let m: map[string]int = map_new(string, int);` initializes a map with initial capacity 8.
+- **`put(m, key, value)` Reassignment**: `m = put(m, key, value)` inserts or updates a key. Keys are borrowed (internally cloned for strings); class values are moved into the map with automatic destruction of old values on key overwrite. The result must be reassigned (`m = put(...)`).
+- **`get(m, key)` & `has(m, key)`**: `get(m, key)` retrieves a value (borrowed for class values; runtime error if key missing); `has(m, key)` checks key existence without failing.
+- **`remove(m, key)`**: Removes the entry, marks the bucket as a tombstone, frees internal string keys, and transfers ownership of class values back to the caller.
+- **`keys(m)` & `len(m)`**: `keys(m)` returns an owned `string[]` or `int[]` of currently occupied keys; `len(m)` returns the number of active entries.
+- **Automated Free Cascade**: At scope exit, all active string keys, active class values, and the underlying bucket array are automatically cleaned up with zero leaks.
 
 ---
 
@@ -21,8 +35,8 @@ Cco v9.0 introduces unified growable array semantics (`list_new`, `push`, `pop`,
 ## 🗺️ Self-Hosting Roadmap
 
 1. **v9.0**: Growable Arrays (`list_new`, `push`, `pop`, `len`) — *Completed*
-2. **v10.0**: Hash Maps (`map_new`, `map_put`, `map_get`, `map_has`, `map_remove`) — *Next*
-3. **v11.0**: Tagged Unions / Pattern Matching — *Upcoming*
+2. **v10.0**: Hash Maps (`map[K]V`, `map_new`, `put`, `get`, `has`, `remove`, `keys`, `len`) — *Completed*
+3. **v11.0**: Tagged Unions / Pattern Matching — *Next*
 4. **v12.0**: Self-Hosted Lexer & Parser Proof-of-Concept — *Goal*
 
 ---
@@ -166,6 +180,7 @@ A comprehensive suite of example programs is available in [`examples/`](examples
 - [`examples/09_object_array_todo.cco`](examples/09_object_array_todo.cco): Arrays of Objects (`Task[]`) and `for-each` loop iteration
 - [`examples/10_import_demo/`](examples/10_import_demo/): Multi-file import system (`import "shapes.cco";`)
 - [`examples/11_struct_vec2.cco`](examples/11_struct_vec2.cco): Lightweight Structs (`struct`), value copies, and in-place borrowed mutation (`&Struct`)
+- [`examples/word_frequency.cco`](examples/word_frequency.cco): Hash Maps (`map[string]int`), `put`, `get`, `has`, `keys`, `len`, and `for-each` iteration
 
 See [`examples/README.md`](examples/README.md) for detailed descriptions and execution instructions.
 
@@ -190,13 +205,14 @@ make test
 
 ---
 
-## 🧪 Test Suite Matrix (v8.0)
+## 🧪 Test Suite Matrix (v10.0)
 
 | Test Case | Description | Result | Valgrind Leak Status |
 | :--- | :--- | :---: | :---: |
-| `test_lexer` | Unit tests for tokenizer, keywords (`class`, `struct`, `self`, `in`, `import`) & `&` borrow token | **PASS** | 0 Bytes Leaked |
-| `test_parser` | Unit tests for AST node construction, `NODE_STRUCT` parsing & enforcement | **PASS** | 0 Bytes Leaked |
+| `test_lexer` | Unit tests for tokenizer, keywords (`class`, `struct`, `map`, `map_new`, `self`, `in`, `import`) & `&` borrow token | **PASS** | 0 Bytes Leaked |
+| `test_parser` | Unit tests for AST node construction, `map[K]V` parsing & enforcement | **PASS** | 0 Bytes Leaked |
 | `test_scope` | Unit tests for ownership pass, move tracking, free injection | **PASS** | 0 Bytes Leaked |
+| `test_map_runtime` | Unit tests for open-addressing map runtime, tombstones, class value cleanup & rehash | **PASS** | 0 Bytes Leaked |
 | `01_hello` | Basic printing, strings, arithmetic operations | **PASS** | 0 Bytes Leaked |
 | `02_alloc_basic` | Basic array allocation, indexing, & block exit free | **PASS** | 0 Bytes Leaked |
 | `03_early_return` | Early return inside nested loop with heap alloc | **PASS** | 0 Bytes Leaked |
@@ -242,6 +258,16 @@ make test
 | `43_growable_push_pop_class` | Growable object array, `push()` ownership transfer, `pop()` sole ownership move out | **PASS** | 0 Bytes Leaked |
 | `44_growable_realloc_stress` | 25 element pushes triggering 3+ buffer reallocations with 0 memory leaks | **PASS** | 0 Bytes Leaked |
 | `45_pop_empty_RUNTIME_ERROR` | Runtime error when `pop()` called on empty array (`capacity == 0` or `length == 0`) | **PASS** | Runtime Error (As Expected) |
+| `46_map_basic_primitive` | `map[int]int` creation, `put()`, `get()`, reassign value, scope-exit cleanup | **PASS** | 0 Bytes Leaked |
+| `47_map_string_key` | `map[string]int` creation, string key cloning, `get()` retrieval | **PASS** | 0 Bytes Leaked |
+| `48_map_class_value_ownership` | `map[string]Point`, object value moves in `put()`, overwrite cleanup, borrowed `get()` | **PASS** | 0 Bytes Leaked |
+| `49_map_remove_and_tombstones` | `remove()` with tombstone tagging, caller object move-out, `has()` verification | **PASS** | 0 Bytes Leaked |
+| `50_map_keys_and_len` | `keys(m)` extraction to `int[]`, `len(m)` query, and `for-each` loop iteration | **PASS** | 0 Bytes Leaked |
+| `51_map_rehash_stress` | 100 entries insertion triggering dynamic rehashing from capacity 8 to 128+ with 0 leaks | **PASS** | 0 Bytes Leaked |
+| `52_map_invalid_key_type_ERROR` | Rejecting invalid key type (`map[float]int`) with formatted diagnostic error | **PASS** | Compile Error (As Expected) |
+| `53_map_put_reassignment_check_ERROR` | Rejecting unassigned `put(m, k, v)` call at compile time | **PASS** | Compile Error (As Expected) |
+
+---
 
 ---
 

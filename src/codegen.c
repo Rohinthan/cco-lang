@@ -88,7 +88,10 @@ static const char *c_type_str_full(CodegenCtx *ctx, Type t, const char *class_na
     }
 }
 
-static const char *c_type_str_decl(CodegenCtx *ctx, Type t, const char *class_name, bool is_array, bool is_heap_owner) {
+static const char *c_type_str_decl_full(CodegenCtx *ctx, Type t, const char *class_name, bool is_array, bool is_map, bool is_heap_owner) {
+    if (is_map) {
+        return "__cco_map *";
+    }
     if (is_array) {
         if (t == TY_CLASS && class_name) {
             static char buf[128];
@@ -109,6 +112,10 @@ static const char *c_type_str_decl(CodegenCtx *ctx, Type t, const char *class_na
         }
     }
     return c_type_str_full(ctx, t, class_name, false, is_heap_owner);
+}
+
+static const char *c_type_str_decl(CodegenCtx *ctx, Type t, const char *class_name, bool is_array, bool is_heap_owner) {
+    return c_type_str_decl_full(ctx, t, class_name, is_array, false, is_heap_owner);
 }
 
 static bool is_expr_pointer(CodegenCtx *ctx, AstNode *expr) {
@@ -322,6 +329,9 @@ static Type infer_expr_type(AstNode *program, AstNode *fn, AstNode *expr) {
                 if (stmt->type == NODE_LET && strcmp(stmt->as.let.name, var_name) == 0) {
                     return stmt->as.let.var_type;
                 }
+                if (stmt->type == NODE_FOR_EACH && strcmp(stmt->as.for_each.loop_var_name, var_name) == 0) {
+                    return infer_expr_type(program, fn, stmt->as.for_each.collection_expr);
+                }
             }
         }
     }
@@ -388,6 +398,101 @@ static bool infer_expr_is_array(AstNode *program, AstNode *fn, AstNode *expr) {
     return false;
 }
 
+static bool infer_expr_is_map(AstNode *program, AstNode *fn, AstNode *expr) {
+    if (!expr) return false;
+    if (expr->type == NODE_ALLOC && expr->as.alloc.is_map) return true;
+
+    if (expr->type == NODE_IDENT && fn) {
+        const char *var_name = expr->as.ident.name;
+        AstNode *body = (fn->type == NODE_FUNCTION) ? fn->as.function.body : (fn->type == NODE_METHOD ? fn->as.method.body : NULL);
+        if (body && body->type == NODE_BLOCK) {
+            for (int i = 0; i < body->as.block.count; i++) {
+                AstNode *stmt = body->as.block.stmts[i];
+                if (stmt->type == NODE_LET && strcmp(stmt->as.let.name, var_name) == 0) {
+                    return stmt->as.let.is_map;
+                }
+            }
+        }
+    }
+    if (expr->type == NODE_CALL && program && program->type == NODE_PROGRAM) {
+        const char *name = expr->as.call.callee;
+        if (name && strcmp(name, "put") == 0) return true;
+    }
+    return false;
+}
+
+static Type get_map_key_type(CodegenCtx *ctx, AstNode *expr) {
+    if (!expr) return TY_INT;
+    if (expr->type == NODE_ALLOC && expr->as.alloc.is_map) {
+        return expr->as.alloc.key_type;
+    }
+    if (expr->type == NODE_IDENT && ctx->current_function) {
+        const char *var_name = expr->as.ident.name;
+        AstNode *fn = ctx->current_function;
+        AstNode *body = (fn->type == NODE_FUNCTION) ? fn->as.function.body : (fn->type == NODE_METHOD ? fn->as.method.body : NULL);
+        if (body && body->type == NODE_BLOCK) {
+            for (int i = 0; i < body->as.block.count; i++) {
+                AstNode *stmt = body->as.block.stmts[i];
+                if (stmt->type == NODE_LET && strcmp(stmt->as.let.name, var_name) == 0) {
+                    return stmt->as.let.key_type;
+                }
+            }
+        }
+    }
+    if (expr->type == NODE_CALL && expr->as.call.callee && strcmp(expr->as.call.callee, "put") == 0) {
+        return get_map_key_type(ctx, expr->as.call.args[0]);
+    }
+    return TY_INT;
+}
+
+static Type get_map_val_type(CodegenCtx *ctx, AstNode *expr) {
+    if (!expr) return TY_INT;
+    if (expr->type == NODE_ALLOC && expr->as.alloc.is_map) {
+        return expr->as.alloc.elem_type;
+    }
+    if (expr->type == NODE_IDENT && ctx->current_function) {
+        const char *var_name = expr->as.ident.name;
+        AstNode *fn = ctx->current_function;
+        AstNode *body = (fn->type == NODE_FUNCTION) ? fn->as.function.body : (fn->type == NODE_METHOD ? fn->as.method.body : NULL);
+        if (body && body->type == NODE_BLOCK) {
+            for (int i = 0; i < body->as.block.count; i++) {
+                AstNode *stmt = body->as.block.stmts[i];
+                if (stmt->type == NODE_LET && strcmp(stmt->as.let.name, var_name) == 0) {
+                    return stmt->as.let.var_type;
+                }
+            }
+        }
+    }
+    if (expr->type == NODE_CALL && expr->as.call.callee && strcmp(expr->as.call.callee, "put") == 0) {
+        return get_map_val_type(ctx, expr->as.call.args[0]);
+    }
+    return TY_INT;
+}
+
+static const char *get_map_val_class_name(CodegenCtx *ctx, AstNode *expr) {
+    if (!expr) return NULL;
+    if (expr->type == NODE_ALLOC && expr->as.alloc.is_map) {
+        return expr->as.alloc.class_name;
+    }
+    if (expr->type == NODE_IDENT && ctx->current_function) {
+        const char *var_name = expr->as.ident.name;
+        AstNode *fn = ctx->current_function;
+        AstNode *body = (fn->type == NODE_FUNCTION) ? fn->as.function.body : (fn->type == NODE_METHOD ? fn->as.method.body : NULL);
+        if (body && body->type == NODE_BLOCK) {
+            for (int i = 0; i < body->as.block.count; i++) {
+                AstNode *stmt = body->as.block.stmts[i];
+                if (stmt->type == NODE_LET && strcmp(stmt->as.let.name, var_name) == 0) {
+                    return stmt->as.let.class_name;
+                }
+            }
+        }
+    }
+    if (expr->type == NODE_CALL && expr->as.call.callee && strcmp(expr->as.call.callee, "put") == 0) {
+        return get_map_val_class_name(ctx, expr->as.call.args[0]);
+    }
+    return NULL;
+}
+
 static void gen_stmt(CodegenCtx *ctx, AstNode *stmt);
 static void gen_block(CodegenCtx *ctx, AstNode *block_node);
 
@@ -407,7 +512,15 @@ static void emit_releases(CodegenCtx *ctx, AstNode *node) {
     if (!node || node->releases_count == 0) return;
     for (int i = 0; i < node->releases_count; i++) {
         emit_indent(ctx);
-        if (node->releases_to_emit[i].is_array) {
+        if (node->releases_to_emit[i].is_map) {
+            const char *mname = node->releases_to_emit[i].var_name;
+            const char *cls = node->releases_to_emit[i].class_name;
+            if (cls && find_class(ctx->ct, cls) != NULL) {
+                sb_appendf(&ctx->sb, "__cco_map_free(%s, (__cco_val_free_fn)%s_free);\n", mname, cls);
+            } else {
+                sb_appendf(&ctx->sb, "__cco_map_free(%s, NULL);\n", mname);
+            }
+        } else if (node->releases_to_emit[i].is_array) {
             const char *arr = node->releases_to_emit[i].var_name;
             const char *cls = node->releases_to_emit[i].class_name;
             sb_appendf(&ctx->sb, "if (%s != NULL) {\n", arr);
@@ -470,7 +583,10 @@ static void gen_expr(CodegenCtx *ctx, AstNode *expr) {
             break;
 
         case NODE_ALLOC:
-            if (expr->as.alloc.is_list) {
+            if (expr->as.alloc.is_map) {
+                int kt = (expr->as.alloc.key_type == TY_STRING) ? 1 : 0;
+                sb_appendf(&ctx->sb, "__cco_map_new(%d)", kt);
+            } else if (expr->as.alloc.is_list) {
                 if (expr->as.alloc.elem_type == TY_CLASS && !is_struct_name(ctx, expr->as.alloc.class_name)) {
                     sb_appendf(&ctx->sb, "(%s **)__cco_list_new(sizeof(%s *))", expr->as.alloc.class_name, expr->as.alloc.class_name);
                 } else {
@@ -578,17 +694,137 @@ static void gen_expr(CodegenCtx *ctx, AstNode *expr) {
             const char *callee = expr->as.call.callee;
             if (strcmp(callee, "len") == 0) {
                 AstNode *arg = expr->as.call.args[0];
-                Type arg_t = infer_expr_type(ctx->program, ctx->current_function, arg);
-                bool is_arr = infer_expr_is_array(ctx->program, ctx->current_function, arg);
-                if (is_arr || arg_t != TY_STRING) {
-                    sb_append(&ctx->sb, "((int)__cco_arr_len_raw(");
+                if (infer_expr_is_map(ctx->program, ctx->current_function, arg)) {
+                    sb_append(&ctx->sb, "((int)(");
                     gen_expr(ctx, arg);
+                    sb_append(&ctx->sb, ")->occupied)");
+                } else {
+                    Type arg_t = infer_expr_type(ctx->program, ctx->current_function, arg);
+                    bool is_arr = infer_expr_is_array(ctx->program, ctx->current_function, arg);
+                    if (is_arr || arg_t != TY_STRING) {
+                        sb_append(&ctx->sb, "((int)__cco_arr_len_raw(");
+                        gen_expr(ctx, arg);
+                        sb_append(&ctx->sb, "))");
+                    } else {
+                        sb_append(&ctx->sb, "((int)strlen(");
+                        gen_expr(ctx, arg);
+                        sb_append(&ctx->sb, "))");
+                    }
+                }
+            } else if (strcmp(callee, "put") == 0) {
+                AstNode *m_arg = expr->as.call.args[0];
+                AstNode *k_arg = expr->as.call.args[1];
+                AstNode *v_arg = expr->as.call.args[2];
+                Type kt = get_map_key_type(ctx, m_arg);
+                const char *v_cls = get_map_val_class_name(ctx, m_arg);
+
+                sb_append(&ctx->sb, "__cco_map_put(");
+                gen_expr(ctx, m_arg);
+                sb_append(&ctx->sb, ", ");
+                if (kt == TY_STRING) {
+                    sb_append(&ctx->sb, "(void *)(");
+                    gen_expr(ctx, k_arg);
+                    sb_append(&ctx->sb, ")");
+                } else {
+                    sb_append(&ctx->sb, "(void *)(intptr_t)(");
+                    gen_expr(ctx, k_arg);
+                    sb_append(&ctx->sb, ")");
+                }
+                sb_append(&ctx->sb, ", ");
+                if (v_cls && find_class(ctx->ct, v_cls) != NULL) {
+                    sb_append(&ctx->sb, "(void *)(");
+                    gen_expr(ctx, v_arg);
+                    sb_append(&ctx->sb, ")");
+                } else {
+                    Type vt = infer_expr_type(ctx->program, ctx->current_function, v_arg);
+                    if (vt == TY_STRING) {
+                        sb_append(&ctx->sb, "(void *)(");
+                        gen_expr(ctx, v_arg);
+                        sb_append(&ctx->sb, ")");
+                    } else {
+                        sb_append(&ctx->sb, "(void *)(intptr_t)(");
+                        gen_expr(ctx, v_arg);
+                        sb_append(&ctx->sb, ")");
+                    }
+                }
+                sb_append(&ctx->sb, ", ");
+                if (v_cls && find_class(ctx->ct, v_cls) != NULL) {
+                    sb_appendf(&ctx->sb, "(__cco_val_free_fn)%s_free)", v_cls);
+                } else {
+                    sb_append(&ctx->sb, "NULL)");
+                }
+            } else if (strcmp(callee, "get") == 0) {
+                AstNode *m_arg = expr->as.call.args[0];
+                AstNode *k_arg = expr->as.call.args[1];
+                Type kt = get_map_key_type(ctx, m_arg);
+                Type vt = get_map_val_type(ctx, m_arg);
+                const char *v_cls = get_map_val_class_name(ctx, m_arg);
+                const char *c_type = c_type_str_full(ctx, vt, v_cls, false, false);
+
+                if (vt == TY_CLASS || vt == TY_STRING) {
+                    sb_appendf(&ctx->sb, "(%s)__cco_map_get(", c_type);
+                } else {
+                    sb_appendf(&ctx->sb, "(%s)(intptr_t)__cco_map_get(", c_type);
+                }
+                gen_expr(ctx, m_arg);
+                sb_append(&ctx->sb, ", ");
+                if (kt == TY_STRING) {
+                    sb_append(&ctx->sb, "(void *)(");
+                    gen_expr(ctx, k_arg);
                     sb_append(&ctx->sb, "))");
                 } else {
-                    sb_append(&ctx->sb, "((int)strlen(");
-                    gen_expr(ctx, arg);
+                    sb_append(&ctx->sb, "(void *)(intptr_t)(");
+                    gen_expr(ctx, k_arg);
                     sb_append(&ctx->sb, "))");
                 }
+            } else if (strcmp(callee, "has") == 0) {
+                AstNode *m_arg = expr->as.call.args[0];
+                AstNode *k_arg = expr->as.call.args[1];
+                Type kt = get_map_key_type(ctx, m_arg);
+
+                sb_append(&ctx->sb, "__cco_map_has(");
+                gen_expr(ctx, m_arg);
+                sb_append(&ctx->sb, ", ");
+                if (kt == TY_STRING) {
+                    sb_append(&ctx->sb, "(void *)(");
+                    gen_expr(ctx, k_arg);
+                    sb_append(&ctx->sb, "))");
+                } else {
+                    sb_append(&ctx->sb, "(void *)(intptr_t)(");
+                    gen_expr(ctx, k_arg);
+                    sb_append(&ctx->sb, "))");
+                }
+            } else if (strcmp(callee, "remove") == 0) {
+                AstNode *m_arg = expr->as.call.args[0];
+                AstNode *k_arg = expr->as.call.args[1];
+                Type kt = get_map_key_type(ctx, m_arg);
+                Type vt = get_map_val_type(ctx, m_arg);
+                const char *v_cls = get_map_val_class_name(ctx, m_arg);
+                const char *c_type = c_type_str_full(ctx, vt, v_cls, false, false);
+
+                if (vt == TY_CLASS || vt == TY_STRING) {
+                    sb_appendf(&ctx->sb, "(%s)__cco_map_remove(", c_type);
+                } else {
+                    sb_appendf(&ctx->sb, "(%s)(intptr_t)__cco_map_remove(", c_type);
+                }
+                gen_expr(ctx, m_arg);
+                sb_append(&ctx->sb, ", ");
+                if (kt == TY_STRING) {
+                    sb_append(&ctx->sb, "(void *)(");
+                    gen_expr(ctx, k_arg);
+                    sb_append(&ctx->sb, "))");
+                } else {
+                    sb_append(&ctx->sb, "(void *)(intptr_t)(");
+                    gen_expr(ctx, k_arg);
+                    sb_append(&ctx->sb, "))");
+                }
+            } else if (strcmp(callee, "keys") == 0) {
+                AstNode *m_arg = expr->as.call.args[0];
+                Type kt = get_map_key_type(ctx, m_arg);
+                const char *ret_cast = (kt == TY_STRING) ? "(char **)" : "(int *)";
+                sb_appendf(&ctx->sb, "%s__cco_map_keys(", ret_cast);
+                gen_expr(ctx, m_arg);
+                sb_append(&ctx->sb, ")");
             } else if (strcmp(callee, "push") == 0) {
                 AstNode *arr_arg = expr->as.call.args[0];
                 AstNode *val_arg = expr->as.call.args[1];
@@ -735,7 +971,7 @@ static void gen_stmt(CodegenCtx *ctx, AstNode *stmt) {
     switch (stmt->type) {
         case NODE_LET:
             emit_indent(ctx);
-            sb_appendf(&ctx->sb, "%s %s = ", c_type_str_decl(ctx, stmt->as.let.var_type, stmt->as.let.class_name, stmt->as.let.is_array, stmt->is_heap_owner), stmt->as.let.name);
+            sb_appendf(&ctx->sb, "%s %s = ", c_type_str_decl_full(ctx, stmt->as.let.var_type, stmt->as.let.class_name, stmt->as.let.is_array, stmt->as.let.is_map, stmt->is_heap_owner), stmt->as.let.name);
             if (stmt->as.let.var_type == TY_STRING && stmt->as.let.value->type == NODE_LITERAL) {
                 sb_appendf(&ctx->sb, "strdup(\"%s\")", stmt->as.let.value->as.literal.val.s);
             } else {
@@ -809,8 +1045,19 @@ static void gen_stmt(CodegenCtx *ctx, AstNode *stmt) {
             ctx->indent_level++;
 
             const char *elem_cls = get_expr_elem_class_name(ctx, stmt->as.for_each.collection_expr);
+            Type elem_ty = infer_expr_type(ctx->program, ctx->current_function, stmt->as.for_each.collection_expr);
             emit_indent(ctx);
-            sb_appendf(&ctx->sb, "%s *%s = ", elem_cls ? elem_cls : "void", stmt->as.for_each.loop_var_name);
+            if (elem_cls) {
+                sb_appendf(&ctx->sb, "%s *%s = ", elem_cls, stmt->as.for_each.loop_var_name);
+            } else if (elem_ty == TY_STRING) {
+                sb_appendf(&ctx->sb, "char *%s = ", stmt->as.for_each.loop_var_name);
+            } else if (elem_ty == TY_FLOAT) {
+                sb_appendf(&ctx->sb, "double %s = ", stmt->as.for_each.loop_var_name);
+            } else if (elem_ty == TY_BOOL) {
+                sb_appendf(&ctx->sb, "bool %s = ", stmt->as.for_each.loop_var_name);
+            } else {
+                sb_appendf(&ctx->sb, "int %s = ", stmt->as.for_each.loop_var_name);
+            }
             if (stmt->as.for_each.collection_expr->type == NODE_IDENT) {
                 sb_append(&ctx->sb, stmt->as.for_each.collection_expr->as.ident.name);
             } else {
@@ -818,8 +1065,10 @@ static void gen_stmt(CodegenCtx *ctx, AstNode *stmt) {
             }
             sb_append(&ctx->sb, "[__i];\n");
 
-            emit_indent(ctx);
-            sb_appendf(&ctx->sb, "if (%s == NULL) continue;\n", stmt->as.for_each.loop_var_name);
+            if (elem_cls) {
+                emit_indent(ctx);
+                sb_appendf(&ctx->sb, "if (%s == NULL) continue;\n", stmt->as.for_each.loop_var_name);
+            }
 
             if (stmt->as.for_each.body->type == NODE_BLOCK) {
                 gen_block(ctx, stmt->as.for_each.body);
@@ -1021,6 +1270,10 @@ static void gen_block(CodegenCtx *ctx, AstNode *block_node) {
     if (!last_is_jump) {
         emit_frees(ctx, block_node);
         emit_releases(ctx, block_node);
+        if (ctx->current_function && ctx->current_function->type == NODE_FUNCTION && strcmp(ctx->current_function->as.function.name, "main") == 0 && ctx->current_function->as.function.body == block_node) {
+            emit_indent(ctx);
+            sb_append(&ctx->sb, "return 0;\n");
+        }
     }
 
     ctx->indent_level--;
@@ -1132,7 +1385,9 @@ static void gen_method(CodegenCtx *ctx, const char *class_name, AstNode *m_node)
 
 static void gen_function(CodegenCtx *ctx, AstNode *fn) {
     ctx->current_function = fn;
-    sb_appendf(&ctx->sb, "%s %s(", c_type_str_full(ctx, fn->as.function.return_type, fn->as.function.return_class_name, false, fn->as.function.returns_heap_pointer), fn->as.function.name);
+    bool is_main = (strcmp(fn->as.function.name, "main") == 0);
+    const char *ret_type_str = is_main ? "int" : c_type_str_full(ctx, fn->as.function.return_type, fn->as.function.return_class_name, false, fn->as.function.returns_heap_pointer);
+    sb_appendf(&ctx->sb, "%s %s(", ret_type_str, fn->as.function.name);
 
     if (fn->as.function.param_count == 0) {
         sb_append(&ctx->sb, "void");
@@ -1162,7 +1417,9 @@ static void mark_chunk_used(bool *used_chunks, const char *name) {
 static void check_releases_usage(AstNode *node, bool *used_chunks) {
     if (!node) return;
     for (int i = 0; i < node->releases_count; i++) {
-        if (node->releases_to_emit && node->releases_to_emit[i].is_array) {
+        if (node->releases_to_emit && node->releases_to_emit[i].is_map) {
+            mark_chunk_used(used_chunks, "map_free");
+        } else if (node->releases_to_emit && node->releases_to_emit[i].is_array) {
             mark_chunk_used(used_chunks, "free_arr");
         }
     }
@@ -1287,7 +1544,13 @@ static void scan_node_usage(AstNode *node, bool *used_chunks) {
             break;
 
         case NODE_ALLOC:
-            mark_chunk_used(used_chunks, "alloc_arr");
+            if (node->as.alloc.is_map) {
+                mark_chunk_used(used_chunks, "map_new");
+            } else if (node->as.alloc.is_list) {
+                mark_chunk_used(used_chunks, "list_new");
+            } else {
+                mark_chunk_used(used_chunks, "alloc_arr");
+            }
             if (node->as.alloc.elem_type == TY_CLASS) {
                 mark_chunk_used(used_chunks, "free_arr");
             }
@@ -1307,6 +1570,24 @@ static void scan_node_usage(AstNode *node, bool *used_chunks) {
                 else if (strcmp(callee, "max_float") == 0) mark_chunk_used(used_chunks, "max_float");
                 else if (strcmp(callee, "read_file") == 0) mark_chunk_used(used_chunks, "read_file");
                 else if (strcmp(callee, "write_file") == 0) mark_chunk_used(used_chunks, "write_file");
+                else if (strcmp(callee, "put") == 0) mark_chunk_used(used_chunks, "map_put");
+                else if (strcmp(callee, "get") == 0) mark_chunk_used(used_chunks, "map_get");
+                else if (strcmp(callee, "has") == 0) mark_chunk_used(used_chunks, "map_has");
+                else if (strcmp(callee, "remove") == 0) mark_chunk_used(used_chunks, "map_remove");
+                else if (strcmp(callee, "keys") == 0) mark_chunk_used(used_chunks, "map_keys");
+                else if (strcmp(callee, "push") == 0) {
+                    mark_chunk_used(used_chunks, "arr_maybe_grow");
+                    mark_chunk_used(used_chunks, "arr_incr_len");
+                    mark_chunk_used(used_chunks, "arr_len_raw");
+                }
+                else if (strcmp(callee, "pop") == 0) {
+                    mark_chunk_used(used_chunks, "arr_decr_len");
+                    mark_chunk_used(used_chunks, "arr_len_raw");
+                }
+                else if (strcmp(callee, "len") == 0) {
+                    mark_chunk_used(used_chunks, "arr_len");
+                    mark_chunk_used(used_chunks, "map_bucket");
+                }
             }
             for (int i = 0; i < node->as.call.arg_count; i++) {
                 scan_node_usage(node->as.call.args[i], used_chunks);

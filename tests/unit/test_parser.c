@@ -127,12 +127,39 @@ void test_parse_borrowed_param() {
     printf("[PASS] test_parse_borrowed_param\n");
 }
 
+void test_parse_map() {
+    const char *src = "fn main() -> void { let m: map[string]int = map_new(string, int); }";
+    TokenArray tokens = lex_source(src);
+    AstArena *arena = create_ast_arena();
+    Parser parser = create_parser(tokens, arena);
+
+    AstNode *prog = parse_program(&parser);
+    assert(prog != NULL);
+    assert(prog->as.program.count == 1);
+
+    AstNode *fn = prog->as.program.functions[0];
+    AstNode *let_stmt = fn->as.function.body->as.block.stmts[0];
+    assert(let_stmt->type == NODE_LET);
+    assert(let_stmt->as.let.is_map == true);
+    assert(let_stmt->as.let.key_type == TY_STRING);
+    assert(let_stmt->as.let.var_type == TY_INT);
+    assert(let_stmt->as.let.value->type == NODE_ALLOC);
+    assert(let_stmt->as.let.value->as.alloc.is_map == true);
+    assert(let_stmt->as.let.value->as.alloc.key_type == TY_STRING);
+    assert(let_stmt->as.let.value->as.alloc.elem_type == TY_INT);
+
+    free_ast_arena(arena);
+    free_tokens(&tokens);
+    printf("[PASS] test_parse_map\n");
+}
+
 int main() {
     printf("Running Parser Unit Tests...\n");
     test_parse_simple_func();
     test_parse_alloc_and_for();
     test_parse_class();
     test_parse_borrowed_param();
+    test_parse_map();
     printf("All Parser tests passed!\n");
     return 0;
 }

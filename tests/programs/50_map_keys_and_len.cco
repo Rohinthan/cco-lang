@@ -1,0 +1,16 @@
+fn main() -> void {
+    let m: map[int]int = map_new(int, int);
+    for (let i: int = 1; i <= 10; i = i + 1) {
+        m = put(m, i, i * 10);
+    }
+
+    print(len(m));
+    let ks: int[] = keys(m);
+    print(len(ks));
+
+    let sum: int = 0;
+    for k in ks {
+        sum = sum + k;
+    }
+    print(sum);
+}

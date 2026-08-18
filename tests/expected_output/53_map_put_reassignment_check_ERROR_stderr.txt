@@ -1,0 +1,6 @@
+error: result of put() must be reassigned (e.g. m = put(m, key, value))
+  --> tests/programs/53_map_put_reassignment_check_ERROR.cco:3:5
+    |
+  3 |     put(m, "a", 1);
+    |     ^ unassigned put() call
+    |

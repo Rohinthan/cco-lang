@@ -1,0 +1,33 @@
+// Word Frequency Counter in Cco v10
+// Demonstrates hash maps (map[string]int), keys(), has(), get(), put(), and len()
+
+fn main() -> void {
+    let text: string = "apple banana apple cherry apple banana date cherry apple";
+    let counts: map[string]int = map_new(string, int);
+
+    let start: int = 0;
+    let n: int = len(text);
+
+    for (let i: int = 0; i <= n; i = i + 1) {
+        if (i == n || char_at(text, i) == ' ') {
+            if (i > start) {
+                let word: string = substring(text, start, i);
+                if (has(counts, word)) {
+                    let prev: int = get(counts, word);
+                    counts = put(counts, word, prev + 1);
+                } else {
+                    counts = put(counts, word, 1);
+                }
+            }
+            start = i + 1;
+        }
+    }
+
+    print(len(counts));
+
+    let words: string[] = keys(counts);
+    for w in words {
+        print(w);
+        print(get(counts, w));
+    }
+}

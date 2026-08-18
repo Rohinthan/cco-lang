@@ -115,7 +115,8 @@ static bool is_stdlib_heap_fn(const char *name) {
     if (!name) return false;
     return strcmp(name, "concat") == 0 ||
            strcmp(name, "substring") == 0 ||
-           strcmp(name, "read_file") == 0;
+           strcmp(name, "read_file") == 0 ||
+           strcmp(name, "keys") == 0;
 }
 
 
@@ -128,7 +129,7 @@ static void analyze_block(ScopeStack *stack, AstNode *block_node, bool is_loop) 
 
         if (stmt->type == NODE_LET) {
             analyze_node(stack, stmt->as.let.value);
-            bool is_alloc = (stmt->as.let.value->type == NODE_ALLOC && stmt->as.let.value->as.alloc.elem_type != TY_CLASS) || (stmt->as.let.var_type == TY_STRING);
+            bool is_alloc = (stmt->as.let.value->type == NODE_ALLOC && !stmt->as.let.value->as.alloc.is_map && stmt->as.let.value->as.alloc.elem_type != TY_CLASS) || (stmt->as.let.var_type == TY_STRING && !stmt->as.let.is_map);
             if (!is_alloc && stmt->as.let.value->type == NODE_CALL) {
                 const char *callee = stmt->as.let.value->as.call.callee;
                 if (is_stdlib_heap_fn(callee)) {
@@ -143,9 +144,7 @@ static void analyze_block(ScopeStack *stack, AstNode *block_node, bool is_loop) 
 
             if (is_alloc) {
                 stmt->is_heap_owner = true;
-                bool is_str = (stmt->as.let.var_type == TY_STRING) ||
-                              (stmt->as.let.value && stmt->as.let.value->type == NODE_LITERAL && stmt->as.let.value->as.literal.lit_type == TY_STRING) ||
-                              (stmt->as.let.value && stmt->as.let.value->type == NODE_CALL && is_stdlib_heap_fn(stmt->as.let.value->as.call.callee));
+                bool is_str = (stmt->as.let.var_type == TY_STRING && !stmt->as.let.is_array);
                 bool is_arr = !is_str;
                 scope_add_owned(stack, s, stmt->as.let.name, is_arr);
             }
@@ -154,11 +153,11 @@ static void analyze_block(ScopeStack *stack, AstNode *block_node, bool is_loop) 
 
             int scope_idx = -1;
             int owned_idx = find_owned_in_stack(stack, stmt->as.assign.name, &scope_idx);
-            bool val_is_heap = ((stmt->as.assign.value->type == NODE_ALLOC && stmt->as.assign.value->as.alloc.elem_type != TY_CLASS) || (stmt->as.assign.value->type == NODE_LITERAL && stmt->as.assign.value->as.literal.lit_type == TY_STRING) || (stmt->as.assign.value->type == NODE_CALL && is_stdlib_heap_fn(stmt->as.assign.value->as.call.callee)));
+            bool val_is_heap = ((stmt->as.assign.value->type == NODE_ALLOC && !stmt->as.assign.value->as.alloc.is_map && stmt->as.assign.value->as.alloc.elem_type != TY_CLASS) || (stmt->as.assign.value->type == NODE_LITERAL && stmt->as.assign.value->as.literal.lit_type == TY_STRING) || (stmt->as.assign.value->type == NODE_CALL && is_stdlib_heap_fn(stmt->as.assign.value->as.call.callee)));
             if (owned_idx != -1 && val_is_heap) {
                 stmt->free_old_on_reassign = true;
                 bool val_is_str = (stmt->as.assign.value->type == NODE_LITERAL && stmt->as.assign.value->as.literal.lit_type == TY_STRING) ||
-                                  (stmt->as.assign.value->type == NODE_CALL && is_stdlib_heap_fn(stmt->as.assign.value->as.call.callee));
+                                  (stmt->as.assign.value->type == NODE_CALL && (strcmp(stmt->as.assign.value->as.call.callee, "concat") == 0 || strcmp(stmt->as.assign.value->as.call.callee, "substring") == 0 || strcmp(stmt->as.assign.value->as.call.callee, "read_file") == 0));
                 bool val_is_arr = !val_is_str;
                 add_free_to_node(stack, stmt, stmt->as.assign.name, val_is_arr);
             }
@@ -280,7 +279,7 @@ static void analyze_node(ScopeStack *stack, AstNode *node) {
                         stack->current_function->as.function.returns_heap_pointer = true;
                     }
                 }
-            } else if (node->as.return_stmt.value && (node->as.return_stmt.value->type == NODE_ALLOC || (node->as.return_stmt.value->type == NODE_CALL && is_stdlib_heap_fn(node->as.return_stmt.value->as.call.callee)))) {
+            } else if (node->as.return_stmt.value && ((node->as.return_stmt.value->type == NODE_ALLOC && !node->as.return_stmt.value->as.alloc.is_map) || (node->as.return_stmt.value->type == NODE_CALL && is_stdlib_heap_fn(node->as.return_stmt.value->as.call.callee)))) {
                 if (stack->current_function) {
                     stack->current_function->as.function.returns_heap_pointer = true;
                 }
@@ -339,7 +338,7 @@ static void analyze_node(ScopeStack *stack, AstNode *node) {
             for (int k = 0; k < node->as.new_expr.field_count; k++) {
                 AstNode *val = node->as.new_expr.field_values[k];
                 analyze_node(stack, val);
-                bool val_is_heap = (val->type == NODE_ALLOC);
+                bool val_is_heap = (val->type == NODE_ALLOC && !val->as.alloc.is_map);
                 if (!val_is_heap && val->type == NODE_IDENT) {
                     int s_idx = -1;
                     int o_idx = find_owned_in_stack(stack, val->as.ident.name, &s_idx);
@@ -384,6 +383,8 @@ typedef struct OwnVar {
     bool is_borrowed_param;
     bool transferred;
     bool is_array;
+    bool is_map;
+    Type key_type;
     int const_size;
 } OwnVar;
 
@@ -442,8 +443,8 @@ static OwnScope *current_own_scope(OwnScopeStack *stack) {
     return &stack->scopes[stack->depth - 1];
 }
 
-static void own_scope_add_var_full(OwnScopeStack *stack, OwnScope *s, const char *name, const char *class_name, int line, int col, bool is_param, bool is_borrowed_param, bool is_array, int const_size) {
-    if (!name || !class_name) return;
+static void own_scope_add_var_full_map(OwnScopeStack *stack, OwnScope *s, const char *name, const char *class_name, int line, int col, bool is_param, bool is_borrowed_param, bool is_array, bool is_map, Type key_type, int const_size) {
+    if (!name) return;
     if (s->count >= s->capacity) {
         s->capacity = s->capacity == 0 ? 4 : s->capacity * 2;
         OwnVar *new_vars = (OwnVar *)arena_alloc_array(stack->arena, s->capacity, sizeof(OwnVar));
@@ -453,15 +454,21 @@ static void own_scope_add_var_full(OwnScopeStack *stack, OwnScope *s, const char
         s->vars = new_vars;
     }
     s->vars[s->count].name = arena_strdup(stack->arena, name);
-    s->vars[s->count].class_name = arena_strdup(stack->arena, class_name);
+    s->vars[s->count].class_name = class_name ? arena_strdup(stack->arena, class_name) : NULL;
     s->vars[s->count].decl_line = line;
     s->vars[s->count].decl_col = col;
     s->vars[s->count].is_param = is_param;
     s->vars[s->count].is_borrowed_param = is_borrowed_param;
     s->vars[s->count].transferred = is_borrowed_param;
     s->vars[s->count].is_array = is_array;
+    s->vars[s->count].is_map = is_map;
+    s->vars[s->count].key_type = key_type;
     s->vars[s->count].const_size = const_size;
     s->count++;
+}
+
+static void own_scope_add_var_full(OwnScopeStack *stack, OwnScope *s, const char *name, const char *class_name, int line, int col, bool is_param, bool is_borrowed_param, bool is_array, int const_size) {
+    own_scope_add_var_full_map(stack, s, name, class_name, line, col, is_param, is_borrowed_param, is_array, false, TY_INT, const_size);
 }
 
 static void own_scope_add_var(OwnScopeStack *stack, OwnScope *s, const char *name, const char *class_name, int line, int col, bool is_param, bool is_borrowed_param) {
@@ -581,8 +588,9 @@ static void check_use_var(OwnScopeStack *stack, const char *name, int line, int 
     }
 }
 
-static void add_free_release_to_node(OwnScopeStack *stack, AstNode *node, const char *var_name, const char *class_name, bool is_array) {
-    if (!node || !var_name || !class_name) return;
+static void add_free_release_to_node_map(OwnScopeStack *stack, AstNode *node, const char *var_name, const char *class_name, bool is_array, bool is_map, Type key_type) {
+    if (!node || !var_name) return;
+    if (!is_map && !class_name) return;
     for (int i = 0; i < node->releases_count; i++) {
         if (strcmp(node->releases_to_emit[i].var_name, var_name) == 0) return;
     }
@@ -593,22 +601,38 @@ static void add_free_release_to_node(OwnScopeStack *stack, AstNode *node, const 
         memcpy(new_rels, node->releases_to_emit, node->releases_count * sizeof(RefRelease));
     }
     new_rels[node->releases_count].var_name = arena_strdup(stack->arena, var_name);
-    new_rels[node->releases_count].class_name = arena_strdup(stack->arena, class_name);
+    new_rels[node->releases_count].class_name = class_name ? arena_strdup(stack->arena, class_name) : NULL;
     new_rels[node->releases_count].is_array = is_array;
+    new_rels[node->releases_count].is_map = is_map;
+    new_rels[node->releases_count].key_type = key_type;
     node->releases_to_emit = new_rels;
     node->releases_count++;
 }
 
 static bool is_expr_array_scope(OwnScopeStack *stack, AstNode *expr) {
     if (!expr) return false;
-    if (expr->type == NODE_ALLOC) return true;
+    if (expr->type == NODE_ALLOC && !expr->as.alloc.is_map) return true;
     if (expr->type == NODE_IDENT) {
         OwnVar *v = find_own_var(stack, expr->as.ident.name, NULL, NULL);
         if (v) return v->is_array;
     }
     if (expr->type == NODE_CALL) {
         const char *callee = expr->as.call.callee;
-        if (strcmp(callee, "push") == 0) return true;
+        if (callee && strcmp(callee, "push") == 0) return true;
+    }
+    return false;
+}
+
+static bool is_expr_map_scope(OwnScopeStack *stack, AstNode *expr) {
+    if (!expr) return false;
+    if (expr->type == NODE_ALLOC && expr->as.alloc.is_map) return true;
+    if (expr->type == NODE_IDENT) {
+        OwnVar *v = find_own_var(stack, expr->as.ident.name, NULL, NULL);
+        if (v) return v->is_map;
+    }
+    if (expr->type == NODE_CALL) {
+        const char *callee = expr->as.call.callee;
+        if (callee && strcmp(callee, "put") == 0) return true;
     }
     return false;
 }
@@ -653,8 +677,11 @@ static char *get_expr_class_type(OwnScopeStack *stack, AstNode *expr) {
         }
 
         case NODE_CALL: {
-            if ((strcmp(expr->as.call.callee, "pop") == 0 || strcmp(expr->as.call.callee, "push") == 0) && expr->as.call.arg_count > 0) {
-                return get_expr_class_type(stack, expr->as.call.args[0]);
+            const char *callee = expr->as.call.callee;
+            if (callee) {
+                if ((strcmp(callee, "pop") == 0 || strcmp(callee, "push") == 0 || strcmp(callee, "get") == 0 || strcmp(callee, "remove") == 0) && expr->as.call.arg_count > 0) {
+                    return get_expr_class_type(stack, expr->as.call.args[0]);
+                }
             }
             if (stack->program && stack->program->type == NODE_PROGRAM) {
                 for (int i = 0; i < stack->program->as.program.count; i++) {
@@ -752,7 +779,15 @@ static void analyze_own_block(OwnScopeStack *stack, AstNode *block_node, bool is
                 cls_name = get_expr_class_type(stack, stmt->as.let.value);
             }
 
-            if (stmt->as.let.is_array || (cls_name && find_class(stack->ct, cls_name) != NULL)) {
+            bool is_get_borrow = false;
+            if (stmt->as.let.value && stmt->as.let.value->type == NODE_CALL) {
+                const char *callee = stmt->as.let.value->as.call.callee;
+                if (callee && strcmp(callee, "get") == 0) {
+                    is_get_borrow = true;
+                }
+            }
+
+            if (stmt->as.let.is_map || stmt->as.let.is_array || (cls_name && find_class(stack->ct, cls_name) != NULL)) {
                 if (cls_name && find_class(stack->ct, cls_name) != NULL) {
                     stmt->as.let.class_name = arena_strdup(stack->arena, cls_name);
                     stmt->as.let.var_type = TY_CLASS;
@@ -777,7 +812,7 @@ static void analyze_own_block(OwnScopeStack *stack, AstNode *block_node, bool is
                 }
 
                 unmark_moved(stack, stmt->as.let.name);
-                own_scope_add_var_full(stack, s, stmt->as.let.name, cls_name, stmt->line, stmt->col, false, false, stmt->as.let.is_array, const_size);
+                own_scope_add_var_full_map(stack, s, stmt->as.let.name, cls_name, stmt->line, stmt->col, false, is_get_borrow, stmt->as.let.is_array, stmt->as.let.is_map, stmt->as.let.key_type, const_size);
             }
         } else if (stmt->type == NODE_ASSIGN) {
             analyze_own_node(stack, stmt->as.assign.value);
@@ -811,8 +846,8 @@ static void analyze_own_block(OwnScopeStack *stack, AstNode *block_node, bool is
                     }
                 }
 
-                stmt->as.assign.class_name = arena_strdup(stack->arena, lhs_var->class_name);
-                if (!find_moved_var(stack, lhs_name) && !lhs_var->transferred) {
+                stmt->as.assign.class_name = lhs_var->class_name ? arena_strdup(stack->arena, lhs_var->class_name) : NULL;
+                if (!lhs_var->is_array && !lhs_var->is_map && !find_moved_var(stack, lhs_name) && !lhs_var->transferred) {
                     stmt->as.assign.release_old = true;
                 }
                 unmark_moved(stack, lhs_name);
@@ -892,7 +927,7 @@ static void analyze_own_block(OwnScopeStack *stack, AstNode *block_node, bool is
 
     for (int i = 0; i < s->count; i++) {
         if (!is_var_transferred(stack, &s->vars[i])) {
-            add_free_release_to_node(stack, block_node, s->vars[i].name, s->vars[i].class_name, s->vars[i].is_array);
+            add_free_release_to_node_map(stack, block_node, s->vars[i].name, s->vars[i].class_name, s->vars[i].is_array, s->vars[i].is_map, s->vars[i].key_type);
         }
     }
 
@@ -1047,7 +1082,7 @@ static void analyze_own_node(OwnScopeStack *stack, AstNode *node) {
             OwnScope *fs = current_own_scope(stack);
             for (int i = 0; i < fs->count; i++) {
                 if (!is_var_transferred(stack, &fs->vars[i])) {
-                    add_free_release_to_node(stack, node, fs->vars[i].name, fs->vars[i].class_name, fs->vars[i].is_array);
+                    add_free_release_to_node_map(stack, node, fs->vars[i].name, fs->vars[i].class_name, fs->vars[i].is_array, fs->vars[i].is_map, fs->vars[i].key_type);
                 }
             }
             pop_own_scope(stack);
@@ -1115,6 +1150,69 @@ static void analyze_own_node(OwnScopeStack *stack, AstNode *node) {
                         char short_msg[256];
                         snprintf(short_msg, sizeof(short_msg), "'%s' is not an array", var_n);
                         ErrorLocation primary = {get_error_filename(), arr_arg->line, arr_arg->col};
+                        print_formatted_error(short_msg, primary, "type mismatch", NULL, NULL, NULL, NULL);
+                        exit(1);
+                    }
+                }
+                break;
+            }
+            if (strcmp(callee, "put") == 0) {
+                if (node->as.call.arg_count == 3) {
+                    AstNode *map_arg = node->as.call.args[0];
+                    AstNode *key_arg = node->as.call.args[1];
+                    AstNode *val_arg = node->as.call.args[2];
+                    analyze_own_node(stack, map_arg);
+                    analyze_own_node(stack, key_arg);
+                    analyze_own_node(stack, val_arg);
+
+                    if (!is_expr_map_scope(stack, map_arg)) {
+                        const char *var_n = (map_arg->type == NODE_IDENT) ? map_arg->as.ident.name : "expression";
+                        char short_msg[256];
+                        snprintf(short_msg, sizeof(short_msg), "'%s' is not a map", var_n);
+                        ErrorLocation primary = {get_error_filename(), map_arg->line, map_arg->col};
+                        print_formatted_error(short_msg, primary, "type mismatch", NULL, NULL, NULL, NULL);
+                        exit(1);
+                    }
+
+                    if (val_arg->type == NODE_IDENT) {
+                        const char *val_name = val_arg->as.ident.name;
+                        OwnVar *val_var = find_own_var(stack, val_name, NULL, NULL);
+                        if (val_var && val_var->class_name && !val_var->is_array && !val_var->is_map) {
+                            check_use_var(stack, val_name, val_arg->line, val_arg->col);
+                            mark_moved(stack, val_name, val_arg->line, val_arg->col, NULL, false);
+                        }
+                    }
+                }
+                break;
+            }
+            if (strcmp(callee, "get") == 0 || strcmp(callee, "has") == 0 || strcmp(callee, "remove") == 0) {
+                if (node->as.call.arg_count == 2) {
+                    AstNode *map_arg = node->as.call.args[0];
+                    AstNode *key_arg = node->as.call.args[1];
+                    analyze_own_node(stack, map_arg);
+                    analyze_own_node(stack, key_arg);
+
+                    if (!is_expr_map_scope(stack, map_arg)) {
+                        const char *var_n = (map_arg->type == NODE_IDENT) ? map_arg->as.ident.name : "expression";
+                        char short_msg[256];
+                        snprintf(short_msg, sizeof(short_msg), "'%s' is not a map", var_n);
+                        ErrorLocation primary = {get_error_filename(), map_arg->line, map_arg->col};
+                        print_formatted_error(short_msg, primary, "type mismatch", NULL, NULL, NULL, NULL);
+                        exit(1);
+                    }
+                }
+                break;
+            }
+            if (strcmp(callee, "keys") == 0) {
+                if (node->as.call.arg_count == 1) {
+                    AstNode *map_arg = node->as.call.args[0];
+                    analyze_own_node(stack, map_arg);
+
+                    if (!is_expr_map_scope(stack, map_arg)) {
+                        const char *var_n = (map_arg->type == NODE_IDENT) ? map_arg->as.ident.name : "expression";
+                        char short_msg[256];
+                        snprintf(short_msg, sizeof(short_msg), "'%s' is not a map", var_n);
+                        ErrorLocation primary = {get_error_filename(), map_arg->line, map_arg->col};
                         print_formatted_error(short_msg, primary, "type mismatch", NULL, NULL, NULL, NULL);
                         exit(1);
                     }
@@ -1300,7 +1398,7 @@ static void analyze_own_node(OwnScopeStack *stack, AstNode *node) {
                 OwnScope *s = &stack->scopes[s_idx];
                 for (int i = 0; i < s->count; i++) {
                     if (!is_var_transferred(stack, &s->vars[i])) {
-                        add_free_release_to_node(stack, node, s->vars[i].name, s->vars[i].class_name, s->vars[i].is_array);
+                        add_free_release_to_node_map(stack, node, s->vars[i].name, s->vars[i].class_name, s->vars[i].is_array, s->vars[i].is_map, s->vars[i].key_type);
                     }
                 }
             }
@@ -1313,7 +1411,7 @@ static void analyze_own_node(OwnScopeStack *stack, AstNode *node) {
                 OwnScope *s = &stack->scopes[s_idx];
                 for (int i = 0; i < s->count; i++) {
                     if (!is_var_transferred(stack, &s->vars[i])) {
-                        add_free_release_to_node(stack, node, s->vars[i].name, s->vars[i].class_name, s->vars[i].is_array);
+                        add_free_release_to_node_map(stack, node, s->vars[i].name, s->vars[i].class_name, s->vars[i].is_array, s->vars[i].is_map, s->vars[i].key_type);
                     }
                 }
                 if (s->is_loop_scope) break;
@@ -1322,6 +1420,16 @@ static void analyze_own_node(OwnScopeStack *stack, AstNode *node) {
         }
 
         case NODE_EXPR_STMT:
+            if (node->as.expr_stmt.expr && node->as.expr_stmt.expr->type == NODE_CALL) {
+                const char *callee = node->as.expr_stmt.expr->as.call.callee;
+                if (callee && strcmp(callee, "put") == 0) {
+                    char short_msg[256];
+                    snprintf(short_msg, sizeof(short_msg), "result of put() must be reassigned (e.g. m = put(m, key, value))");
+                    ErrorLocation primary = {get_error_filename(), node->line, node->col};
+                    print_formatted_error(short_msg, primary, "unassigned put() call", NULL, NULL, NULL, NULL);
+                    exit(1);
+                }
+            }
             analyze_own_node(stack, node->as.expr_stmt.expr);
             break;
         case NODE_PRINT:
