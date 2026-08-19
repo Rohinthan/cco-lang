@@ -203,6 +203,20 @@ static void analyze_block(ScopeStack *stack, AstNode *block_node, bool is_loop) 
     pop_scope(stack);
 }
 
+static bool is_known_constructed_type(AstNode *program, const char *name) {
+    if (!program || program->type != NODE_PROGRAM || !name) return false;
+    for (int i = 0; i < program->as.program.class_count; i++) {
+        if (strcmp(program->as.program.classes[i]->as.class_decl.name, name) == 0) return true;
+    }
+    for (int i = 0; i < program->as.program.struct_count; i++) {
+        if (strcmp(program->as.program.structs[i]->as.struct_decl.name, name) == 0) return true;
+    }
+    for (int i = 0; i < program->as.program.enum_count; i++) {
+        if (strcmp(program->as.program.enums[i]->as.enum_decl.name, name) == 0) return true;
+    }
+    return false;
+}
+
 static void analyze_node(ScopeStack *stack, AstNode *node) {
     if (!node) return;
 
@@ -380,6 +394,22 @@ static void analyze_node(ScopeStack *stack, AstNode *node) {
             }
             break;
         case NODE_NEW: {
+            const char *cname = node->as.new_expr.class_name;
+            if (cname && !node->as.new_expr.constructs_enum && !is_known_constructed_type(stack->program, cname)) {
+                char short_msg[256];
+                snprintf(short_msg, sizeof(short_msg), "unknown type '%s' in constructor expression", cname);
+                ErrorLocation loc = {get_error_filename(), node->line, node->col};
+                print_formatted_error(
+                    short_msg,
+                    loc,
+                    "unknown type name",
+                    "make sure the struct or class is defined with matching spelling before instantiating it",
+                    NULL,
+                    NULL,
+                    NULL
+                );
+                exit(1);
+            }
             for (int k = 0; k < node->as.new_expr.field_count; k++) {
                 AstNode *val = node->as.new_expr.field_values[k];
                 analyze_node(stack, val);
