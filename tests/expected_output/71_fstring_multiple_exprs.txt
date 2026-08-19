@@ -1,0 +1,2 @@
+User Alice: age 25, score 98.5, active: true
+Alice has active status = true

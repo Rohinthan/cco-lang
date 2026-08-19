@@ -1,0 +1,12 @@
+fn main() -> int {
+    let name: string = "Alice";
+    let age: int = 25;
+    let score: float = 98.5;
+    let active: bool = true;
+
+    let summary: string = f"User {name}: age {age}, score {score}, active: {active}";
+    print(summary);
+
+    print(f"{name} has active status = {active}");
+    return 0;
+}
