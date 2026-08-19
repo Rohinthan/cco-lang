@@ -1,0 +1,17 @@
+fn square(n: int) -> int {
+    return n * n;
+}
+
+fn greet(name: string) -> string {
+    return concat("Hello, ", name);
+}
+
+fn main() -> int {
+    let a: int = 5;
+    let b: int = 3;
+
+    print(f"Calculation: {a} + {b} * 2 = {a + b * 2}");
+    print(f"Square of {a} is {square(a)}");
+    print(f"Greeting: {greet("Bob")}");
+    return 0;
+}
