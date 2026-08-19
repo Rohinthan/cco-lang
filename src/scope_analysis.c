@@ -116,6 +116,8 @@ static bool is_stdlib_heap_fn(const char *name) {
     return strcmp(name, "concat") == 0 ||
            strcmp(name, "substring") == 0 ||
            strcmp(name, "read_file") == 0 ||
+           strcmp(name, "program_name") == 0 ||
+           strcmp(name, "args") == 0 ||
            strcmp(name, "keys") == 0;
 }
 
@@ -143,10 +145,12 @@ static void analyze_block(ScopeStack *stack, AstNode *block_node, bool is_loop) 
             }
 
             if (is_alloc) {
-                stmt->is_heap_owner = true;
-                bool is_str = (stmt->as.let.var_type == TY_STRING && !stmt->as.let.is_array);
-                bool is_arr = !is_str;
-                scope_add_owned(stack, s, stmt->as.let.name, is_arr);
+                if (!(stmt->as.let.var_type == TY_STRING && stmt->as.let.is_array)) {
+                    stmt->is_heap_owner = true;
+                    bool is_str = (stmt->as.let.var_type == TY_STRING && !stmt->as.let.is_array);
+                    bool is_arr = !is_str;
+                    scope_add_owned(stack, s, stmt->as.let.name, is_arr);
+                }
             }
         } else if (stmt->type == NODE_ASSIGN) {
             analyze_node(stack, stmt->as.assign.value);
@@ -157,7 +161,7 @@ static void analyze_block(ScopeStack *stack, AstNode *block_node, bool is_loop) 
             if (owned_idx != -1 && val_is_heap) {
                 stmt->free_old_on_reassign = true;
                 bool val_is_str = (stmt->as.assign.value->type == NODE_LITERAL && stmt->as.assign.value->as.literal.lit_type == TY_STRING) ||
-                                  (stmt->as.assign.value->type == NODE_CALL && (strcmp(stmt->as.assign.value->as.call.callee, "concat") == 0 || strcmp(stmt->as.assign.value->as.call.callee, "substring") == 0 || strcmp(stmt->as.assign.value->as.call.callee, "read_file") == 0));
+                                  (stmt->as.assign.value->type == NODE_CALL && (strcmp(stmt->as.assign.value->as.call.callee, "concat") == 0 || strcmp(stmt->as.assign.value->as.call.callee, "substring") == 0 || strcmp(stmt->as.assign.value->as.call.callee, "read_file") == 0 || strcmp(stmt->as.assign.value->as.call.callee, "program_name") == 0));
                 bool val_is_arr = !val_is_str;
                 add_free_to_node(stack, stmt, stmt->as.assign.name, val_is_arr);
             }
@@ -275,6 +279,17 @@ static void analyze_node(ScopeStack *stack, AstNode *node) {
                 }
             }
             pop_scope(stack);
+            break;
+
+        case NODE_FOR_EACH:
+            analyze_node(stack, node->as.for_each.collection_expr);
+            if (node->as.for_each.body) {
+                if (node->as.for_each.body->type == NODE_BLOCK) {
+                    analyze_block(stack, node->as.for_each.body, true);
+                } else {
+                    analyze_node(stack, node->as.for_each.body);
+                }
+            }
             break;
 
         case NODE_RETURN: {
@@ -633,7 +648,7 @@ static bool is_expr_array_scope(OwnScopeStack *stack, AstNode *expr) {
     if (expr->type == NODE_CALL) {
         const char *callee = expr->as.call.callee;
         if (callee) {
-            if (strcmp(callee, "push") == 0) return true;
+            if (strcmp(callee, "push") == 0 || strcmp(callee, "keys") == 0 || strcmp(callee, "args") == 0) return true;
             if (stack->program && stack->program->type == NODE_PROGRAM) {
                 for (int i = 0; i < stack->program->as.program.count; i++) {
                     AstNode *fn = stack->program->as.program.functions[i];
@@ -822,6 +837,9 @@ static void analyze_own_block(OwnScopeStack *stack, AstNode *block_node, bool is
             }
             if (!cls_name) {
                 cls_name = get_expr_class_type(stack, stmt->as.let.value);
+            }
+            if (!cls_name && stmt->as.let.is_array && stmt->as.let.var_type == TY_STRING) {
+                cls_name = "string";
             }
 
             bool is_get_borrow = false;
