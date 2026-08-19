@@ -1,0 +1,22 @@
+fn main() -> int {
+    random_seed(42);
+    let r1: int = random_int(1, 100);
+    print(r1);
+    let r2: int = random_int(1, 100);
+    print(r2);
+    let r3: int = random_int(1, 100);
+    print(r3);
+
+    random_seed(42);
+    let s1: int = random_int(1, 100);
+    print(s1);
+    let s2: int = random_int(1, 100);
+    print(s2);
+    let s3: int = random_int(1, 100);
+    print(s3);
+
+    if (r1 == s1 && r2 == s2 && r3 == s3) {
+        print("deterministic random ok");
+    }
+    return 0;
+}
