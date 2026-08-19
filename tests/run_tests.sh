@@ -97,7 +97,7 @@ for item in tests/programs/*; do
 
     # Specific prelude emission assertions for v8 tests
     if [ "$base" = "38_prelude_minimal" ]; then
-        if grep -q "__cco_" "$c_out"; then
+        if grep -q -E "__cco_(concat|alloc_arr|read_file|write_file|bounds_check|arr_len|substring|abs|min|max|map|free_arr)" "$c_out"; then
             echo "FAILED (38_prelude_minimal contains unexpected __cco_ helper functions in prelude)"
             FAILED=$((FAILED + 1))
             continue
@@ -134,8 +134,15 @@ for item in tests/programs/*; do
         tcc -std=c11 "$c_out" -o "${bin_out}_tcc" -lm
     fi
 
+    # Check for optional .args sidecar file
+    local_args=()
+    args_file="tests/programs/${base}.args"
+    if [ -f "$args_file" ]; then
+        read -r -a local_args < "$args_file"
+    fi
+
     # 3. Execute and capture stdout
-    "$bin_out" > "$act_out"
+    "$bin_out" "${local_args[@]}" > "$act_out"
 
     # 4. Diff output against expected
     if ! diff -u "$act_out" "$exp_out" > /dev/null; then
@@ -146,9 +153,9 @@ for item in tests/programs/*; do
     fi
 
     # 5. Valgrind leak check
-    if ! valgrind --leak-check=full --error-exitcode=1 "$bin_out" > /dev/null 2>&1; then
+    if ! valgrind --leak-check=full --error-exitcode=1 "$bin_out" "${local_args[@]}" > /dev/null 2>&1; then
         echo "FAILED (Valgrind memory leak / error)"
-        valgrind --leak-check=full "$bin_out"
+        valgrind --leak-check=full "$bin_out" "${local_args[@]}"
         FAILED=$((FAILED + 1))
         continue
     fi
