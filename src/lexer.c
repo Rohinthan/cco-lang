@@ -55,6 +55,7 @@ static TokenType check_keyword(const char *str) {
     if (strcmp(str, "map_new") == 0) return TOKEN_MAP_NEW;
     if (strcmp(str, "enum") == 0) return TOKEN_ENUM;
     if (strcmp(str, "match") == 0) return TOKEN_MATCH;
+    if (strcmp(str, "operator") == 0) return TOKEN_OPERATOR;
     if (strcmp(str, "_") == 0) return TOKEN_UNDERSCORE;
     if (strcmp(str, "int") == 0) return TOKEN_TYPE_INT;
     if (strcmp(str, "float") == 0) return TOKEN_TYPE_FLOAT;
@@ -481,6 +482,7 @@ void dump_tokens(const TokenArray *array) {
             case TOKEN_MAP_NEW:
             case TOKEN_ENUM:
             case TOKEN_MATCH:
+            case TOKEN_OPERATOR:
             case TOKEN_TYPE_INT:
             case TOKEN_TYPE_FLOAT:
             case TOKEN_TYPE_CHAR:
