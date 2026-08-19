@@ -173,6 +173,17 @@ Cco includes a built-in Standard Library available in every file without manual 
 | `arg_count` | `arg_count() -> int` | Returns argument count `len(args())` without array allocation | - |
 | `program_name` | `program_name() -> string` | Returns program invocation name (`argv[0]`) as fresh owned string | Caller owns return string |
 
+### 5. Input, Number Parsing, and Random Numbers (v14.0)
+| Function | Signature | Description | Heap Ownership |
+| :--- | :--- | :--- | :--- |
+| `read_line` | `read_line() -> string` | Reads one line from stdin (stripping trailing `\n`), returns `""` on EOF | Caller owns return string |
+| `to_int` | `to_int(s: string) -> int` | Parses string as integer; fatal runtime error if invalid | - |
+| `to_float` | `to_float(s: string) -> float` | Parses string as float; fatal runtime error if invalid | - |
+| `is_int` | `is_int(s: string) -> bool` | Returns `true` if `s` is a valid integer without runtime error risk | - |
+| `is_float` | `is_float(s: string) -> bool` | Returns `true` if `s` is a valid float without runtime error risk | - |
+| `random_int` | `random_int(min: int, max: int) -> int` | Returns unbiased random integer in `[min, max]` inclusive | - |
+| `random_seed` | `random_seed(seed: int) -> void` | Seeds random generator for deterministic reproducible execution | - |
+
 ---
 
 ## 🎯 Diagnostic Error Message Polish (Part B)
@@ -220,6 +231,7 @@ A comprehensive suite of example programs is available in [`examples/`](examples
 - [`examples/10_import_demo/`](examples/10_import_demo/): Multi-file import system (`import "shapes.cco";`)
 - [`examples/11_struct_vec2.cco`](examples/11_struct_vec2.cco): Lightweight Structs (`struct`), value copies, and in-place borrowed mutation (`&Struct`)
 - [`examples/12_cli_args.cco`](examples/12_cli_args.cco): Command-Line Arguments (`program_name()`, `arg_count()`, `args()`)
+- [`examples/13_number_guess.cco`](examples/13_number_guess.cco): Interactive Number Guessing Game (`read_line()`, `is_int()`, `to_int()`, `random_seed()`, `random_int()`)
 - [`examples/word_frequency.cco`](examples/word_frequency.cco): Hash Maps (`map[string]int`), `put`, `get`, `has`, `keys`, `len`, and `for-each` iteration
 
 See [`examples/README.md`](examples/README.md) for detailed descriptions and execution instructions.
@@ -245,7 +257,7 @@ make test
 
 ---
 
-## 🧪 Test Suite Matrix (v13.0)
+## 🧪 Test Suite Matrix (v14.0)
 
 | Test Case | Description | Result | Valgrind Leak Status |
 | :--- | :--- | :---: | :---: |
@@ -317,17 +329,21 @@ make test
 | `62_argv_basic` | CLI argument processing with sidecar `.args`, `args()`, `arg_count()` | **PASS** | 0 Bytes Leaked |
 | `63_argv_empty` | Zero CLI arguments invocation, empty `args()` string array, `arg_count() == 0` | **PASS** | 0 Bytes Leaked |
 | `64_program_name` | Program invocation path retrieval via `program_name()` (`argv[0]`) | **PASS** | 0 Bytes Leaked |
-| `compare_lexers` (v12) | Self-hosted lexer diff harness across all 87 `.cco` files in corpus (100% byte-identical) | **PASS** | 0 Bytes Leaked |
-
----
+| `65_read_line_basic` | Standard input line reading with sidecar `.stdin`, newline stripping, EOF handling | **PASS** | 0 Bytes Leaked |
+| `66_to_int_valid` | Valid integer and float numeric parsing via `to_int()` and `to_float()` | **PASS** | 0 Bytes Leaked |
+| `67_to_int_invalid_RUNTIME_ERROR` | Catching invalid numeric string in `to_int()` with formatted runtime error | **PASS** | Runtime Error (As Expected) |
+| `68_is_int_is_float_guard` | Safe parse-guarding pattern (`is_int()`, `is_float()`) avoiding runtime fatal crashes | **PASS** | 0 Bytes Leaked |
+| `69_random_seeded_deterministic` | Deterministic random sequence verification via `random_seed()` & `random_int()` | **PASS** | 0 Bytes Leaked |
+| `compare_lexers` (v12) | Self-hosted lexer diff harness across all 92 `.cco` files in corpus (100% byte-identical) | **PASS** | 0 Bytes Leaked |
 
 ---
 
 ## 🌐 Strict C11 Portability & Multi-Compiler Conformance
 
-Cco-generated C output is strictly conformant **standard C11** code (`-std=c11 -pedantic-errors`).
+Cco-generated C output is strictly conformant **standard ISO C11** code (`-std=c11 -pedantic-errors`).
 
 - **No Compiler Extensions in Generated Output**: Non-standard GNU extensions (such as `__typeof__`) have been eliminated from generated output in favor of explicit, statically-known type emission.
+- **Strict Standard C11 I/O**: The stdin reader `read_line()` is implemented using standard ISO C11 `fgetc()` with dynamic heap buffer reallocation (`malloc`/`realloc`) rather than POSIX-only `getline()`, ensuring generated C code compiles and runs seamlessly across Windows/MSVC, Linux, macOS, and BSD without POSIX dependencies.
 - **Multi-Compiler Conformance**: Generated C output compiles cleanly under `gcc`, `clang`, `tcc`, and MSVC without requiring GNU-specific or compiler-specific extensions.
 - **Strict Pedantic Compliance**: All build and test pipelines compile generated output with `-Wall -Wextra -Werror -pedantic-errors -std=c11`.
 - **Compiler Binary Platform Note**: While Cco-generated C code is strictly portable standard C11, the Cco compiler executable itself currently relies on POSIX APIs (`realpath()`) for canonical module resolution and requires a POSIX environment (Linux/macOS/WSL) to run.
