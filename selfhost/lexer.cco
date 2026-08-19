@@ -242,23 +242,19 @@ fn lex(source: string) -> Token[] {
             continue;
         }
 
-        // String literals
+        // Strings
         if (c == '"') {
             let start_col: int = col;
+            let start_line: int = line;
             i = i + 1;
             col = col + 1;
             let start_pos: int = i;
-            while (i < n && char_at(source, i) != '"') {
+            while (i < n && char_at(source, i) != '"' && char_at(source, i) != '\n') {
                 if (char_at(source, i) == '\\' && i + 1 < n) {
                     i = i + 2;
                     col = col + 2;
                 } else {
-                    if (char_at(source, i) == '\n') {
-                        line = line + 1;
-                        col = 1;
-                    } else {
-                        col = col + 1;
-                    }
+                    col = col + 1;
                     i = i + 1;
                 }
             }
@@ -268,7 +264,7 @@ fn lex(source: string) -> Token[] {
                 i = i + 1;
                 col = col + 1;
             }
-            tokens = push(tokens, Token { kind: TokenKind.StringLit { value: str_val }, line: line, col: start_col });
+            tokens = push(tokens, Token { kind: TokenKind.StringLit { value: str_val }, line: start_line, col: start_col });
             continue;
         }
 
@@ -332,6 +328,7 @@ fn lex(source: string) -> Token[] {
         // Character literals
         if (c == '\'') {
             let start_col: int = col;
+            let start_line: int = line;
             i = i + 1;
             col = col + 1;
             let ch_val: char = ' ';
@@ -356,7 +353,7 @@ fn lex(source: string) -> Token[] {
                 i = i + 1;
                 col = col + 1;
             }
-            tokens = push(tokens, Token { kind: TokenKind.CharLit { value: ch_val }, line: line, col: start_col });
+            tokens = push(tokens, Token { kind: TokenKind.CharLit { value: ch_val }, line: start_line, col: start_col });
             continue;
         }
 
