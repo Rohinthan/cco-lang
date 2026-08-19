@@ -208,6 +208,8 @@ struct AstNode {
             Type return_key_type;
             char *return_class_name;
             bool returns_heap_pointer;
+            bool is_operator;
+            char *operator_symbol;
             AstNode *body;
         } function;
 
