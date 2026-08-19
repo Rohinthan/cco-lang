@@ -19,6 +19,7 @@ Welcome to the Cco example program gallery. These examples demonstrate the featu
 | [`11_struct_vec2.cco`](11_struct_vec2.cco) | Lightweight Structs (Value Types) | Value type structs (`struct`), copy semantics, in-place borrowed mutation (`&Struct`) |
 | [`12_cli_args.cco`](12_cli_args.cco) | Command-Line Arguments | `program_name()`, `arg_count()`, `args()`, command-line processing |
 | [`13_number_guess.cco`](13_number_guess.cco) | Interactive Number Guessing Game | F-Strings (`f"..."`), `read_line()`, `is_int()`, `to_int()`, `random_seed()`, `random_int()` |
+| [`vec2_operators.cco`](vec2_operators.cco) | Struct Operator Overloading | Overloaded struct operators (`operator+`, `operator-`, `operator==`), value semantics |
 
 ## Compiling & Running Examples
 
