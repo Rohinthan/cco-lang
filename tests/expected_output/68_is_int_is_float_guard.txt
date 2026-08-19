@@ -1,0 +1,6 @@
+123
+invalid int
+invalid int
+3.14
+invalid float
+100
