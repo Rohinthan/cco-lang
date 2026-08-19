@@ -166,6 +166,13 @@ Cco includes a built-in Standard Library available in every file without manual 
 | `read_file` | `read_file(path: string) -> string` | Reads entire file at `path` into a fresh heap-allocated string | Caller owns return string |
 | `write_file` | `write_file(path: string, content: string) -> bool` | Writes `content` to file at `path`, returning `true` on success | - |
 
+### 4. Command-Line Argument Functions (v13.0)
+| Function | Signature | Description | Heap Ownership |
+| :--- | :--- | :--- | :--- |
+| `args` | `args() -> string[]` | Returns all arguments after program name as a fresh owned array | Caller owns returned string array & strings |
+| `arg_count` | `arg_count() -> int` | Returns argument count `len(args())` without array allocation | - |
+| `program_name` | `program_name() -> string` | Returns program invocation name (`argv[0]`) as fresh owned string | Caller owns return string |
+
 ---
 
 ## 🎯 Diagnostic Error Message Polish (Part B)
@@ -212,6 +219,7 @@ A comprehensive suite of example programs is available in [`examples/`](examples
 - [`examples/09_object_array_todo.cco`](examples/09_object_array_todo.cco): Arrays of Objects (`Task[]`) and `for-each` loop iteration
 - [`examples/10_import_demo/`](examples/10_import_demo/): Multi-file import system (`import "shapes.cco";`)
 - [`examples/11_struct_vec2.cco`](examples/11_struct_vec2.cco): Lightweight Structs (`struct`), value copies, and in-place borrowed mutation (`&Struct`)
+- [`examples/12_cli_args.cco`](examples/12_cli_args.cco): Command-Line Arguments (`program_name()`, `arg_count()`, `args()`)
 - [`examples/word_frequency.cco`](examples/word_frequency.cco): Hash Maps (`map[string]int`), `put`, `get`, `has`, `keys`, `len`, and `for-each` iteration
 
 See [`examples/README.md`](examples/README.md) for detailed descriptions and execution instructions.
@@ -237,7 +245,7 @@ make test
 
 ---
 
-## 🧪 Test Suite Matrix (v10.0)
+## 🧪 Test Suite Matrix (v13.0)
 
 | Test Case | Description | Result | Valgrind Leak Status |
 | :--- | :--- | :---: | :---: |
@@ -306,7 +314,10 @@ make test
 | `59_enum_nonexhaustive_ERROR` | Rejecting non-exhaustive match statements at compile time with missing variant list | **PASS** | Compile Error (As Expected) |
 | `60_enum_duplicate_arm_ERROR` | Rejecting duplicate match arms at compile time with two-location note | **PASS** | Compile Error (As Expected) |
 | `61_enum_field_rename_ERROR` | Rejecting field name renaming in match patterns with diagnostic error | **PASS** | Compile Error (As Expected) |
-| `compare_lexers` (v12) | Self-hosted lexer diff harness across all 83 `.cco` files in corpus (100% byte-identical) | **PASS** | 0 Bytes Leaked |
+| `62_argv_basic` | CLI argument processing with sidecar `.args`, `args()`, `arg_count()` | **PASS** | 0 Bytes Leaked |
+| `63_argv_empty` | Zero CLI arguments invocation, empty `args()` string array, `arg_count() == 0` | **PASS** | 0 Bytes Leaked |
+| `64_program_name` | Program invocation path retrieval via `program_name()` (`argv[0]`) | **PASS** | 0 Bytes Leaked |
+| `compare_lexers` (v12) | Self-hosted lexer diff harness across all 87 `.cco` files in corpus (100% byte-identical) | **PASS** | 0 Bytes Leaked |
 
 ---
 
