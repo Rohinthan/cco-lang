@@ -28,6 +28,7 @@ static const char *deps_map_has[] = { "map_hash", "map_bucket", NULL };
 static const char *deps_map_remove[] = { "map_hash", "map_bucket", NULL };
 static const char *deps_map_keys[] = { "list_new", "arr_maybe_grow", "arr_len_raw", "arr_incr_len", "map_bucket", NULL };
 static const char *deps_map_free[] = { "map_bucket", NULL };
+static const char *deps_get_args[] = { "list_new", "arr_maybe_grow", "arr_len_raw", "arr_incr_len", NULL };
 
 static const PreludeChunk PRELUDE_CHUNKS[] = {
     {
@@ -531,7 +532,7 @@ static const PreludeChunk PRELUDE_CHUNKS[] = {
         "            arr = __cco_arr_maybe_grow(arr, elem_size);\n"
         "            int len = __cco_arr_len_raw(arr);\n"
         "            if (m->key_type == 1) {\n"
-        "                ((char **)arr)[len] = (char *)m->buckets[i].key;\n"
+        "                ((char **)arr)[len] = strdup((char *)m->buckets[i].key);\n"
         "            } else {\n"
         "                ((int *)arr)[len] = (int)(intptr_t)m->buckets[i].key;\n"
         "            }\n"
@@ -562,6 +563,38 @@ static const PreludeChunk PRELUDE_CHUNKS[] = {
         "    free(m);\n"
         "}\n\n",
         deps_map_free
+    },
+    {
+        "get_args",
+        "static inline char **__cco_get_args(void) {\n"
+        "    char **arr = (char **)__cco_list_new(sizeof(char *));\n"
+        "    if (__cco_argc <= 1 || !__cco_argv) return arr;\n"
+        "    for (int i = 1; i < __cco_argc; i++) {\n"
+        "        arr = (char **)__cco_arr_maybe_grow(arr, sizeof(char *));\n"
+        "        int len = __cco_arr_len_raw(arr);\n"
+        "        arr[len] = strdup(__cco_argv[i]);\n"
+        "        __cco_arr_incr_len(arr);\n"
+        "    }\n"
+        "    return arr;\n"
+        "}\n\n",
+        deps_get_args
+    },
+    {
+        "get_arg_count",
+        "static inline int __cco_get_arg_count(void) {\n"
+        "    return (__cco_argc > 1) ? (__cco_argc - 1) : 0;\n"
+        "}\n\n",
+        NULL
+    },
+    {
+        "get_program_name",
+        "static inline char *__cco_get_program_name(void) {\n"
+        "    if (__cco_argc > 0 && __cco_argv && __cco_argv[0]) {\n"
+        "        return strdup(__cco_argv[0]);\n"
+        "    }\n"
+        "    return strdup(\"\");\n"
+        "}\n\n",
+        NULL
     }
 };
 
