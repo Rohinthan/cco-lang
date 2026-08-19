@@ -191,6 +191,7 @@ fn init_keywords() -> map[string]bool {
     keywords = put(keywords, "map_new", true);
     keywords = put(keywords, "enum", true);
     keywords = put(keywords, "match", true);
+    keywords = put(keywords, "operator", true);
     keywords = put(keywords, "int", true);
     keywords = put(keywords, "float", true);
     keywords = put(keywords, "char", true);
