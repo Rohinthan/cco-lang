@@ -1,0 +1,6 @@
+error: lexer error: unbalanced '{' in f-string
+  --> tests/programs/74_fstring_unbalanced_ERROR.cco:3:24
+    |
+  3 |     print(f"unbalanced {x");
+    |                        ^ unexpected input
+    |
