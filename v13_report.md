@@ -1,6 +1,5 @@
 # Cco v13.0 Implementation Report: Command-Line Arguments (`args` / `arg_count` / `program_name`)
 
-**Author**: Antigravity  
 **Version**: v13.0  
 **Status**: Completed & Verified (64/64 Integration Tests Passing, 87/87 Lexer Comparison Files Passing, 0 Leaks)
 
