@@ -1,0 +1,11 @@
+fn main() -> int {
+    let count: int = arg_count();
+    print(count);
+    let argv: string[] = args();
+    print(len(argv));
+    for a in argv {
+        print(a);
+    }
+    print("empty args ok");
+    return 0;
+}
