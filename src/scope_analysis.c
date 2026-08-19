@@ -632,7 +632,17 @@ static bool is_expr_array_scope(OwnScopeStack *stack, AstNode *expr) {
     }
     if (expr->type == NODE_CALL) {
         const char *callee = expr->as.call.callee;
-        if (callee && strcmp(callee, "push") == 0) return true;
+        if (callee) {
+            if (strcmp(callee, "push") == 0) return true;
+            if (stack->program && stack->program->type == NODE_PROGRAM) {
+                for (int i = 0; i < stack->program->as.program.count; i++) {
+                    AstNode *fn = stack->program->as.program.functions[i];
+                    if (strcmp(fn->as.function.name, callee) == 0) {
+                        return fn->as.function.return_is_array;
+                    }
+                }
+            }
+        }
     }
     return false;
 }
@@ -646,7 +656,17 @@ static bool is_expr_map_scope(OwnScopeStack *stack, AstNode *expr) {
     }
     if (expr->type == NODE_CALL) {
         const char *callee = expr->as.call.callee;
-        if (callee && strcmp(callee, "put") == 0) return true;
+        if (callee) {
+            if (strcmp(callee, "put") == 0) return true;
+            if (stack->program && stack->program->type == NODE_PROGRAM) {
+                for (int i = 0; i < stack->program->as.program.count; i++) {
+                    AstNode *fn = stack->program->as.program.functions[i];
+                    if (strcmp(fn->as.function.name, callee) == 0) {
+                        return fn->as.function.return_is_map;
+                    }
+                }
+            }
+        }
     }
     return false;
 }

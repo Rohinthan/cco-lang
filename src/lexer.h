@@ -92,5 +92,6 @@ typedef struct {
 TokenArray lex_source(const char *source);
 void free_tokens(TokenArray *array);
 const char *token_type_to_string(TokenType type);
+void dump_tokens(const TokenArray *array);
 
 #endif // LEXER_H

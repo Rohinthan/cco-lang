@@ -373,3 +373,65 @@ const char *token_type_to_string(TokenType type) {
         default: return "UNKNOWN";
     }
 }
+
+void dump_tokens(const TokenArray *array) {
+    if (!array) return;
+    for (int i = 0; i < array->count; i++) {
+        Token tok = array->tokens[i];
+        switch (tok.type) {
+            case TOKEN_IMPORT:
+            case TOKEN_CLASS:
+            case TOKEN_STRUCT:
+            case TOKEN_SELF:
+            case TOKEN_FN:
+            case TOKEN_LET:
+            case TOKEN_IF:
+            case TOKEN_ELSE:
+            case TOKEN_WHILE:
+            case TOKEN_FOR:
+            case TOKEN_IN:
+            case TOKEN_RETURN:
+            case TOKEN_BREAK:
+            case TOKEN_CONTINUE:
+            case TOKEN_PRINT:
+            case TOKEN_ALLOC:
+            case TOKEN_LIST_NEW:
+            case TOKEN_MAP:
+            case TOKEN_MAP_NEW:
+            case TOKEN_ENUM:
+            case TOKEN_MATCH:
+            case TOKEN_TYPE_INT:
+            case TOKEN_TYPE_FLOAT:
+            case TOKEN_TYPE_CHAR:
+            case TOKEN_TYPE_BOOL:
+            case TOKEN_TYPE_STRING:
+            case TOKEN_TYPE_VOID:
+            case TOKEN_TRUE:
+            case TOKEN_FALSE:
+                printf("%d:%d KEYWORD %s\n", tok.line, tok.col, tok.lexeme);
+                break;
+            case TOKEN_IDENT:
+                printf("%d:%d IDENT %s\n", tok.line, tok.col, tok.lexeme);
+                break;
+            case TOKEN_INT_LIT:
+                printf("%d:%d INT %s\n", tok.line, tok.col, tok.lexeme);
+                break;
+            case TOKEN_FLOAT_LIT:
+                printf("%d:%d FLOAT %s\n", tok.line, tok.col, tok.lexeme);
+                break;
+            case TOKEN_STRING_LIT:
+                printf("%d:%d STRING %s\n", tok.line, tok.col, tok.lexeme);
+                break;
+            case TOKEN_CHAR_LIT:
+                printf("%d:%d CHAR %s\n", tok.line, tok.col, tok.lexeme);
+                break;
+            case TOKEN_EOF:
+                printf("%d:%d EOF\n", tok.line, tok.col);
+                break;
+            default:
+                // Symbols & Operators
+                printf("%d:%d SYMBOL %s\n", tok.line, tok.col, tok.lexeme);
+                break;
+        }
+    }
+}

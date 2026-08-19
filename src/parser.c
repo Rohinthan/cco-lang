@@ -1064,7 +1064,9 @@ static AstNode *parse_class(Parser *p) {
             consume(p, TOKEN_ARROW, "Expected '->' after method signature");
             char *ret_cls = NULL;
             bool ret_is_arr = false;
-            Type ret_type = parse_type_with_class(p, &ret_cls, NULL, &ret_is_arr, NULL, NULL);
+            bool ret_is_map = false;
+            Type ret_key_t = TY_INT;
+            Type ret_type = parse_type_with_class(p, &ret_cls, NULL, &ret_is_arr, &ret_is_map, &ret_key_t);
             AstNode *body = parse_block(p);
 
             AstNode *m_node = arena_alloc_node(p->arena, NODE_METHOD, m_tok.line, m_tok.col);
@@ -1079,6 +1081,8 @@ static AstNode *parse_class(Parser *p) {
             m_node->as.method.param_count = param_count;
             m_node->as.method.return_type = ret_type;
             m_node->as.method.return_is_array = ret_is_arr;
+            m_node->as.method.return_is_map = ret_is_map;
+            m_node->as.method.return_key_type = ret_key_t;
             m_node->as.method.return_class_name = ret_cls;
             m_node->as.method.body = body;
 
@@ -1358,7 +1362,9 @@ static AstNode *parse_function(Parser *p) {
     consume(p, TOKEN_ARROW, "Expected '->' after function signature");
     char *ret_cls = NULL;
     bool ret_is_arr = false;
-    Type return_type = parse_type_with_class(p, &ret_cls, NULL, &ret_is_arr, NULL, NULL);
+    bool ret_is_map = false;
+    Type ret_key_t = TY_INT;
+    Type return_type = parse_type_with_class(p, &ret_cls, NULL, &ret_is_arr, &ret_is_map, &ret_key_t);
     AstNode *body = parse_block(p);
 
     AstNode *node = arena_alloc_node(p->arena, NODE_FUNCTION, tok.line, tok.col);
@@ -1373,6 +1379,8 @@ static AstNode *parse_function(Parser *p) {
     node->as.function.param_count = param_count;
     node->as.function.return_type = return_type;
     node->as.function.return_is_array = ret_is_arr;
+    node->as.function.return_is_map = ret_is_map;
+    node->as.function.return_key_type = ret_key_t;
     node->as.function.return_class_name = ret_cls;
     node->as.function.body = body;
     return node;

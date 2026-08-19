@@ -1,8 +1,18 @@
-# Cco (C--) Compiler: A C-like Language with Tagged Unions, Pattern Matching, Hash Maps, Growable Arrays, Selective Prelude Emission, Lightweight Structs & Standard Library (v11.0)
+# Cco (C--) Compiler: A C-like Language with Self-Hosted Lexer, Tagged Unions, Pattern Matching, Hash Maps, Growable Arrays, Selective Prelude Emission, Lightweight Structs & Standard Library (v12.0)
 
-**Cco (C--)** is a lightweight, systems programming language with explicit C-like syntax, **scope-exit auto-free for raw allocations**, **compile-time single ownership with move semantics**, **Tagged Unions (`enum`) and Pattern Matching (`match`)**, **Hash Maps (`map[K]V`, `map_new`, `put`, `get`, `has`, `remove`, `keys`, `len`)**, **Growable Arrays (`list_new`, `push`, `pop`, `len`)**, **Selective Prelude Emission** (only emitting used stdlib helpers for clean generated C), **Lightweight Structs (Value Types)** (`struct Point2D { x: int; y: int; }`), **Arrays of Objects with for-each iteration** (`alloc(Point, n)`, `for p in pts`), **Minimal Multi-file Module/Import System** (`import "file.cco";`), and a **built-in Standard Library** (Strings, Math, File I/O). It transpiles Cco source code (`.cco`) into portable, standard C11 source code (`.c`), which is compiled to native machine binaries using `gcc` or `clang`.
+**Cco (C--)** is a lightweight, systems programming language with explicit C-like syntax, **a self-hosted lexer proof-of-concept (`selfhost/lexer.cco`)**, **scope-exit auto-free for raw allocations**, **compile-time single ownership with move semantics**, **Tagged Unions (`enum`) and Pattern Matching (`match`)**, **Hash Maps (`map[K]V`, `map_new`, `put`, `get`, `has`, `remove`, `keys`, `len`)**, **Growable Arrays (`list_new`, `push`, `pop`, `len`)**, **Selective Prelude Emission** (only emitting used stdlib helpers for clean generated C), **Lightweight Structs (Value Types)** (`struct Point2D { x: int; y: int; }`), **Arrays of Objects with for-each iteration** (`alloc(Point, n)`, `for p in pts`), **Minimal Multi-file Module/Import System** (`import "file.cco";`), and a **built-in Standard Library** (Strings, Math, File I/O). It transpiles Cco source code (`.cco`) into portable, standard C11 source code (`.c`), which is compiled to native machine binaries using `gcc` or `clang`.
 
 > **Write it like Python's class/struct/enum/map syntax reads. Compile it and it runs like C with zero runtime reference counting overhead, zero GC pauses, clean inspectable generated C via selective prelude emission, stack-allocated value structs, Rust-like compile-time ownership safety across multi-file programs, exhaustive pattern matching, and GCC/Rust-style diagnostic error messages.**
+
+---
+
+## ⚡ Self-Hosted Lexer Proof-of-Concept (v12.0)
+
+Cco v12.0 completes the self-hosting roadmap with a full **self-hosted lexer written in Cco itself** (`selfhost/lexer.cco`):
+
+- **Written in Pure Cco**: Implements lexical analysis for the full Cco syntax using features built across v1–v11 (`TokenKind` tagged union, `Token` class, `map[string]bool` keywords table, growable `Token[]` arrays, and string operations).
+- **Byte-Identical Ground-Truth Parity**: Validated against the C reference compiler (`./cco --dump-tokens`) with **100% pass rate across all 83 `.cco` files** in the codebase via `tests/compare_lexers.sh`.
+- **Honest Scope Boundary**: Demonstrates that Cco is expressive enough to implement its own compiler frontend components. Parser, scope analysis, and C code generator remain hand-written in C.
 
 ---
 
@@ -55,10 +65,11 @@ Cco v11.0 introduces native heap-allocated tagged unions (`enum`) and compile-ti
 
 ## 🗺️ Self-Hosting Roadmap
 
-1. **v9.0**: Growable Arrays (`list_new`, `push`, `pop`, `len`) — *Completed*
+1. **v9.0**: Growable Dynamic Arrays (`list_new`, `push`, `pop`, `len`) — *Completed*
 2. **v10.0**: Hash Maps (`map[K]V`, `map_new`, `put`, `get`, `has`, `remove`, `keys`, `len`) — *Completed*
 3. **v11.0**: Tagged Unions / Pattern Matching (`enum`, `match`) — *Completed*
-4. **v12.0**: Self-Hosted Lexer & Parser Proof-of-Concept — *Next Goal*
+4. **v12.0**: Self-Hosted Lexer Proof-of-Concept (`selfhost/lexer.cco`) — *Completed*
+   - *Future Work*: Parser, Scope Analysis, and Code Generation self-hosting remain hand-written in C.
 
 ---
 
@@ -287,6 +298,15 @@ make test
 | `51_map_rehash_stress` | 100 entries insertion triggering dynamic rehashing from capacity 8 to 128+ with 0 leaks | **PASS** | 0 Bytes Leaked |
 | `52_map_invalid_key_type_ERROR` | Rejecting invalid key type (`map[float]int`) with formatted diagnostic error | **PASS** | Compile Error (As Expected) |
 | `53_map_put_reassignment_check_ERROR` | Rejecting unassigned `put(m, k, v)` call at compile time | **PASS** | Compile Error (As Expected) |
+| `54_enum_unit_variants` | Unit variants (`enum Color { Red, Green, Blue }`), pattern match, and fieldless tags | **PASS** | 0 Bytes Leaked |
+| `55_enum_payload_variants` | Payload variants (`enum Shape { Circle { radius: int } }`), data extraction, match branches | **PASS** | 0 Bytes Leaked |
+| `56_enum_recursive_eval` | Recursive tagged union trees (`Expr.Add`, `Expr.Mul`), evaluation, automated recursive cleanup | **PASS** | 0 Bytes Leaked |
+| `57_enum_ownership_move` | Ownership transfer (moves) of enum instances across variables and functions | **PASS** | 0 Bytes Leaked |
+| `58_enum_borrowed_match` | Borrow-only match scrutinee (`match &token`), borrowed field binding, zero premature frees | **PASS** | 0 Bytes Leaked |
+| `59_enum_nonexhaustive_ERROR` | Rejecting non-exhaustive match statements at compile time with missing variant list | **PASS** | Compile Error (As Expected) |
+| `60_enum_duplicate_arm_ERROR` | Rejecting duplicate match arms at compile time with two-location note | **PASS** | Compile Error (As Expected) |
+| `61_enum_field_rename_ERROR` | Rejecting field name renaming in match patterns with diagnostic error | **PASS** | Compile Error (As Expected) |
+| `compare_lexers` (v12) | Self-hosted lexer diff harness across all 83 `.cco` files in corpus (100% byte-identical) | **PASS** | 0 Bytes Leaked |
 
 ---
 

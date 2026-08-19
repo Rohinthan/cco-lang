@@ -23,23 +23,62 @@ static void write_file(const char *path, const char *content) {
 
 int main(int argc, char **argv) {
     if (argc < 2) {
-        printf("Usage: cco <source.cco> [-o output.c] [--emit-c] [--run]\n");
+        printf("Usage: cco <source.cco> [-o output.c] [--emit-c] [--run] [--dump-tokens]\n");
         return 1;
     }
 
-    const char *input_path = argv[1];
+    const char *input_path = NULL;
     const char *output_c_path = "build/output.c";
     bool emit_c = false;
     bool run_binary = false;
+    bool dump_tokens_mode = false;
 
-    for (int i = 2; i < argc; i++) {
+    for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-o") == 0 && i + 1 < argc) {
             output_c_path = argv[++i];
         } else if (strcmp(argv[i], "--emit-c") == 0) {
             emit_c = true;
         } else if (strcmp(argv[i], "--run") == 0) {
             run_binary = true;
+        } else if (strcmp(argv[i], "--dump-tokens") == 0) {
+            dump_tokens_mode = true;
+        } else if (argv[i][0] != '-') {
+            if (!input_path) {
+                input_path = argv[i];
+            }
         }
+    }
+
+    if (!input_path) {
+        fprintf(stderr, "Error: No input file specified\n");
+        return 1;
+    }
+
+    if (dump_tokens_mode) {
+        FILE *file = fopen(input_path, "rb");
+        if (!file) {
+            fprintf(stderr, "Error: Could not open file '%s'\n", input_path);
+            return 1;
+        }
+        fseek(file, 0L, SEEK_END);
+        size_t file_size = ftell(file);
+        rewind(file);
+        char *buffer = (char *)malloc(file_size + 1);
+        if (!buffer) {
+            fclose(file);
+            fprintf(stderr, "Error: Memory allocation failed\n");
+            return 1;
+        }
+        size_t bytes_read = fread(buffer, sizeof(char), file_size, file);
+        buffer[bytes_read] = '\0';
+        fclose(file);
+
+        TokenArray tokens = lex_source(buffer);
+        dump_tokens(&tokens);
+
+        free(buffer);
+        free_tokens(&tokens);
+        return 0;
     }
 
     AstArena *arena = create_ast_arena();

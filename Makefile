@@ -22,10 +22,13 @@ unit_tests: cco
 	valgrind --leak-check=full --error-exitcode=1 ./build/test_scope
 	valgrind --leak-check=full --error-exitcode=1 ./build/test_map_runtime
 
-test: unit_tests
+test_selfhost: cco
+	@bash tests/compare_lexers.sh
+
+test: unit_tests test_selfhost
 	@bash tests/run_tests.sh
 
 clean:
-	rm -rf build cco
+	rm -rf build cco selfhost/lexer_selfhosted selfhost/lexer_selfhosted.c target.cco
 
-.PHONY: all unit_tests test clean
+.PHONY: all unit_tests test_selfhost test clean

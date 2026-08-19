@@ -183,6 +183,8 @@ struct AstNode {
             int param_count;
             Type return_type;
             bool return_is_array;
+            bool return_is_map;
+            Type return_key_type;
             char *return_class_name;
             bool returns_heap_pointer;
             AstNode *body;
@@ -200,6 +202,8 @@ struct AstNode {
             int param_count;
             Type return_type;
             bool return_is_array;
+            bool return_is_map;
+            Type return_key_type;
             char *return_class_name;
             bool returns_heap_pointer;
             AstNode *body;

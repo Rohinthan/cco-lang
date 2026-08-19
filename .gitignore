@@ -1,2 +1,6 @@
 build/
 cco
+selfhost/lexer_selfhosted
+selfhost/lexer_selfhosted.c
+target.cco
+*.o

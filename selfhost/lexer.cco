@@ -1,0 +1,481 @@
+enum TokenKind {
+    Ident { name: string },
+    Keyword { word: string },
+    IntLit { value: int },
+    FloatLit { value: float },
+    StringLit { value: string },
+    CharLit { value: char },
+    Symbol { text: string },
+    Eof,
+}
+
+class Token {
+    kind: TokenKind;
+    line: int;
+    col: int;
+}
+
+fn is_digit(c: char) -> bool {
+    return c >= '0' && c <= '9';
+}
+
+fn is_alpha(c: char) -> bool {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+}
+
+fn is_alnum(c: char) -> bool {
+    return is_alpha(c) || is_digit(c);
+}
+
+fn int_to_str(n: int) -> string {
+    if (n == 0) {
+        let z: string = "0";
+        return z;
+    }
+    let neg: bool = false;
+    if (n < 0) {
+        neg = true;
+        n = 0 - n;
+    }
+    let digits: string = "0123456789";
+    let res: string = "";
+    while (n > 0) {
+        let d: int = n % 10;
+        let c: string = substring(digits, d, d + 1);
+        res = concat(c, res);
+        n = n / 10;
+    }
+    if (neg) {
+        res = concat("-", res);
+    }
+    return res;
+}
+
+fn char_to_str(c: char) -> string {
+    if (c == ' ') { let s: string = " "; return s; }
+    if (c == '\n') { let s: string = "\n"; return s; }
+    if (c == '\t') { let s: string = "\t"; return s; }
+    if (c == '\r') { let s: string = "\r"; return s; }
+    if (c == '\\') { let s: string = "\\"; return s; }
+    if (c == '\'') { let s: string = "\'"; return s; }
+    if (c == '\"') { let s: string = "\""; return s; }
+    let all: string = " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~";
+    let i: int = 0;
+    let n: int = len(all);
+    while (i < n) {
+        if (char_at(all, i) == c) {
+            let res: string = substring(all, i, i + 1);
+            return res;
+        }
+        i = i + 1;
+    }
+    let empty: string = "";
+    return empty;
+}
+
+fn parse_int(s: string) -> int {
+    let res: int = 0;
+    let n: int = len(s);
+    let i: int = 0;
+    while (i < n) {
+        let c: char = char_at(s, i);
+        let digit: int = 0;
+        if (c == '1') { digit = 1; }
+        else if (c == '2') { digit = 2; }
+        else if (c == '3') { digit = 3; }
+        else if (c == '4') { digit = 4; }
+        else if (c == '5') { digit = 5; }
+        else if (c == '6') { digit = 6; }
+        else if (c == '7') { digit = 7; }
+        else if (c == '8') { digit = 8; }
+        else if (c == '9') { digit = 9; }
+        res = res * 10 + digit;
+        i = i + 1;
+    }
+    return res;
+}
+
+fn parse_float(s: string) -> float {
+    let int_part: float = 0.0;
+    let frac_part: float = 0.0;
+    let divisor: float = 1.0;
+    let n: int = len(s);
+    let i: int = 0;
+    let in_frac: bool = false;
+    while (i < n) {
+        let c: char = char_at(s, i);
+        if (c == '.') {
+            in_frac = true;
+        } else {
+            let digit: float = 0.0;
+            if (c == '1') { digit = 1.0; }
+            else if (c == '2') { digit = 2.0; }
+            else if (c == '3') { digit = 3.0; }
+            else if (c == '4') { digit = 4.0; }
+            else if (c == '5') { digit = 5.0; }
+            else if (c == '6') { digit = 6.0; }
+            else if (c == '7') { digit = 7.0; }
+            else if (c == '8') { digit = 8.0; }
+            else if (c == '9') { digit = 9.0; }
+            if (in_frac) {
+                divisor = divisor * 10.0;
+                frac_part = frac_part + digit / divisor;
+            } else {
+                int_part = int_part * 10.0 + digit;
+            }
+        }
+        i = i + 1;
+    }
+    return int_part + frac_part;
+}
+
+fn strip_trailing_zeros(s: string) -> string {
+    let n: int = len(s);
+    while (n > 2) {
+        let last_c: char = char_at(s, n - 1);
+        let prev_c: char = char_at(s, n - 2);
+        if (last_c == '0' && prev_c != '.') {
+            s = substring(s, 0, n - 1);
+            n = n - 1;
+        } else {
+            return s;
+        }
+    }
+    return s;
+}
+
+fn float_to_str(f: float) -> string {
+    let int_part: int = f;
+    let frac: float = f - int_part;
+    let s_int: string = int_to_str(int_part);
+    let res: string = concat(s_int, ".");
+    if (frac < 0.0000001) {
+        let out: string = concat(res, "0");
+        return out;
+    }
+    frac = frac + 0.0000005;
+    let d_count: int = 0;
+    while (d_count < 6 && frac > 0.000001) {
+        frac = frac * 10.0;
+        let d: int = frac;
+        let s_d: string = int_to_str(d);
+        res = concat(res, s_d);
+        frac = frac - d;
+        d_count = d_count + 1;
+    }
+    let clean: string = strip_trailing_zeros(res);
+    return clean;
+}
+
+fn init_keywords() -> map[string]bool {
+    let keywords: map[string]bool = map_new(string, bool);
+    keywords = put(keywords, "import", true);
+    keywords = put(keywords, "class", true);
+    keywords = put(keywords, "struct", true);
+    keywords = put(keywords, "self", true);
+    keywords = put(keywords, "fn", true);
+    keywords = put(keywords, "let", true);
+    keywords = put(keywords, "if", true);
+    keywords = put(keywords, "else", true);
+    keywords = put(keywords, "while", true);
+    keywords = put(keywords, "for", true);
+    keywords = put(keywords, "in", true);
+    keywords = put(keywords, "return", true);
+    keywords = put(keywords, "break", true);
+    keywords = put(keywords, "continue", true);
+    keywords = put(keywords, "print", true);
+    keywords = put(keywords, "alloc", true);
+    keywords = put(keywords, "list_new", true);
+    keywords = put(keywords, "map", true);
+    keywords = put(keywords, "map_new", true);
+    keywords = put(keywords, "enum", true);
+    keywords = put(keywords, "match", true);
+    keywords = put(keywords, "int", true);
+    keywords = put(keywords, "float", true);
+    keywords = put(keywords, "char", true);
+    keywords = put(keywords, "bool", true);
+    keywords = put(keywords, "string", true);
+    keywords = put(keywords, "void", true);
+    keywords = put(keywords, "true", true);
+    keywords = put(keywords, "false", true);
+    return keywords;
+}
+
+fn lex(source: string) -> Token[] {
+    let tokens: Token[] = list_new(Token);
+    let keywords: map[string]bool = init_keywords();
+
+    let i: int = 0;
+    let line: int = 1;
+    let col: int = 1;
+    let n: int = len(source);
+
+    while (i < n) {
+        let c: char = char_at(source, i);
+
+        // Skip whitespace
+        if (c == ' ' || c == '\t' || c == '\r') {
+            i = i + 1;
+            col = col + 1;
+            continue;
+        }
+        if (c == '\n') {
+            i = i + 1;
+            line = line + 1;
+            col = 1;
+            continue;
+        }
+
+        // Skip comments
+        if (c == '/' && i + 1 < n && char_at(source, i + 1) == '/') {
+            i = i + 2;
+            col = col + 2;
+            while (i < n && char_at(source, i) != '\n') {
+                i = i + 1;
+                col = col + 1;
+            }
+            continue;
+        }
+
+        // String literals
+        if (c == '"') {
+            let start_col: int = col;
+            i = i + 1;
+            col = col + 1;
+            let start_pos: int = i;
+            while (i < n && char_at(source, i) != '"') {
+                if (char_at(source, i) == '\\' && i + 1 < n) {
+                    i = i + 2;
+                    col = col + 2;
+                } else {
+                    if (char_at(source, i) == '\n') {
+                        line = line + 1;
+                        col = 1;
+                    } else {
+                        col = col + 1;
+                    }
+                    i = i + 1;
+                }
+            }
+
+            let str_val: string = substring(source, start_pos, i);
+            if (i < n && char_at(source, i) == '"') {
+                i = i + 1;
+                col = col + 1;
+            }
+            tokens = push(tokens, Token { kind: TokenKind.StringLit { value: str_val }, line: line, col: start_col });
+            continue;
+        }
+
+        // Character literals
+        if (c == '\'') {
+            let start_col: int = col;
+            i = i + 1;
+            col = col + 1;
+            let ch_val: char = ' ';
+            if (i < n && char_at(source, i) == '\\' && i + 1 < n) {
+                i = i + 1;
+                col = col + 1;
+                let esc: char = char_at(source, i);
+                if (esc == 'n') { ch_val = '\n'; }
+                else if (esc == 't') { ch_val = '\t'; }
+                else if (esc == 'r') { ch_val = '\r'; }
+                else if (esc == '\\') { ch_val = '\\'; }
+                else if (esc == '\'') { ch_val = '\''; }
+                else { ch_val = esc; }
+                i = i + 1;
+                col = col + 1;
+            } else if (i < n) {
+                ch_val = char_at(source, i);
+                i = i + 1;
+                col = col + 1;
+            }
+            if (i < n && char_at(source, i) == '\'') {
+                i = i + 1;
+                col = col + 1;
+            }
+            tokens = push(tokens, Token { kind: TokenKind.CharLit { value: ch_val }, line: line, col: start_col });
+            continue;
+        }
+
+        // Numbers (Int or Float)
+        if (is_digit(c)) {
+            let start_col: int = col;
+            let start_pos: int = i;
+            let is_flt: bool = false;
+
+            while (i < n && (is_digit(char_at(source, i)) || char_at(source, i) == '.')) {
+                if (char_at(source, i) == '.') {
+                    if (is_flt) {
+                        break;
+                    }
+                    is_flt = true;
+                }
+                i = i + 1;
+                col = col + 1;
+            }
+
+            let num_str: string = substring(source, start_pos, i);
+            if (is_flt) {
+                let fv: float = parse_float(num_str);
+                tokens = push(tokens, Token { kind: TokenKind.FloatLit { value: fv }, line: line, col: start_col });
+            } else {
+                let iv: int = parse_int(num_str);
+                tokens = push(tokens, Token { kind: TokenKind.IntLit { value: iv }, line: line, col: start_col });
+            }
+            continue;
+        }
+
+        // Identifiers and Keywords
+        if (is_alpha(c) || c == '_') {
+            let start_col: int = col;
+            let start_pos: int = i;
+
+            while (i < n && (is_alnum(char_at(source, i)) || char_at(source, i) == '_')) {
+                i = i + 1;
+                col = col + 1;
+            }
+
+            let word: string = substring(source, start_pos, i);
+            if (equals(word, "_")) {
+                tokens = push(tokens, Token { kind: TokenKind.Symbol { text: "_" }, line: line, col: start_col });
+            } else if (has(keywords, word)) {
+                tokens = push(tokens, Token { kind: TokenKind.Keyword { word: word }, line: line, col: start_col });
+            } else {
+                tokens = push(tokens, Token { kind: TokenKind.Ident { name: word }, line: line, col: start_col });
+            }
+            continue;
+        }
+
+        // Two-character operators
+        if (i + 1 < n) {
+            let next_c: char = char_at(source, i + 1);
+            if (c == '-' && next_c == '>') {
+                let sym: string = substring(source, i, i + 2);
+                tokens = push(tokens, Token { kind: TokenKind.Symbol { text: sym }, line: line, col: col });
+                i = i + 2; col = col + 2;
+                continue;
+            }
+            if (c == '=' && next_c == '>') {
+                let sym: string = substring(source, i, i + 2);
+                tokens = push(tokens, Token { kind: TokenKind.Symbol { text: sym }, line: line, col: col });
+                i = i + 2; col = col + 2;
+                continue;
+            }
+            if (c == '=' && next_c == '=') {
+                let sym: string = substring(source, i, i + 2);
+                tokens = push(tokens, Token { kind: TokenKind.Symbol { text: sym }, line: line, col: col });
+                i = i + 2; col = col + 2;
+                continue;
+            }
+            if (c == '!' && next_c == '=') {
+                let sym: string = substring(source, i, i + 2);
+                tokens = push(tokens, Token { kind: TokenKind.Symbol { text: sym }, line: line, col: col });
+                i = i + 2; col = col + 2;
+                continue;
+            }
+            if (c == '<' && next_c == '=') {
+                let sym: string = substring(source, i, i + 2);
+                tokens = push(tokens, Token { kind: TokenKind.Symbol { text: sym }, line: line, col: col });
+                i = i + 2; col = col + 2;
+                continue;
+            }
+            if (c == '>' && next_c == '=') {
+                let sym: string = substring(source, i, i + 2);
+                tokens = push(tokens, Token { kind: TokenKind.Symbol { text: sym }, line: line, col: col });
+                i = i + 2; col = col + 2;
+                continue;
+            }
+            if (c == '&' && next_c == '&') {
+                let sym: string = substring(source, i, i + 2);
+                tokens = push(tokens, Token { kind: TokenKind.Symbol { text: sym }, line: line, col: col });
+                i = i + 2; col = col + 2;
+                continue;
+            }
+            if (c == '|' && next_c == '|') {
+                let sym: string = substring(source, i, i + 2);
+                tokens = push(tokens, Token { kind: TokenKind.Symbol { text: sym }, line: line, col: col });
+                i = i + 2; col = col + 2;
+                continue;
+            }
+        }
+
+        // Single-character symbols
+        if (c == '(' || c == ')' || c == '{' || c == '}' || c == '[' || c == ']' ||
+            c == ',' || c == ':' || c == ';' || c == '=' || c == '<' || c == '>' ||
+            c == '+' || c == '-' || c == '*' || c == '/' || c == '%' || c == '!' ||
+            c == '.' || c == '&') {
+            let sym: string = substring(source, i, i + 1);
+            tokens = push(tokens, Token { kind: TokenKind.Symbol { text: sym }, line: line, col: col });
+            i = i + 1;
+            col = col + 1;
+            continue;
+        }
+
+        i = i + 1;
+        col = col + 1;
+    }
+
+    tokens = push(tokens, Token { kind: TokenKind.Eof, line: line, col: col });
+    return tokens;
+}
+
+fn print_token(tok: &Token) -> void {
+    let s_line: string = int_to_str(tok.line);
+    let s_col: string = int_to_str(tok.col);
+    let loc_tmp: string = concat(s_line, ":");
+    let loc: string = concat(loc_tmp, s_col);
+    match tok.kind {
+        TokenKind.Keyword { word } => {
+            let p1: string = concat(loc, " KEYWORD ");
+            let out: string = concat(p1, word);
+            print(out);
+        }
+        TokenKind.Ident { name } => {
+            let p1: string = concat(loc, " IDENT ");
+            let out: string = concat(p1, name);
+            print(out);
+        }
+        TokenKind.Symbol { text } => {
+            let p1: string = concat(loc, " SYMBOL ");
+            let out: string = concat(p1, text);
+            print(out);
+        }
+        TokenKind.IntLit { value } => {
+            let s_val: string = int_to_str(value);
+            let p1: string = concat(loc, " INT ");
+            let out: string = concat(p1, s_val);
+            print(out);
+        }
+        TokenKind.FloatLit { value } => {
+            let s_val: string = float_to_str(value);
+            let p1: string = concat(loc, " FLOAT ");
+            let out: string = concat(p1, s_val);
+            print(out);
+        }
+        TokenKind.StringLit { value } => {
+            let p1: string = concat(loc, " STRING ");
+            let out: string = concat(p1, value);
+            print(out);
+        }
+        TokenKind.CharLit { value } => {
+            let s_val: string = char_to_str(value);
+            let p1: string = concat(loc, " CHAR ");
+            let out: string = concat(p1, s_val);
+            print(out);
+        }
+        TokenKind.Eof => {
+            let out: string = concat(loc, " EOF");
+            print(out);
+        }
+    }
+}
+
+fn main() -> int {
+    let source: string = read_file("target.cco");
+    let tokens: Token[] = lex(source);
+    for t in tokens {
+        print_token(t);
+    }
+    return 0;
+}

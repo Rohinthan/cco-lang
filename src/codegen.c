@@ -298,6 +298,17 @@ static const char *get_expr_elem_class_name(CodegenCtx *ctx, AstNode *expr) {
             return get_expr_elem_class_name(ctx, expr->as.call.args[0]);
         }
     }
+    if (expr->type == NODE_CALL && ctx->program && ctx->program->type == NODE_PROGRAM) {
+        const char *name = expr->as.call.callee;
+        if (name) {
+            for (int f = 0; f < ctx->program->as.program.count; f++) {
+                AstNode *target_fn = ctx->program->as.program.functions[f];
+                if (strcmp(target_fn->as.function.name, name) == 0) {
+                    return target_fn->as.function.return_class_name;
+                }
+            }
+        }
+    }
     return NULL;
 }
 
@@ -560,6 +571,14 @@ static bool infer_expr_is_map(AstNode *program, AstNode *fn, AstNode *expr) {
     if (expr->type == NODE_CALL && program && program->type == NODE_PROGRAM) {
         const char *name = expr->as.call.callee;
         if (name && strcmp(name, "put") == 0) return true;
+        if (name) {
+            for (int f = 0; f < program->as.program.count; f++) {
+                AstNode *target_fn = program->as.program.functions[f];
+                if (strcmp(target_fn->as.function.name, name) == 0) {
+                    return target_fn->as.function.return_is_map;
+                }
+            }
+        }
     }
     return false;
 }
@@ -584,6 +603,17 @@ static Type get_map_key_type(CodegenCtx *ctx, AstNode *expr) {
     }
     if (expr->type == NODE_CALL && expr->as.call.callee && strcmp(expr->as.call.callee, "put") == 0) {
         return get_map_key_type(ctx, expr->as.call.args[0]);
+    }
+    if (expr->type == NODE_CALL && ctx->program && ctx->program->type == NODE_PROGRAM) {
+        const char *name = expr->as.call.callee;
+        if (name) {
+            for (int f = 0; f < ctx->program->as.program.count; f++) {
+                AstNode *target_fn = ctx->program->as.program.functions[f];
+                if (strcmp(target_fn->as.function.name, name) == 0) {
+                    return target_fn->as.function.return_key_type;
+                }
+            }
+        }
     }
     return TY_INT;
 }
@@ -1159,21 +1189,38 @@ static void gen_stmt(CodegenCtx *ctx, AstNode *stmt) {
             sb_append(&ctx->sb, ";\n");
             break;
 
-        case NODE_ASSIGN:
-            emit_frees(ctx, stmt);
-            if (stmt->as.assign.release_old && stmt->as.assign.class_name) {
+        case NODE_ASSIGN: {
+            bool has_cleanup = (stmt->frees_count > 0) || (stmt->as.assign.release_old && stmt->as.assign.class_name);
+            if (has_cleanup) {
+                static int assign_tmp_counter = 0;
+                int cur_assign_tmp = ++assign_tmp_counter;
                 emit_indent(ctx);
-                sb_appendf(&ctx->sb, "%s_free(%s);\n", stmt->as.assign.class_name, stmt->as.assign.name);
-            }
-            emit_indent(ctx);
-            sb_appendf(&ctx->sb, "%s = ", stmt->as.assign.name);
-            if (stmt->as.assign.value->type == NODE_LITERAL && stmt->as.assign.value->as.literal.lit_type == TY_STRING) {
-                sb_appendf(&ctx->sb, "strdup(\"%s\")", stmt->as.assign.value->as.literal.val.s);
+                sb_appendf(&ctx->sb, "void *__assign_tmp_%d = (void *)(", cur_assign_tmp);
+                if (stmt->as.assign.value->type == NODE_LITERAL && stmt->as.assign.value->as.literal.lit_type == TY_STRING) {
+                    sb_appendf(&ctx->sb, "strdup(\"%s\")", stmt->as.assign.value->as.literal.val.s);
+                } else {
+                    gen_expr(ctx, stmt->as.assign.value);
+                }
+                sb_append(&ctx->sb, ");\n");
+                emit_frees(ctx, stmt);
+                if (stmt->as.assign.release_old && stmt->as.assign.class_name) {
+                    emit_indent(ctx);
+                    sb_appendf(&ctx->sb, "%s_free(%s);\n", stmt->as.assign.class_name, stmt->as.assign.name);
+                }
+                emit_indent(ctx);
+                sb_appendf(&ctx->sb, "%s = __assign_tmp_%d;\n", stmt->as.assign.name, cur_assign_tmp);
             } else {
-                gen_expr(ctx, stmt->as.assign.value);
+                emit_indent(ctx);
+                sb_appendf(&ctx->sb, "%s = ", stmt->as.assign.name);
+                if (stmt->as.assign.value->type == NODE_LITERAL && stmt->as.assign.value->as.literal.lit_type == TY_STRING) {
+                    sb_appendf(&ctx->sb, "strdup(\"%s\")", stmt->as.assign.value->as.literal.val.s);
+                } else {
+                    gen_expr(ctx, stmt->as.assign.value);
+                }
+                sb_append(&ctx->sb, ";\n");
             }
-            sb_append(&ctx->sb, ";\n");
             break;
+        }
 
         case NODE_MEMBER_ASSIGN:
             if (stmt->as.member_assign.release_old && stmt->as.member_assign.field_class_name) {
@@ -1792,8 +1839,9 @@ static void gen_class_helpers(CodegenCtx *ctx, AstNode *program) {
 
 static void gen_method(CodegenCtx *ctx, const char *class_name, AstNode *m_node) {
     ctx->current_function = m_node;
+    const char *ret_type_str = c_type_str_decl_full(ctx, m_node->as.method.return_type, m_node->as.method.return_class_name, m_node->as.method.return_is_array, m_node->as.method.return_is_map, m_node->as.method.returns_heap_pointer);
     sb_appendf(&ctx->sb, "%s %s_%s(",
-               c_type_str_full(ctx, m_node->as.method.return_type, m_node->as.method.return_class_name, false, m_node->as.method.returns_heap_pointer),
+               ret_type_str,
                class_name, m_node->as.method.name);
 
     if (m_node->as.method.param_count == 0) {
@@ -1816,7 +1864,7 @@ static void gen_method(CodegenCtx *ctx, const char *class_name, AstNode *m_node)
 static void gen_function(CodegenCtx *ctx, AstNode *fn) {
     ctx->current_function = fn;
     bool is_main = (strcmp(fn->as.function.name, "main") == 0);
-    const char *ret_type_str = is_main ? "int" : c_type_str_full(ctx, fn->as.function.return_type, fn->as.function.return_class_name, false, fn->as.function.returns_heap_pointer);
+    const char *ret_type_str = is_main ? "int" : c_type_str_decl_full(ctx, fn->as.function.return_type, fn->as.function.return_class_name, fn->as.function.return_is_array, fn->as.function.return_is_map, fn->as.function.returns_heap_pointer);
     sb_appendf(&ctx->sb, "%s %s(", ret_type_str, fn->as.function.name);
 
     if (fn->as.function.param_count == 0) {
