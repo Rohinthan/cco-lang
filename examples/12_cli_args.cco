@@ -1,0 +1,24 @@
+// CLI Argument Processor in Cco v13
+// Demonstrates program_name(), arg_count(), and args()
+
+fn main() -> void {
+    let prog: string = program_name();
+    let count: int = arg_count();
+
+    print("Program invocation name:");
+    print(prog);
+
+    print("Total arguments supplied:");
+    print(count);
+
+    if (count == 0) {
+        print("No arguments provided.");
+    } else {
+        print("Arguments list:");
+        let all_args: string[] = args();
+        for arg in all_args {
+            let msg: string = concat("  Arg: ", arg);
+            print(msg);
+        }
+    }
+}
