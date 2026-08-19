@@ -233,7 +233,23 @@ static void check_and_add_function(ResolverCtx *ctx, AstNode *fn, const char *ca
     const char *fname = fn->as.function.name;
     for (int i = 0; i < ctx->fn_count; i++) {
         AstNode *existing = ctx->merged_functions[i];
-        if (strcmp(existing->as.function.name, fname) == 0) {
+        bool is_dup = false;
+        if (fn->as.function.is_operator && existing->as.function.is_operator) {
+            if (fn->as.function.operator_symbol && existing->as.function.operator_symbol &&
+                strcmp(fn->as.function.operator_symbol, existing->as.function.operator_symbol) == 0 &&
+                fn->as.function.param_count == existing->as.function.param_count) {
+                const char *cls1 = (fn->as.function.param_count > 0) ? fn->as.function.param_class_names[0] : "";
+                const char *cls2 = (existing->as.function.param_count > 0) ? existing->as.function.param_class_names[0] : "";
+                if (cls1 && cls2 && strcmp(cls1, cls2) == 0) {
+                    is_dup = true;
+                }
+            }
+        } else if (!fn->as.function.is_operator && !existing->as.function.is_operator) {
+            if (strcmp(existing->as.function.name, fname) == 0) {
+                is_dup = true;
+            }
+        }
+        if (is_dup) {
             char short_msg[256];
             snprintf(short_msg, sizeof(short_msg), "duplicate definition of '%s'", fname);
 
