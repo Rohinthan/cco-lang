@@ -1,0 +1,8 @@
+// Tests program_name()
+// When invoked via the test harness as build/64_program_name,
+// program_name() returns "build/64_program_name".
+fn main() -> int {
+    let prog: string = program_name();
+    print(prog);
+    return 0;
+}
