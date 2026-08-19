@@ -1449,7 +1449,43 @@ static AstNode *parse_enum(Parser *p) {
 
 static AstNode *parse_function(Parser *p) {
     Token tok = consume(p, TOKEN_FN, "Expected 'fn'");
-    Token name_tok = consume(p, TOKEN_IDENT, "Expected function name");
+    Token name_tok;
+    bool is_operator = false;
+    char *op_symbol = NULL;
+    char *fn_name = NULL;
+
+    if (match(p, TOKEN_OPERATOR)) {
+        is_operator = true;
+        Token op_tok;
+        if (match(p, TOKEN_PLUS)) {
+            op_tok = previous(p);
+            op_symbol = "+";
+        } else if (match(p, TOKEN_MINUS)) {
+            op_tok = previous(p);
+            op_symbol = "-";
+        } else if (match(p, TOKEN_STAR)) {
+            op_tok = previous(p);
+            op_symbol = "*";
+        } else if (match(p, TOKEN_SLASH)) {
+            op_tok = previous(p);
+            op_symbol = "/";
+        } else if (match(p, TOKEN_EQ)) {
+            op_tok = previous(p);
+            op_symbol = "==";
+        } else if (match(p, TOKEN_NE)) {
+            op_tok = previous(p);
+            op_symbol = "!=";
+        } else {
+            fatal_parser_error(peek(p).line, peek(p).col, peek(p).lexeme, "Expected operator symbol (+, -, *, /, ==, !=) after 'operator'");
+        }
+        char buf[64];
+        snprintf(buf, sizeof(buf), "operator%s", op_symbol);
+        fn_name = arena_strdup(p->arena, buf);
+        name_tok = op_tok;
+    } else {
+        name_tok = consume(p, TOKEN_IDENT, "Expected function name");
+        fn_name = arena_strdup(p->arena, name_tok.lexeme);
+    }
     consume(p, TOKEN_LPAREN, "Expected '(' after function name");
 
     char **param_names = NULL;
@@ -1518,7 +1554,9 @@ static AstNode *parse_function(Parser *p) {
     AstNode *body = parse_block(p);
 
     AstNode *node = arena_alloc_node(p->arena, NODE_FUNCTION, tok.line, tok.col);
-    node->as.function.name = arena_strdup(p->arena, name_tok.lexeme);
+    node->as.function.name = fn_name;
+    node->as.function.is_operator = is_operator;
+    node->as.function.operator_symbol = op_symbol ? arena_strdup(p->arena, op_symbol) : NULL;
     node->as.function.param_names = param_names;
     node->as.function.param_types = param_types;
     node->as.function.param_is_array = param_is_array;
@@ -1638,5 +1676,115 @@ AstNode *parse_program(Parser *p) {
     prog->as.program.enum_count = enum_count;
     prog->as.program.functions = functions;
     prog->as.program.count = fn_count;
+
+    for (int i = 0; i < prog->as.program.count; i++) {
+        AstNode *fn = prog->as.program.functions[i];
+        if (!fn->as.function.is_operator) continue;
+
+        const char *op = fn->as.function.operator_symbol;
+        int arity = fn->as.function.param_count;
+
+        if (strcmp(op, "==") == 0 || strcmp(op, "!=") == 0 || strcmp(op, "+") == 0 || strcmp(op, "*") == 0 || strcmp(op, "/") == 0) {
+            if (arity != 2) {
+                char short_msg[256];
+                snprintf(short_msg, sizeof(short_msg), "'operator%s' requires exactly 2 parameters", op);
+                ErrorLocation loc = {get_error_filename(), fn->line, fn->col};
+                print_formatted_error(short_msg, loc, "invalid operator signature", NULL, NULL, NULL, NULL);
+                exit(1);
+            }
+        } else if (strcmp(op, "-") == 0) {
+            if (arity < 1 || arity > 2) {
+                char short_msg[256];
+                snprintf(short_msg, sizeof(short_msg), "'operator-' requires 1 or 2 parameters");
+                ErrorLocation loc = {get_error_filename(), fn->line, fn->col};
+                print_formatted_error(short_msg, loc, "invalid operator signature", NULL, NULL, NULL, NULL);
+                exit(1);
+            }
+        }
+
+        if (arity > 0) {
+            Type t0 = fn->as.function.param_types[0];
+            const char *c0 = fn->as.function.param_class_names[0];
+
+            if (t0 != TY_CLASS || !c0) {
+                char short_msg[256];
+                snprintf(short_msg, sizeof(short_msg), "operator overloading is only supported for struct types in this version");
+                ErrorLocation loc = {get_error_filename(), fn->as.function.param_lines ? fn->as.function.param_lines[0] : fn->line, fn->as.function.param_cols ? fn->as.function.param_cols[0] : fn->col};
+                print_formatted_error(short_msg, loc, "operator overloading requires struct type", NULL, NULL, NULL, NULL);
+                exit(1);
+            }
+
+            bool is_class = false;
+            for (int c = 0; c < prog->as.program.class_count; c++) {
+                if (strcmp(prog->as.program.classes[c]->as.class_decl.name, c0) == 0) {
+                    is_class = true;
+                    break;
+                }
+            }
+            if (is_class) {
+                char short_msg[256];
+                snprintf(short_msg, sizeof(short_msg), "operator overloading is only supported for struct types in this version — '%s' is a class", c0);
+                ErrorLocation loc = {get_error_filename(), fn->as.function.param_lines ? fn->as.function.param_lines[0] : fn->line, fn->as.function.param_cols ? fn->as.function.param_cols[0] : fn->col};
+                print_formatted_error(short_msg, loc, "classes not supported for operator overloading in v16", "structs are copied values with no ownership question; class operator overloading is a separate feature for later", NULL, NULL, NULL);
+                exit(1);
+            }
+
+            bool is_struct = false;
+            for (int s = 0; s < prog->as.program.struct_count; s++) {
+                if (strcmp(prog->as.program.structs[s]->as.struct_decl.name, c0) == 0) {
+                    is_struct = true;
+                    break;
+                }
+            }
+            if (!is_struct && prog->as.program.import_count == 0) {
+                char short_msg[256];
+                snprintf(short_msg, sizeof(short_msg), "operator overloading is only supported for struct types in this version — '%s' is not a struct", c0);
+                ErrorLocation loc = {get_error_filename(), fn->as.function.param_lines ? fn->as.function.param_lines[0] : fn->line, fn->as.function.param_cols ? fn->as.function.param_cols[0] : fn->col};
+                print_formatted_error(short_msg, loc, "unknown struct type", NULL, NULL, NULL, NULL);
+                exit(1);
+            }
+
+            if (arity == 2) {
+                Type t1 = fn->as.function.param_types[1];
+                const char *c1 = fn->as.function.param_class_names[1];
+                if (t1 != TY_CLASS || !c1 || strcmp(c0, c1) != 0) {
+                    char short_msg[256];
+                    snprintf(short_msg, sizeof(short_msg), "operator function parameters must both be the same struct type");
+                    ErrorLocation loc = {get_error_filename(), fn->as.function.param_lines ? fn->as.function.param_lines[1] : fn->line, fn->as.function.param_cols ? fn->as.function.param_cols[1] : fn->col};
+                    print_formatted_error(short_msg, loc, "parameter type mismatch in operator function", NULL, NULL, NULL, NULL);
+                    exit(1);
+                }
+            }
+        }
+
+        if (strcmp(op, "==") == 0 || strcmp(op, "!=") == 0) {
+            if (fn->as.function.return_type != TY_BOOL) {
+                char short_msg[256];
+                snprintf(short_msg, sizeof(short_msg), "'operator%s' must return bool", op);
+                ErrorLocation loc = {get_error_filename(), fn->line, fn->col};
+                print_formatted_error(short_msg, loc, "comparison operators must return bool", NULL, NULL, NULL, NULL);
+                exit(1);
+            }
+        }
+
+        for (int j = 0; j < i; j++) {
+            AstNode *prev = prog->as.program.functions[j];
+            if (!prev->as.function.is_operator) continue;
+            if (strcmp(prev->as.function.operator_symbol, op) == 0 &&
+                prev->as.function.param_count == arity) {
+                const char *prev_c = (prev->as.function.param_count > 0) ? prev->as.function.param_class_names[0] : "";
+                const char *cur_c = (arity > 0) ? fn->as.function.param_class_names[0] : "";
+                if (prev_c && cur_c && strcmp(prev_c, cur_c) == 0) {
+                    char short_msg[256];
+                    snprintf(short_msg, sizeof(short_msg), "duplicate definition of 'operator%s' for struct '%s'", op, cur_c);
+                    ErrorLocation primary = {get_error_filename(), fn->line, fn->col};
+                    ErrorLocation note_loc = {get_error_filename(), prev->line, prev->col};
+                    print_formatted_error(short_msg, primary, "duplicate operator definition", "first defined here:", &note_loc, "first defined here", NULL);
+                    exit(1);
+                }
+            }
+        }
+    }
+
     return prog;
 }
