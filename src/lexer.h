@@ -38,6 +38,7 @@ typedef enum {
     TOKEN_INT_LIT,
     TOKEN_FLOAT_LIT,
     TOKEN_STRING_LIT,
+    TOKEN_FSTRING_LIT,
     TOKEN_CHAR_LIT,
 
     // Symbols & Operators
