@@ -456,11 +456,12 @@ static Type infer_expr_type(AstNode *program, AstNode *fn, AstNode *expr) {
         if (strcmp(name, "push") == 0 && expr->as.call.arg_count > 0) {
             return infer_expr_type(program, fn, expr->as.call.args[0]);
         }
-        if (strcmp(name, "len") == 0 || strcmp(name, "abs_int") == 0 || strcmp(name, "min_int") == 0 || strcmp(name, "max_int") == 0 || strcmp(name, "arg_count") == 0) return TY_INT;
-        if (strcmp(name, "sqrt") == 0 || strcmp(name, "pow") == 0 || strcmp(name, "abs_float") == 0 || strcmp(name, "floor") == 0 || strcmp(name, "ceil") == 0 || strcmp(name, "min_float") == 0 || strcmp(name, "max_float") == 0) return TY_FLOAT;
-        if (strcmp(name, "concat") == 0 || strcmp(name, "substring") == 0 || strcmp(name, "read_file") == 0 || strcmp(name, "program_name") == 0 || strcmp(name, "args") == 0) return TY_STRING;
-        if (strcmp(name, "equals") == 0 || strcmp(name, "write_file") == 0) return TY_BOOL;
+        if (strcmp(name, "len") == 0 || strcmp(name, "abs_int") == 0 || strcmp(name, "min_int") == 0 || strcmp(name, "max_int") == 0 || strcmp(name, "arg_count") == 0 || strcmp(name, "to_int") == 0 || strcmp(name, "random_int") == 0) return TY_INT;
+        if (strcmp(name, "sqrt") == 0 || strcmp(name, "pow") == 0 || strcmp(name, "abs_float") == 0 || strcmp(name, "floor") == 0 || strcmp(name, "ceil") == 0 || strcmp(name, "min_float") == 0 || strcmp(name, "max_float") == 0 || strcmp(name, "to_float") == 0) return TY_FLOAT;
+        if (strcmp(name, "concat") == 0 || strcmp(name, "substring") == 0 || strcmp(name, "read_file") == 0 || strcmp(name, "program_name") == 0 || strcmp(name, "args") == 0 || strcmp(name, "read_line") == 0) return TY_STRING;
+        if (strcmp(name, "equals") == 0 || strcmp(name, "write_file") == 0 || strcmp(name, "is_int") == 0 || strcmp(name, "is_float") == 0) return TY_BOOL;
         if (strcmp(name, "char_at") == 0) return TY_CHAR;
+        if (strcmp(name, "random_seed") == 0) return TY_VOID;
 
         if (program && program->type == NODE_PROGRAM) {
             for (int f = 0; f < program->as.program.count; f++) {
@@ -1221,6 +1222,34 @@ static void gen_expr(CodegenCtx *ctx, AstNode *expr) {
                 sb_append(&ctx->sb, "__cco_get_arg_count()");
             } else if (strcmp(callee, "program_name") == 0) {
                 sb_append(&ctx->sb, "__cco_get_program_name()");
+            } else if (strcmp(callee, "random_seed") == 0) {
+                sb_append(&ctx->sb, "__cco_random_seed(");
+                gen_expr(ctx, expr->as.call.args[0]);
+                sb_append(&ctx->sb, ")");
+            } else if (strcmp(callee, "random_int") == 0) {
+                sb_append(&ctx->sb, "__cco_random_int(");
+                gen_expr(ctx, expr->as.call.args[0]);
+                sb_append(&ctx->sb, ", ");
+                gen_expr(ctx, expr->as.call.args[1]);
+                sb_append(&ctx->sb, ")");
+            } else if (strcmp(callee, "to_int") == 0) {
+                sb_append(&ctx->sb, "__cco_to_int(");
+                gen_expr(ctx, expr->as.call.args[0]);
+                sb_append(&ctx->sb, ")");
+            } else if (strcmp(callee, "is_int") == 0) {
+                sb_append(&ctx->sb, "__cco_is_int(");
+                gen_expr(ctx, expr->as.call.args[0]);
+                sb_append(&ctx->sb, ")");
+            } else if (strcmp(callee, "to_float") == 0) {
+                sb_append(&ctx->sb, "__cco_to_float(");
+                gen_expr(ctx, expr->as.call.args[0]);
+                sb_append(&ctx->sb, ")");
+            } else if (strcmp(callee, "is_float") == 0) {
+                sb_append(&ctx->sb, "__cco_is_float(");
+                gen_expr(ctx, expr->as.call.args[0]);
+                sb_append(&ctx->sb, ")");
+            } else if (strcmp(callee, "read_line") == 0) {
+                sb_append(&ctx->sb, "__cco_read_line()");
             } else {
                 sb_appendf(&ctx->sb, "%s(", callee);
                 for (int i = 0; i < expr->as.call.arg_count; i++) {
@@ -2159,6 +2188,27 @@ static void scan_node_usage(AstNode *node, bool *used_chunks) {
                 else if (strcmp(callee, "program_name") == 0) {
                     mark_chunk_used(used_chunks, "get_program_name");
                 }
+                else if (strcmp(callee, "random_seed") == 0) {
+                    mark_chunk_used(used_chunks, "random_seed");
+                }
+                else if (strcmp(callee, "random_int") == 0) {
+                    mark_chunk_used(used_chunks, "random_int");
+                }
+                else if (strcmp(callee, "to_int") == 0) {
+                    mark_chunk_used(used_chunks, "to_int");
+                }
+                else if (strcmp(callee, "is_int") == 0) {
+                    mark_chunk_used(used_chunks, "is_int");
+                }
+                else if (strcmp(callee, "to_float") == 0) {
+                    mark_chunk_used(used_chunks, "to_float");
+                }
+                else if (strcmp(callee, "is_float") == 0) {
+                    mark_chunk_used(used_chunks, "is_float");
+                }
+                else if (strcmp(callee, "read_line") == 0) {
+                    mark_chunk_used(used_chunks, "read_line");
+                }
             }
             for (int i = 0; i < node->as.call.arg_count; i++) {
                 scan_node_usage(node->as.call.args[i], used_chunks);
@@ -2225,7 +2275,9 @@ char *generate_c_code(AstNode *program, AstArena *arena) {
     sb_append(&ctx.sb, "#include <stdlib.h>\n");
     sb_append(&ctx.sb, "#include <stdbool.h>\n");
     sb_append(&ctx.sb, "#include <string.h>\n");
-    sb_append(&ctx.sb, "#include <math.h>\n\n");
+    sb_append(&ctx.sb, "#include <math.h>\n");
+    sb_append(&ctx.sb, "#include <time.h>\n");
+    sb_append(&ctx.sb, "#include <errno.h>\n\n");
     sb_append(&ctx.sb, "static int __cco_argc;\n");
     sb_append(&ctx.sb, "static char **__cco_argv;\n\n");
 
