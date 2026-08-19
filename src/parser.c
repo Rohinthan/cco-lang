@@ -1076,6 +1076,22 @@ static AstNode *parse_match_stmt(Parser *p) {
 }
 
 static AstNode *parse_statement(Parser *p) {
+    if (check(p, TOKEN_FN) || check(p, TOKEN_CLASS) || check(p, TOKEN_STRUCT) || check(p, TOKEN_ENUM) || check(p, TOKEN_INTERFACE) || check(p, TOKEN_IMPL) || check(p, TOKEN_IMPORT)) {
+        Token tok = peek(p);
+        char short_msg[256];
+        snprintf(short_msg, sizeof(short_msg), "unexpected top-level declaration '%s' inside a block — missing '}' on the preceding block/function?", tok.lexeme);
+        ErrorLocation primary = {get_error_filename(), tok.line, tok.col};
+        print_formatted_error(
+            short_msg,
+            primary,
+            "unexpected declaration inside block",
+            "top-level declarations ('fn', 'class', 'struct', 'enum', 'interface', 'impl', 'import') cannot be nested inside function or loop blocks — check if a closing brace '}' is missing above",
+            NULL,
+            NULL,
+            NULL
+        );
+        exit(1);
+    }
     if (check(p, TOKEN_LET)) return parse_let_stmt(p);
     if (check(p, TOKEN_IF)) return parse_if_stmt(p);
     if (check(p, TOKEN_WHILE)) return parse_while_stmt(p);
