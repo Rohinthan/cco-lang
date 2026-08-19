@@ -29,6 +29,11 @@ static const char *deps_map_remove[] = { "map_hash", "map_bucket", NULL };
 static const char *deps_map_keys[] = { "list_new", "arr_maybe_grow", "arr_len_raw", "arr_incr_len", "map_bucket", NULL };
 static const char *deps_map_free[] = { "map_bucket", NULL };
 static const char *deps_get_args[] = { "list_new", "arr_maybe_grow", "arr_len_raw", "arr_incr_len", NULL };
+static const char *deps_random_int[] = { "random_seed", NULL };
+static const char *deps_is_int[] = { "try_parse_int", NULL };
+static const char *deps_to_int[] = { "try_parse_int", NULL };
+static const char *deps_is_float[] = { "try_parse_float", NULL };
+static const char *deps_to_float[] = { "try_parse_float", NULL };
 
 static const PreludeChunk PRELUDE_CHUNKS[] = {
     {
@@ -593,6 +598,143 @@ static const PreludeChunk PRELUDE_CHUNKS[] = {
         "        return strdup(__cco_argv[0]);\n"
         "    }\n"
         "    return strdup(\"\");\n"
+        "}\n\n",
+        NULL
+    },
+    {
+        "random_seed",
+        "static int __cco_rand_seeded = 0;\n"
+        "static inline void __cco_random_seed(long seed) {\n"
+        "    srand((unsigned int)seed);\n"
+        "    __cco_rand_seeded = 1;\n"
+        "}\n\n",
+        NULL
+    },
+    {
+        "random_int",
+        "static inline long __cco_random_int(long min, long max) {\n"
+        "    if (!__cco_rand_seeded) {\n"
+        "        srand((unsigned int)time(NULL));\n"
+        "        __cco_rand_seeded = 1;\n"
+        "    }\n"
+        "    if (min == max) return min;\n"
+        "    if (min > max) { long tmp = min; min = max; max = tmp; }\n"
+        "    unsigned long range = (unsigned long)(max - min + 1);\n"
+        "    unsigned long limit = (unsigned long)RAND_MAX - ((unsigned long)RAND_MAX % range);\n"
+        "    unsigned long r;\n"
+        "    do {\n"
+        "        r = (unsigned long)rand();\n"
+        "    } while (r >= limit);\n"
+        "    return min + (long)(r % range);\n"
+        "}\n\n",
+        deps_random_int
+    },
+    {
+        "try_parse_int",
+        "static inline bool __cco_try_parse_int(const char *s, long *out_val) {\n"
+        "    if (!s) return false;\n"
+        "    while (*s == ' ' || *s == '\\t' || *s == '\\n' || *s == '\\r') s++;\n"
+        "    if (!*s) return false;\n"
+        "    char *endptr = NULL;\n"
+        "    errno = 0;\n"
+        "    long val = strtol(s, &endptr, 10);\n"
+        "    if (endptr == s || errno != 0) return false;\n"
+        "    while (*endptr == ' ' || *endptr == '\\t' || *endptr == '\\n' || *endptr == '\\r') endptr++;\n"
+        "    if (*endptr != '\\0') return false;\n"
+        "    if (out_val) *out_val = val;\n"
+        "    return true;\n"
+        "}\n\n",
+        NULL
+    },
+    {
+        "is_int",
+        "static inline bool __cco_is_int(const char *s) {\n"
+        "    return __cco_try_parse_int(s, NULL);\n"
+        "}\n\n",
+        deps_is_int
+    },
+    {
+        "to_int",
+        "static inline long __cco_to_int(const char *s) {\n"
+        "    long val = 0;\n"
+        "    if (!__cco_try_parse_int(s, &val)) {\n"
+        "        fprintf(stderr, \"Runtime Error: '%s' is not a valid integer\\n\", s ? s : \"null\");\n"
+        "        exit(1);\n"
+        "    }\n"
+        "    return val;\n"
+        "}\n\n",
+        deps_to_int
+    },
+    {
+        "try_parse_float",
+        "static inline bool __cco_try_parse_float(const char *s, double *out_val) {\n"
+        "    if (!s) return false;\n"
+        "    while (*s == ' ' || *s == '\\t' || *s == '\\n' || *s == '\\r') s++;\n"
+        "    if (!*s) return false;\n"
+        "    char *endptr = NULL;\n"
+        "    errno = 0;\n"
+        "    double val = strtod(s, &endptr);\n"
+        "    if (endptr == s || errno != 0) return false;\n"
+        "    while (*endptr == ' ' || *endptr == '\\t' || *endptr == '\\n' || *endptr == '\\r') endptr++;\n"
+        "    if (*endptr != '\\0') return false;\n"
+        "    if (out_val) *out_val = val;\n"
+        "    return true;\n"
+        "}\n\n",
+        NULL
+    },
+    {
+        "is_float",
+        "static inline bool __cco_is_float(const char *s) {\n"
+        "    return __cco_try_parse_float(s, NULL);\n"
+        "}\n\n",
+        deps_is_float
+    },
+    {
+        "to_float",
+        "static inline double __cco_to_float(const char *s) {\n"
+        "    double val = 0.0;\n"
+        "    if (!__cco_try_parse_float(s, &val)) {\n"
+        "        fprintf(stderr, \"Runtime Error: '%s' is not a valid float\\n\", s ? s : \"null\");\n"
+        "        exit(1);\n"
+        "    }\n"
+        "    return val;\n"
+        "}\n\n",
+        deps_to_float
+    },
+    {
+        "read_line",
+        "static inline char *__cco_read_line(void) {\n"
+        "    size_t cap = 128;\n"
+        "    size_t len = 0;\n"
+        "    char *buf = (char *)malloc(cap);\n"
+        "    if (!buf) {\n"
+        "        fprintf(stderr, \"Memory allocation failed in read_line()\\n\");\n"
+        "        exit(1);\n"
+        "    }\n"
+        "    int c;\n"
+        "    while ((c = fgetc(stdin)) != EOF) {\n"
+        "        if (c == '\\n') break;\n"
+        "        if (c == '\\r') {\n"
+        "            int next_c = fgetc(stdin);\n"
+        "            if (next_c != '\\n' && next_c != EOF) {\n"
+        "                ungetc(next_c, stdin);\n"
+        "            }\n"
+        "            break;\n"
+        "        }\n"
+        "        if (len + 1 >= cap) {\n"
+        "            cap *= 2;\n"
+        "            char *new_buf = (char *)realloc(buf, cap);\n"
+        "            if (!new_buf) {\n"
+        "                free(buf);\n"
+        "                fprintf(stderr, \"Memory allocation failed in read_line()\\n\");\n"
+        "                exit(1);\n"
+        "            }\n"
+        "            buf = new_buf;\n"
+        "        }\n"
+        "        buf[len++] = (char)c;\n"
+        "    }\n"
+        "    buf[len] = '\\0';\n"
+        "    return buf;\n"
         "}\n\n",
         NULL
     }
