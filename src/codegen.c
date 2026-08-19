@@ -445,6 +445,9 @@ static Type infer_expr_type(AstNode *program, AstNode *fn, AstNode *expr) {
     if (expr->type == NODE_LITERAL) {
         return expr->as.literal.lit_type;
     }
+    if (expr->type == NODE_FSTRING || expr->type == NODE_FSTRING_TEXT) {
+        return TY_STRING;
+    }
     if (expr->type == NODE_ALLOC) {
         return expr->as.alloc.elem_type;
     }
@@ -784,10 +787,76 @@ static AstNode *find_class_ast(AstNode *program, const char *name) {
     return NULL;
 }
 
+static void sb_append_escaped_string(StringBuffer *sb, const char *s) {
+    sb_append(sb, "\"");
+    if (s) {
+        while (*s) {
+            if (*s == '\n') sb_append(sb, "\\n");
+            else if (*s == '\t') sb_append(sb, "\\t");
+            else if (*s == '\r') sb_append(sb, "\\r");
+            else if (*s == '\\') sb_append(sb, "\\\\");
+            else if (*s == '\"') sb_append(sb, "\\\"");
+            else {
+                char ch[2] = {*s, '\0'};
+                sb_append(sb, ch);
+            }
+            s++;
+        }
+    }
+    sb_append(sb, "\"");
+}
+
+static void gen_fstring_part(CodegenCtx *ctx, AstNode *part, bool *out_needs_free);
+
 static void gen_expr(CodegenCtx *ctx, AstNode *expr) {
     if (!expr) return;
 
     switch (expr->type) {
+        case NODE_FSTRING_TEXT:
+            sb_append(&ctx->sb, "strdup(");
+            sb_append_escaped_string(&ctx->sb, expr->as.fstring_text.text);
+            sb_append(&ctx->sb, ")");
+            break;
+
+        case NODE_FSTRING: {
+            if (expr->as.fstring.part_count == 1) {
+                AstNode *p0 = expr->as.fstring.parts[0];
+                if (p0->type == NODE_FSTRING_TEXT) {
+                    sb_append(&ctx->sb, "strdup(");
+                    sb_append_escaped_string(&ctx->sb, p0->as.fstring_text.text);
+                    sb_append(&ctx->sb, ")");
+                } else {
+                    bool needs_free = false;
+                    Type t = infer_expr_type(ctx->program, ctx->current_function, p0);
+                    if (t == TY_STRING && p0->type != NODE_LITERAL) {
+                        sb_append(&ctx->sb, "strdup(");
+                        gen_expr(ctx, p0);
+                        sb_append(&ctx->sb, ")");
+                    } else {
+                        gen_fstring_part(ctx, p0, &needs_free);
+                    }
+                }
+            } else {
+                for (int i = 0; i < expr->as.fstring.part_count - 1; i++) {
+                    sb_append(&ctx->sb, "__cco_concat_free(");
+                }
+                bool free0 = false;
+                gen_fstring_part(ctx, expr->as.fstring.parts[0], &free0);
+                sb_append(&ctx->sb, ", ");
+                bool free1 = false;
+                gen_fstring_part(ctx, expr->as.fstring.parts[1], &free1);
+                sb_appendf(&ctx->sb, ", %s, %s)", free0 ? "true" : "false", free1 ? "true" : "false");
+
+                for (int i = 2; i < expr->as.fstring.part_count; i++) {
+                    sb_append(&ctx->sb, ", ");
+                    bool free_i = false;
+                    gen_fstring_part(ctx, expr->as.fstring.parts[i], &free_i);
+                    sb_appendf(&ctx->sb, ", true, %s)", free_i ? "true" : "false");
+                }
+            }
+            break;
+        }
+
         case NODE_LITERAL:
             if (expr->as.literal.lit_type == TY_INT) {
                 sb_appendf(&ctx->sb, "%ld", expr->as.literal.val.i);
@@ -1266,6 +1335,60 @@ static void gen_expr(CodegenCtx *ctx, AstNode *expr) {
     }
 }
 
+static void gen_fstring_part(CodegenCtx *ctx, AstNode *part, bool *out_needs_free) {
+    if (part->type == NODE_FSTRING_TEXT) {
+        *out_needs_free = false;
+        sb_append_escaped_string(&ctx->sb, part->as.fstring_text.text);
+        return;
+    }
+
+    Type t = infer_expr_type(ctx->program, ctx->current_function, part);
+    if (t == TY_INT) {
+        *out_needs_free = true;
+        sb_append(&ctx->sb, "__cco_int_to_str(");
+        gen_expr(ctx, part);
+        sb_append(&ctx->sb, ")");
+    } else if (t == TY_FLOAT) {
+        *out_needs_free = true;
+        sb_append(&ctx->sb, "__cco_float_to_str(");
+        gen_expr(ctx, part);
+        sb_append(&ctx->sb, ")");
+    } else if (t == TY_BOOL) {
+        *out_needs_free = true;
+        sb_append(&ctx->sb, "__cco_bool_to_str(");
+        gen_expr(ctx, part);
+        sb_append(&ctx->sb, ")");
+    } else if (t == TY_CHAR) {
+        *out_needs_free = true;
+        sb_append(&ctx->sb, "__cco_char_to_str(");
+        gen_expr(ctx, part);
+        sb_append(&ctx->sb, ")");
+    } else if (t == TY_STRING) {
+        if (part->type == NODE_LITERAL) {
+            *out_needs_free = false;
+            sb_append_escaped_string(&ctx->sb, part->as.literal.val.s);
+        } else if (part->type == NODE_CALL || part->type == NODE_METHOD_CALL || part->type == NODE_FSTRING) {
+            *out_needs_free = true;
+            gen_expr(ctx, part);
+        } else {
+            *out_needs_free = false;
+            gen_expr(ctx, part);
+        }
+    } else {
+        *out_needs_free = false;
+        gen_expr(ctx, part);
+    }
+}
+
+static inline bool is_heap_string_returning_call(const char *name) {
+    if (!name) return false;
+    return (strcmp(name, "concat") == 0 ||
+            strcmp(name, "substring") == 0 ||
+            strcmp(name, "read_file") == 0 ||
+            strcmp(name, "read_line") == 0 ||
+            strcmp(name, "program_name") == 0);
+}
+
 static void gen_stmt(CodegenCtx *ctx, AstNode *stmt) {
     if (!stmt) return;
 
@@ -1531,9 +1654,27 @@ static void gen_stmt(CodegenCtx *ctx, AstNode *stmt) {
             AstNode *val = stmt->as.print_stmt.value;
             Type t = infer_expr_type(ctx->program, ctx->current_function, val);
             if (t == TY_STRING) {
-                sb_append(&ctx->sb, "printf(\"%s\\n\", ");
-                gen_expr(ctx, val);
-                sb_append(&ctx->sb, ");\n");
+                if (val->type == NODE_FSTRING || (val->type == NODE_CALL && is_heap_string_returning_call(val->as.call.callee))) {
+                    static int print_tmp_counter = 0;
+                    int cur_tmp = ++print_tmp_counter;
+                    sb_appendf(&ctx->sb, "{\n");
+                    ctx->indent_level++;
+                    emit_indent(ctx);
+                    sb_appendf(&ctx->sb, "char *__print_tmp_%d = ", cur_tmp);
+                    gen_expr(ctx, val);
+                    sb_append(&ctx->sb, ";\n");
+                    emit_indent(ctx);
+                    sb_appendf(&ctx->sb, "printf(\"%%s\\n\", __print_tmp_%d ? __print_tmp_%d : \"\");\n", cur_tmp, cur_tmp);
+                    emit_indent(ctx);
+                    sb_appendf(&ctx->sb, "free(__print_tmp_%d);\n", cur_tmp);
+                    ctx->indent_level--;
+                    emit_indent(ctx);
+                    sb_append(&ctx->sb, "}\n");
+                } else {
+                    sb_append(&ctx->sb, "printf(\"%s\\n\", ");
+                    gen_expr(ctx, val);
+                    sb_append(&ctx->sb, ");\n");
+                }
             } else if (t == TY_FLOAT) {
                 sb_append(&ctx->sb, "printf(\"%g\\n\", (double)(");
                 gen_expr(ctx, val);
@@ -2231,6 +2372,20 @@ static void scan_node_usage(AstNode *node, bool *used_chunks) {
 
         case NODE_MEMBER:
             scan_node_usage(node->as.member.object, used_chunks);
+            break;
+
+        case NODE_FSTRING:
+            mark_chunk_used(used_chunks, "concat_free");
+            mark_chunk_used(used_chunks, "int_to_str");
+            mark_chunk_used(used_chunks, "float_to_str");
+            mark_chunk_used(used_chunks, "bool_to_str");
+            mark_chunk_used(used_chunks, "char_to_str");
+            for (int i = 0; i < node->as.fstring.part_count; i++) {
+                AstNode *part = node->as.fstring.parts[i];
+                if (part->type != NODE_FSTRING_TEXT) {
+                    scan_node_usage(part, used_chunks);
+                }
+            }
             break;
 
         default:
