@@ -135,6 +135,151 @@ static Type parse_type_with_class(Parser *p, char **out_class_name, bool *out_is
     return t;
 }
 
+static AstNode *parse_fstring_lit(Parser *p, Token tok) {
+    const char *raw = tok.lexeme;
+    int len = (int)strlen(raw);
+    int capacity = 8;
+    int count = 0;
+    AstNode **parts = (AstNode **)arena_alloc_array(p->arena, capacity, sizeof(AstNode *));
+
+    char *text_buf = (char *)malloc(len + 1);
+    int text_len = 0;
+
+    int i = 0;
+    while (i < len) {
+        if (raw[i] == '{') {
+            if (i + 1 < len && raw[i + 1] == '{') {
+                text_buf[text_len++] = '{';
+                i += 2;
+                continue;
+            }
+
+            if (text_len > 0) {
+                text_buf[text_len] = '\0';
+                AstNode *t_node = arena_alloc_node(p->arena, NODE_FSTRING_TEXT, tok.line, tok.col);
+                t_node->as.fstring_text.text = arena_strdup(p->arena, text_buf);
+                if (count >= capacity) {
+                    int new_cap = capacity * 2;
+                    AstNode **new_parts = (AstNode **)arena_alloc_array(p->arena, new_cap, sizeof(AstNode *));
+                    memcpy(new_parts, parts, count * sizeof(AstNode *));
+                    parts = new_parts;
+                    capacity = new_cap;
+                }
+                parts[count++] = t_node;
+                text_len = 0;
+            }
+
+            i++; // skip '{'
+            int expr_start = i;
+            int depth = 1;
+            while (i < len && depth > 0) {
+                if (raw[i] == '{') {
+                    if (i + 1 < len && raw[i + 1] == '{') {
+                        i += 2;
+                        continue;
+                    }
+                    depth++;
+                } else if (raw[i] == '}') {
+                    if (i + 1 < len && raw[i + 1] == '}') {
+                        i += 2;
+                        continue;
+                    }
+                    depth--;
+                    if (depth == 0) {
+                        break;
+                    }
+                }
+                i++;
+            }
+
+            if (depth > 0) {
+                free(text_buf);
+                fatal_parser_error(tok.line, tok.col, "{", "unbalanced '{' in f-string");
+            }
+
+            int expr_len = i - expr_start;
+            i++; // skip closing '}'
+
+            int s = expr_start;
+            while (s < expr_start + expr_len && isspace((unsigned char)raw[s])) s++;
+            int e = expr_start + expr_len - 1;
+            while (e >= s && isspace((unsigned char)raw[e])) e--;
+            if (s > e) {
+                free(text_buf);
+                fatal_parser_error(tok.line, tok.col, "{}", "expected expression inside '{...}'");
+            }
+
+            char *expr_str = (char *)malloc(expr_len + 1);
+            strncpy(expr_str, raw + expr_start, expr_len);
+            expr_str[expr_len] = '\0';
+
+            TokenArray sub_tokens = lex_source(expr_str);
+            free(expr_str);
+
+            Parser sub_p = create_parser(sub_tokens, p->arena);
+            AstNode *sub_expr = parse_expr(&sub_p);
+
+            if (sub_p.tokens.tokens[sub_p.current].type != TOKEN_EOF) {
+                Token extra_tok = sub_p.tokens.tokens[sub_p.current];
+                free(text_buf);
+                free_tokens(&sub_tokens);
+                fatal_parser_error(tok.line, tok.col, extra_tok.lexeme, "unexpected tokens in f-string expression");
+            }
+
+            free_tokens(&sub_tokens);
+
+            if (count >= capacity) {
+                int new_cap = capacity * 2;
+                AstNode **new_parts = (AstNode **)arena_alloc_array(p->arena, new_cap, sizeof(AstNode *));
+                memcpy(new_parts, parts, count * sizeof(AstNode *));
+                parts = new_parts;
+                capacity = new_cap;
+            }
+            parts[count++] = sub_expr;
+        } else if (raw[i] == '}') {
+            if (i + 1 < len && raw[i + 1] == '}') {
+                text_buf[text_len++] = '}';
+                i += 2;
+                continue;
+            } else {
+                free(text_buf);
+                fatal_parser_error(tok.line, tok.col, "}", "unmatched '}' in f-string");
+            }
+        } else {
+            text_buf[text_len++] = raw[i++];
+        }
+    }
+
+    if (text_len > 0) {
+        text_buf[text_len] = '\0';
+        AstNode *t_node = arena_alloc_node(p->arena, NODE_FSTRING_TEXT, tok.line, tok.col);
+        t_node->as.fstring_text.text = arena_strdup(p->arena, text_buf);
+        if (count >= capacity) {
+            int new_cap = capacity * 2;
+            AstNode **new_parts = (AstNode **)arena_alloc_array(p->arena, new_cap, sizeof(AstNode *));
+            memcpy(new_parts, parts, count * sizeof(AstNode *));
+            parts = new_parts;
+            capacity = new_cap;
+        }
+        parts[count++] = t_node;
+    }
+
+    free(text_buf);
+
+    if (count == 0) {
+        AstNode *empty_t = arena_alloc_node(p->arena, NODE_FSTRING_TEXT, tok.line, tok.col);
+        empty_t->as.fstring_text.text = arena_strdup(p->arena, "");
+        parts = (AstNode **)arena_alloc_array(p->arena, 1, sizeof(AstNode *));
+        parts[0] = empty_t;
+        count = 1;
+    }
+
+    AstNode *node = arena_alloc_node(p->arena, NODE_FSTRING, tok.line, tok.col);
+    node->as.fstring.parts = parts;
+    node->as.fstring.part_count = count;
+    return node;
+}
+
 static AstNode *parse_primary(Parser *p) {
     Token tok = peek(p);
 
@@ -157,6 +302,11 @@ static AstNode *parse_primary(Parser *p) {
         node->as.literal.lit_type = TY_STRING;
         node->as.literal.val.s = arena_strdup(p->arena, tok.lexeme);
         return node;
+    }
+
+    if (match(p, TOKEN_FSTRING_LIT)) {
+        Token f_tok = previous(p);
+        return parse_fstring_lit(p, f_tok);
     }
 
     if (match(p, TOKEN_CHAR_LIT)) {
