@@ -1,6 +1,5 @@
 # Cco v16.0 Implementation Report: Operator Overloading for Structs
 
-**Author**: Antigravity  
 **Version**: v16.0  
 **Status**: Completed & Verified (79/79 Integration Tests Passing, 104/104 Lexer Comparison Files Passing, 0 Memory Leaks under Valgrind)
 
