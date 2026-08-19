@@ -18,7 +18,7 @@ Welcome to the Cco example program gallery. These examples demonstrate the featu
 | [`10_import_demo/`](10_import_demo/) | Multi-file import system | Top-level imports (`import "file.cco";`), Resolve-Then-Merge AST |
 | [`11_struct_vec2.cco`](11_struct_vec2.cco) | Lightweight Structs (Value Types) | Value type structs (`struct`), copy semantics, in-place borrowed mutation (`&Struct`) |
 | [`12_cli_args.cco`](12_cli_args.cco) | Command-Line Arguments | `program_name()`, `arg_count()`, `args()`, command-line processing |
-| [`13_number_guess.cco`](13_number_guess.cco) | Interactive Number Guessing Game | `read_line()`, `is_int()`, `to_int()`, `random_seed()`, `random_int()` |
+| [`13_number_guess.cco`](13_number_guess.cco) | Interactive Number Guessing Game | F-Strings (`f"..."`), `read_line()`, `is_int()`, `to_int()`, `random_seed()`, `random_int()` |
 
 ## Compiling & Running Examples
 
