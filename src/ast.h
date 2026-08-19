@@ -61,7 +61,9 @@ typedef enum {
     NODE_ENUM,
     NODE_VARIANT,
     NODE_MATCH,
-    NODE_MATCH_ARM
+    NODE_MATCH_ARM,
+    NODE_FSTRING,
+    NODE_FSTRING_TEXT
 } NodeType;
 
 typedef struct AstNode AstNode;
@@ -358,6 +360,15 @@ struct AstNode {
             bool is_map;
             Type key_type;
         } alloc;
+
+        struct {
+            AstNode **parts;
+            int part_count;
+        } fstring;
+
+        struct {
+            char *text;
+        } fstring_text;
     } as;
 };
 
