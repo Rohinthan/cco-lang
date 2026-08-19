@@ -1,0 +1,28 @@
+fn parse_and_print_int(s: string) -> void {
+    if (is_int(s)) {
+        let n: int = to_int(s);
+        print(n);
+    } else {
+        print("invalid int");
+    }
+}
+
+fn parse_and_print_float(s: string) -> void {
+    if (is_float(s)) {
+        let f: float = to_float(s);
+        print(f);
+    } else {
+        print("invalid float");
+    }
+}
+
+fn main() -> int {
+    parse_and_print_int("123");
+    parse_and_print_int("abc");
+    parse_and_print_int("12.34");
+
+    parse_and_print_float("3.14");
+    parse_and_print_float("xyz");
+    parse_and_print_float("100");
+    return 0;
+}
