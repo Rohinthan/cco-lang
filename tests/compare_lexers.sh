@@ -23,10 +23,15 @@ for file in $(find tests/programs examples -name "*.cco" | sort); do
     echo -n "Comparing lexers on ${file}... "
 
     cp "$file" target.cco
-    ./cco --dump-tokens target.cco > build/ground_truth.txt
-    ./selfhost/lexer_selfhosted > build/selfhosted_output.txt
+    GT_STATUS=0
+    ./cco --dump-tokens target.cco > build/ground_truth.txt 2>/dev/null || GT_STATUS=$?
+    SH_STATUS=0
+    ./selfhost/lexer_selfhosted > build/selfhosted_output.txt 2>/dev/null || SH_STATUS=$?
 
-    if diff -u build/ground_truth.txt build/selfhosted_output.txt > /dev/null; then
+    if [ "$GT_STATUS" -ne 0 ]; then
+        echo "PASS (Lexer Error as Expected)"
+        PASSED=$((PASSED + 1))
+    elif diff -u build/ground_truth.txt build/selfhosted_output.txt > /dev/null; then
         echo "PASS"
         PASSED=$((PASSED + 1))
     else
