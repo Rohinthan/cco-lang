@@ -1,0 +1,5 @@
+fn main() -> int {
+    let x: int = to_int("42abc");
+    print(x);
+    return 0;
+}
