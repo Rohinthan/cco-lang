@@ -140,6 +140,87 @@ TokenArray lex_source(const char *source) {
             continue;
         }
 
+        // F-Strings (f"...")
+        if (c == 'f' && source[pos + 1] == '"') {
+            int start_col = col;
+            int start_line = line;
+            pos += 2; // Skip f"
+            col += 2;
+            int start_pos = pos;
+            int brace_depth = 0;
+            int last_open_brace_col = start_col;
+            int last_open_brace_line = start_line;
+
+            while (source[pos] != '\0') {
+                if (source[pos] == '"' && brace_depth == 0) {
+                    break;
+                }
+                if (source[pos] == '{') {
+                    if (source[pos + 1] == '{') {
+                        // {{ escaped brace
+                        pos += 2;
+                        col += 2;
+                        continue;
+                    }
+                    brace_depth++;
+                    last_open_brace_col = col;
+                    last_open_brace_line = line;
+                    pos++;
+                    col++;
+                } else if (source[pos] == '}') {
+                    if (source[pos + 1] == '}') {
+                        // }} escaped brace
+                        pos += 2;
+                        col += 2;
+                        continue;
+                    }
+                    if (brace_depth > 0) {
+                        brace_depth--;
+                    } else {
+                        fatal_lexer_error(line, col, "unmatched '}' in f-string");
+                    }
+                    pos++;
+                    col++;
+                } else if (source[pos] == '\\' && source[pos + 1] != '\0') {
+                    pos += 2;
+                    col += 2;
+                } else if (source[pos] == '\n') {
+                    if (brace_depth > 0) {
+                        fatal_lexer_error(last_open_brace_line, last_open_brace_col, "unbalanced '{' in f-string");
+                    } else {
+                        fatal_lexer_error(start_line, start_col, "unterminated f-string literal");
+                    }
+                } else {
+                    col++;
+                    pos++;
+                }
+            }
+
+            if (source[pos] == '\0') {
+                if (brace_depth > 0) {
+                    fatal_lexer_error(last_open_brace_line, last_open_brace_col, "unbalanced '{' in f-string");
+                } else {
+                    fatal_lexer_error(start_line, start_col, "unterminated f-string literal");
+                }
+            }
+
+            if (brace_depth > 0) {
+                fatal_lexer_error(last_open_brace_line, last_open_brace_col, "unbalanced '{' in f-string");
+            }
+
+            int len = pos - start_pos;
+            char *buf = malloc(len + 1);
+            strncpy(buf, source + start_pos, len);
+            buf[len] = '\0';
+
+            pos++; // Skip closing quote
+            col++;
+
+            Token tok = {TOKEN_FSTRING_LIT, buf, start_line, start_col};
+            append_token(&array, tok);
+            continue;
+        }
+
         // Character Literals
         if (c == '\'') {
             int start_col = col;
@@ -421,6 +502,9 @@ void dump_tokens(const TokenArray *array) {
                 break;
             case TOKEN_STRING_LIT:
                 printf("%d:%d STRING %s\n", tok.line, tok.col, tok.lexeme);
+                break;
+            case TOKEN_FSTRING_LIT:
+                printf("%d:%d FSTRING %s\n", tok.line, tok.col, tok.lexeme);
                 break;
             case TOKEN_CHAR_LIT:
                 printf("%d:%d CHAR %s\n", tok.line, tok.col, tok.lexeme);
