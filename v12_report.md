@@ -1,6 +1,5 @@
 # Cco v12.0 Implementation Report: Self-Hosted Lexer Proof-of-Concept
 
-**Author**: Antigravity  
 **Version**: v12.0  
 **Status**: Completed & Verified (83/83 Corpus Files Passing, 61/61 Test Programs Passing, 0 Leaks)
 
