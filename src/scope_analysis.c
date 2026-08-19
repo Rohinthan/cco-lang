@@ -210,12 +210,26 @@ static void analyze_node(ScopeStack *stack, AstNode *node) {
             for (int i = 0; i < node->as.program.count; i++) {
                 analyze_node(stack, node->as.program.functions[i]);
             }
+            for (int c = 0; c < node->as.program.class_count; c++) {
+                AstNode *cls = node->as.program.classes[c];
+                for (int m = 0; m < cls->as.class_decl.method_count; m++) {
+                    analyze_node(stack, cls->as.class_decl.methods[m]);
+                }
+            }
             break;
 
         case NODE_FUNCTION: {
             AstNode *prev_fn = stack->current_function;
             stack->current_function = node;
             analyze_block(stack, node->as.function.body, false);
+            stack->current_function = prev_fn;
+            break;
+        }
+
+        case NODE_METHOD: {
+            AstNode *prev_fn = stack->current_function;
+            stack->current_function = node;
+            analyze_block(stack, node->as.method.body, false);
             stack->current_function = prev_fn;
             break;
         }
