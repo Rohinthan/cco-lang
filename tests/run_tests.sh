@@ -44,13 +44,26 @@ for item in tests/programs/*; do
 
     echo -n "Testing ${base}... "
 
+    # Check for optional .args sidecar file
+    local_args=()
+    args_file="tests/programs/${base}.args"
+    if [ -f "$args_file" ]; then
+        read -r -a local_args < "$args_file"
+    fi
+
+    # Check for optional .stdin sidecar file
+    stdin_file="tests/programs/${base}.stdin"
+    if [ ! -f "$stdin_file" ]; then
+        stdin_file="/dev/null"
+    fi
+
     if [[ "$base" == *"_RUNTIME_ERROR"* ]]; then
         err_out="build/${base}_err.txt"
         exp_err="tests/expected_output/${base}_stderr.txt"
         ./cco "$entry" -o "$c_out"
         gcc -Wall -Wextra -Werror -pedantic-errors -std=c11 "$c_out" -o "$bin_out" -lm
         set +e
-        "$bin_out" 2> "$err_out" > /dev/null
+        "$bin_out" "${local_args[@]}" < "$stdin_file" 2> "$err_out" > /dev/null
         code=$?
         set -e
         if [ "$code" -eq 0 ]; then
@@ -134,15 +147,8 @@ for item in tests/programs/*; do
         tcc -std=c11 "$c_out" -o "${bin_out}_tcc" -lm
     fi
 
-    # Check for optional .args sidecar file
-    local_args=()
-    args_file="tests/programs/${base}.args"
-    if [ -f "$args_file" ]; then
-        read -r -a local_args < "$args_file"
-    fi
-
     # 3. Execute and capture stdout
-    "$bin_out" "${local_args[@]}" > "$act_out"
+    "$bin_out" "${local_args[@]}" < "$stdin_file" > "$act_out"
 
     # 4. Diff output against expected
     if ! diff -u "$act_out" "$exp_out" > /dev/null; then
@@ -153,9 +159,9 @@ for item in tests/programs/*; do
     fi
 
     # 5. Valgrind leak check
-    if ! valgrind --leak-check=full --error-exitcode=1 "$bin_out" "${local_args[@]}" > /dev/null 2>&1; then
+    if ! valgrind --leak-check=full --error-exitcode=1 "$bin_out" "${local_args[@]}" < "$stdin_file" > /dev/null 2>&1; then
         echo "FAILED (Valgrind memory leak / error)"
-        valgrind --leak-check=full "$bin_out" "${local_args[@]}"
+        valgrind --leak-check=full "$bin_out" "${local_args[@]}" < "$stdin_file"
         FAILED=$((FAILED + 1))
         continue
     fi
