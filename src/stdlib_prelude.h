@@ -737,6 +737,62 @@ static const PreludeChunk PRELUDE_CHUNKS[] = {
         "    return buf;\n"
         "}\n\n",
         NULL
+    },
+    {
+        "concat_free",
+        "static inline char *__cco_concat_free(const char *a, const char *b, bool free_a, bool free_b) {\n"
+        "    if (!a) a = \"\";\n"
+        "    if (!b) b = \"\";\n"
+        "    size_t len_a = strlen(a);\n"
+        "    size_t len_b = strlen(b);\n"
+        "    char *res = (char *)malloc(len_a + len_b + 1);\n"
+        "    if (!res) {\n"
+        "        fprintf(stderr, \"Memory allocation failed in concat_free()\\n\");\n"
+        "        exit(1);\n"
+        "    }\n"
+        "    memcpy(res, a, len_a);\n"
+        "    memcpy(res + len_a, b, len_b);\n"
+        "    res[len_a + len_b] = '\\0';\n"
+        "    if (free_a && a && *a) free((void *)a);\n"
+        "    if (free_b && b && *b) free((void *)b);\n"
+        "    return res;\n"
+        "}\n\n",
+        NULL
+    },
+    {
+        "int_to_str",
+        "static inline char *__cco_int_to_str(long n) {\n"
+        "    char buf[32];\n"
+        "    snprintf(buf, sizeof(buf), \"%ld\", n);\n"
+        "    return strdup(buf);\n"
+        "}\n\n",
+        NULL
+    },
+    {
+        "float_to_str",
+        "static inline char *__cco_float_to_str(double f) {\n"
+        "    char buf[64];\n"
+        "    snprintf(buf, sizeof(buf), \"%g\", f);\n"
+        "    return strdup(buf);\n"
+        "}\n\n",
+        NULL
+    },
+    {
+        "bool_to_str",
+        "static inline char *__cco_bool_to_str(bool b) {\n"
+        "    return strdup(b ? \"true\" : \"false\");\n"
+        "}\n\n",
+        NULL
+    },
+    {
+        "char_to_str",
+        "static inline char *__cco_char_to_str(char c) {\n"
+        "    char buf[2];\n"
+        "    buf[0] = c;\n"
+        "    buf[1] = '\\0';\n"
+        "    return strdup(buf);\n"
+        "}\n\n",
+        NULL
     }
 };
 
