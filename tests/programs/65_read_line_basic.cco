@@ -1,0 +1,9 @@
+fn main() -> int {
+    let line1: string = read_line();
+    print(line1);
+    let line2: string = read_line();
+    print(line2);
+    let line3: string = read_line();
+    print(len(line3));
+    return 0;
+}
