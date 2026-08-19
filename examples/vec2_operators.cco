@@ -1,0 +1,28 @@
+struct Vec2 {
+    x: float;
+    y: float;
+}
+
+fn operator+(a: Vec2, b: Vec2) -> Vec2 {
+    return Vec2 { x: a.x + b.x, y: a.y + b.y };
+}
+
+fn operator-(a: Vec2) -> Vec2 {
+    return Vec2 { x: -a.x, y: -a.y };
+}
+
+fn operator==(a: Vec2, b: Vec2) -> bool {
+    return a.x == b.x && a.y == b.y;
+}
+
+fn main() -> int {
+    let p: Vec2 = Vec2 { x: 1.0, y: 2.0 };
+    let q: Vec2 = Vec2 { x: 3.0, y: 4.0 };
+    let sum: Vec2 = p + q;
+    let neg: Vec2 = -p;
+    print(sum.x);        // 4.0
+    print(neg.x);        // -1.0
+    print(p == p);       // true
+    print(p == q);       // false
+    return 0;
+}
