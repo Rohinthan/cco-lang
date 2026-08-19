@@ -2,6 +2,7 @@
 #include "codegen.h"
 #include "class_decl.h"
 #include "stdlib_prelude.h"
+#include "errors.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -56,6 +57,20 @@ typedef struct {
 static bool is_struct_name(CodegenCtx *ctx, const char *name) {
     if (!ctx || !ctx->ct || !name) return false;
     return resolve_type_name(ctx->ct, name) == TYPE_KIND_STRUCT;
+}
+
+static const char *get_operator_fn_c_name(const char *struct_name, const char *op_symbol, int arity) {
+    static char buf[256];
+    const char *op_name = "unknown";
+    if (strcmp(op_symbol, "+") == 0) op_name = "add";
+    else if (strcmp(op_symbol, "-") == 0) op_name = (arity == 1) ? "neg" : "sub";
+    else if (strcmp(op_symbol, "*") == 0) op_name = "mul";
+    else if (strcmp(op_symbol, "/") == 0) op_name = "div";
+    else if (strcmp(op_symbol, "==") == 0) op_name = "eq";
+    else if (strcmp(op_symbol, "!=") == 0) op_name = "ne";
+
+    snprintf(buf, sizeof(buf), "__cco_operator_%s_%s", op_name, struct_name ? struct_name : "unknown");
+    return buf;
 }
 
 static void emit_indent(CodegenCtx *ctx) {
@@ -332,6 +347,15 @@ static const char *get_expr_elem_class_name(CodegenCtx *ctx, AstNode *expr) {
             }
         }
     }
+    if (expr->type == NODE_NEW) {
+        return expr->as.new_expr.class_name;
+    }
+    if (expr->type == NODE_BINARY) {
+        return get_expr_elem_class_name(ctx, expr->as.binary.left);
+    }
+    if (expr->type == NODE_UNARY) {
+        return get_expr_elem_class_name(ctx, expr->as.unary.operand);
+    }
     return NULL;
 }
 
@@ -506,6 +530,10 @@ static Type infer_expr_type(AstNode *program, AstNode *fn, AstNode *expr) {
                     }
                 }
             }
+            if (!cname) {
+                AstNode *body = (fn->type == NODE_FUNCTION) ? fn->as.function.body : fn->as.method.body;
+                cname = find_ident_class_in_node(program, body, obj_name);
+            }
         }
         if (cname) {
             for (int c = 0; c < program->as.program.class_count; c++) {
@@ -514,6 +542,16 @@ static Type infer_expr_type(AstNode *program, AstNode *fn, AstNode *expr) {
                     for (int f = 0; f < cls->as.class_decl.field_count; f++) {
                         if (strcmp(cls->as.class_decl.fields[f]->as.field.name, mname) == 0) {
                             return cls->as.class_decl.fields[f]->as.field.type;
+                        }
+                    }
+                }
+            }
+            for (int s = 0; s < program->as.program.struct_count; s++) {
+                AstNode *st = program->as.program.structs[s];
+                if (strcmp(st->as.struct_decl.name, cname) == 0) {
+                    for (int f = 0; f < st->as.struct_decl.field_count; f++) {
+                        if (strcmp(st->as.struct_decl.fields[f]->as.struct_field_decl.name, mname) == 0) {
+                            return st->as.struct_decl.fields[f]->as.struct_field_decl.field_type;
                         }
                     }
                 }
@@ -543,6 +581,25 @@ static Type infer_expr_type(AstNode *program, AstNode *fn, AstNode *expr) {
             Type found_t = find_ident_type_in_node(program, program, var_name);
             if (found_t != (Type)-1) return found_t;
         }
+    }
+    if (expr->type == NODE_NEW) {
+        return TY_CLASS;
+    }
+    if (expr->type == NODE_BINARY) {
+        if (strcmp(expr->as.binary.op, "==") == 0 || strcmp(expr->as.binary.op, "!=") == 0 ||
+            strcmp(expr->as.binary.op, "<") == 0 || strcmp(expr->as.binary.op, ">") == 0 ||
+            strcmp(expr->as.binary.op, "<=") == 0 || strcmp(expr->as.binary.op, ">=") == 0 ||
+            strcmp(expr->as.binary.op, "&&") == 0 || strcmp(expr->as.binary.op, "||") == 0) {
+            return TY_BOOL;
+        }
+        Type lt = infer_expr_type(program, fn, expr->as.binary.left);
+        if (lt == TY_CLASS) return TY_CLASS;
+        if (lt == TY_FLOAT || infer_expr_type(program, fn, expr->as.binary.right) == TY_FLOAT) return TY_FLOAT;
+        return TY_INT;
+    }
+    if (expr->type == NODE_UNARY) {
+        if (strcmp(expr->as.unary.op, "!") == 0) return TY_BOOL;
+        return infer_expr_type(program, fn, expr->as.unary.operand);
     }
 
     return TY_INT;
@@ -1004,15 +1061,58 @@ static void gen_expr(CodegenCtx *ctx, AstNode *expr) {
             sb_append(&ctx->sb, "]");
             break;
 
-        case NODE_BINARY:
-            sb_append(&ctx->sb, "(");
-            gen_expr(ctx, expr->as.binary.left);
-            sb_appendf(&ctx->sb, " %s ", expr->as.binary.op);
-            gen_expr(ctx, expr->as.binary.right);
-            sb_append(&ctx->sb, ")");
-            break;
+        case NODE_BINARY: {
+            Type lt = infer_expr_type(ctx->program, ctx->current_function, expr->as.binary.left);
+            Type rt = infer_expr_type(ctx->program, ctx->current_function, expr->as.binary.right);
+            const char *lcls = get_expr_elem_class_name(ctx, expr->as.binary.left);
+            const char *rcls = get_expr_elem_class_name(ctx, expr->as.binary.right);
 
-        case NODE_UNARY:
+            if (lt == TY_CLASS && rt == TY_CLASS && lcls && rcls && strcmp(lcls, rcls) == 0 && is_struct_name(ctx, lcls)) {
+                AstNode *op_fn = NULL;
+                if (ctx->program && ctx->program->type == NODE_PROGRAM) {
+                    for (int i = 0; i < ctx->program->as.program.count; i++) {
+                        AstNode *fn = ctx->program->as.program.functions[i];
+                        if (fn->as.function.is_operator &&
+                            strcmp(fn->as.function.operator_symbol, expr->as.binary.op) == 0 &&
+                            fn->as.function.param_count == 2 &&
+                            fn->as.function.param_class_names[0] &&
+                            strcmp(fn->as.function.param_class_names[0], lcls) == 0) {
+                            op_fn = fn;
+                            break;
+                        }
+                    }
+                }
+                if (op_fn) {
+                    const char *c_fn_name = get_operator_fn_c_name(lcls, expr->as.binary.op, 2);
+                    sb_appendf(&ctx->sb, "%s(", c_fn_name);
+                    gen_expr(ctx, expr->as.binary.left);
+                    sb_append(&ctx->sb, ", ");
+                    gen_expr(ctx, expr->as.binary.right);
+                    sb_append(&ctx->sb, ")");
+                } else {
+                    char short_msg[256];
+                    snprintf(short_msg, sizeof(short_msg), "no 'operator%s' defined for struct '%s'", expr->as.binary.op, lcls);
+                    char note_msg[256];
+                    if (strcmp(expr->as.binary.op, "==") == 0 || strcmp(expr->as.binary.op, "!=") == 0) {
+                        snprintf(note_msg, sizeof(note_msg), "fn operator%s(a: %s, b: %s) -> bool { ... }", expr->as.binary.op, lcls, lcls);
+                    } else {
+                        snprintf(note_msg, sizeof(note_msg), "fn operator%s(a: %s, b: %s) -> %s { ... }", expr->as.binary.op, lcls, lcls, lcls);
+                    }
+                    ErrorLocation loc = {get_error_filename(), expr->line, expr->col};
+                    print_formatted_error(short_msg, loc, "missing operator definition", note_msg, NULL, NULL, NULL);
+                    exit(1);
+                }
+            } else {
+                sb_append(&ctx->sb, "(");
+                gen_expr(ctx, expr->as.binary.left);
+                sb_appendf(&ctx->sb, " %s ", expr->as.binary.op);
+                gen_expr(ctx, expr->as.binary.right);
+                sb_append(&ctx->sb, ")");
+            }
+            break;
+        }
+
+        case NODE_UNARY: {
             if (strcmp(expr->as.unary.op, "&") == 0) {
                 Type ot = infer_expr_type(ctx->program, ctx->current_function, expr->as.unary.operand);
                 const char *ocls = get_expr_elem_class_name(ctx, expr->as.unary.operand);
@@ -1020,11 +1120,46 @@ static void gen_expr(CodegenCtx *ctx, AstNode *expr) {
                     gen_expr(ctx, expr->as.unary.operand);
                     break;
                 }
+            } else if (strcmp(expr->as.unary.op, "-") == 0) {
+                Type ot = infer_expr_type(ctx->program, ctx->current_function, expr->as.unary.operand);
+                const char *ocls = get_expr_elem_class_name(ctx, expr->as.unary.operand);
+                if (ot == TY_CLASS && ocls && is_struct_name(ctx, ocls)) {
+                    AstNode *op_fn = NULL;
+                    if (ctx->program && ctx->program->type == NODE_PROGRAM) {
+                        for (int i = 0; i < ctx->program->as.program.count; i++) {
+                            AstNode *fn = ctx->program->as.program.functions[i];
+                            if (fn->as.function.is_operator &&
+                                strcmp(fn->as.function.operator_symbol, "-") == 0 &&
+                                fn->as.function.param_count == 1 &&
+                                fn->as.function.param_class_names[0] &&
+                                strcmp(fn->as.function.param_class_names[0], ocls) == 0) {
+                                op_fn = fn;
+                                break;
+                            }
+                        }
+                    }
+                    if (op_fn) {
+                        const char *c_fn_name = get_operator_fn_c_name(ocls, "-", 1);
+                        sb_appendf(&ctx->sb, "%s(", c_fn_name);
+                        gen_expr(ctx, expr->as.unary.operand);
+                        sb_append(&ctx->sb, ")");
+                        break;
+                    } else {
+                        char short_msg[256];
+                        snprintf(short_msg, sizeof(short_msg), "no 'operator-' defined for struct '%s'", ocls);
+                        char note_msg[256];
+                        snprintf(note_msg, sizeof(note_msg), "fn operator-(a: %s) -> %s { ... }", ocls, ocls);
+                        ErrorLocation loc = {get_error_filename(), expr->line, expr->col};
+                        print_formatted_error(short_msg, loc, "missing operator definition", note_msg, NULL, NULL, NULL);
+                        exit(1);
+                    }
+                }
             }
             sb_appendf(&ctx->sb, "(%s", expr->as.unary.op);
             gen_expr(ctx, expr->as.unary.operand);
             sb_append(&ctx->sb, ")");
             break;
+        }
 
         case NODE_CALL: {
             const char *callee = expr->as.call.callee;
@@ -2111,7 +2246,11 @@ static void gen_function(CodegenCtx *ctx, AstNode *fn) {
         sb_append(&ctx->sb, "int main(int __cco_main_argc, char **__cco_main_argv) ");
     } else {
         const char *ret_type_str = c_type_str_decl_full(ctx, fn->as.function.return_type, fn->as.function.return_class_name, fn->as.function.return_is_array, fn->as.function.return_is_map, fn->as.function.returns_heap_pointer);
-        sb_appendf(&ctx->sb, "%s %s(", ret_type_str, fn->as.function.name);
+        const char *c_fn_name = fn->as.function.name;
+        if (fn->as.function.is_operator) {
+            c_fn_name = get_operator_fn_c_name(fn->as.function.param_class_names[0], fn->as.function.operator_symbol, fn->as.function.param_count);
+        }
+        sb_appendf(&ctx->sb, "%s %s(", ret_type_str, c_fn_name);
 
         if (fn->as.function.param_count == 0) {
             sb_append(&ctx->sb, "void");
@@ -2455,6 +2594,29 @@ char *generate_c_code(AstNode *program, AstArena *arena) {
 
     // Class struct definitions, retain/release/new helpers
     gen_class_helpers(&ctx, program);
+
+    // Function prototypes
+    for (int i = 0; i < program->as.program.count; i++) {
+        AstNode *fn = program->as.program.functions[i];
+        if (strcmp(fn->as.function.name, "main") == 0) continue;
+        const char *ret_type_str = c_type_str_decl_full(&ctx, fn->as.function.return_type, fn->as.function.return_class_name, fn->as.function.return_is_array, fn->as.function.return_is_map, fn->as.function.returns_heap_pointer);
+        const char *c_fn_name = fn->as.function.name;
+        if (fn->as.function.is_operator) {
+            c_fn_name = get_operator_fn_c_name(fn->as.function.param_class_names[0], fn->as.function.operator_symbol, fn->as.function.param_count);
+        }
+        sb_appendf(&ctx.sb, "%s %s(", ret_type_str, c_fn_name);
+        if (fn->as.function.param_count == 0) {
+            sb_append(&ctx.sb, "void");
+        } else {
+            for (int p = 0; p < fn->as.function.param_count; p++) {
+                if (p > 0) sb_append(&ctx.sb, ", ");
+                bool is_bor = fn->as.function.param_is_borrowed ? fn->as.function.param_is_borrowed[p] : false;
+                sb_appendf(&ctx.sb, "%s %s", c_type_str_full(&ctx, fn->as.function.param_types[p], fn->as.function.param_class_names[p], is_bor, false), fn->as.function.param_names[p]);
+            }
+        }
+        sb_append(&ctx.sb, ");\n");
+    }
+    if (program->as.program.count > 0) sb_append(&ctx.sb, "\n");
 
     // Method definitions
     for (int i = 0; i < program->as.program.class_count; i++) {
