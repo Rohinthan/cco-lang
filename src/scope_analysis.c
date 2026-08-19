@@ -116,6 +116,7 @@ static bool is_stdlib_heap_fn(const char *name) {
     return strcmp(name, "concat") == 0 ||
            strcmp(name, "substring") == 0 ||
            strcmp(name, "read_file") == 0 ||
+           strcmp(name, "read_line") == 0 ||
            strcmp(name, "program_name") == 0 ||
            strcmp(name, "args") == 0 ||
            strcmp(name, "keys") == 0;
@@ -161,7 +162,7 @@ static void analyze_block(ScopeStack *stack, AstNode *block_node, bool is_loop) 
             if (owned_idx != -1 && val_is_heap) {
                 stmt->free_old_on_reassign = true;
                 bool val_is_str = (stmt->as.assign.value->type == NODE_LITERAL && stmt->as.assign.value->as.literal.lit_type == TY_STRING) ||
-                                  (stmt->as.assign.value->type == NODE_CALL && (strcmp(stmt->as.assign.value->as.call.callee, "concat") == 0 || strcmp(stmt->as.assign.value->as.call.callee, "substring") == 0 || strcmp(stmt->as.assign.value->as.call.callee, "read_file") == 0 || strcmp(stmt->as.assign.value->as.call.callee, "program_name") == 0));
+                                  (stmt->as.assign.value->type == NODE_CALL && (strcmp(stmt->as.assign.value->as.call.callee, "concat") == 0 || strcmp(stmt->as.assign.value->as.call.callee, "substring") == 0 || strcmp(stmt->as.assign.value->as.call.callee, "read_file") == 0 || strcmp(stmt->as.assign.value->as.call.callee, "read_line") == 0 || strcmp(stmt->as.assign.value->as.call.callee, "program_name") == 0));
                 bool val_is_arr = !val_is_str;
                 add_free_to_node(stack, stmt, stmt->as.assign.name, val_is_arr);
             }
