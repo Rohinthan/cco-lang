@@ -1,0 +1,24 @@
+struct Vec2 {
+    x: float;
+    y: float;
+}
+
+fn operator-(a: Vec2) -> Vec2 {
+    return Vec2 { x: -a.x, y: -a.y };
+}
+
+fn operator-(a: Vec2, b: Vec2) -> Vec2 {
+    return Vec2 { x: a.x - b.x, y: a.y - b.y };
+}
+
+fn main() -> int {
+    let p: Vec2 = Vec2 { x: 5.0, y: -12.5 };
+    let q: Vec2 = Vec2 { x: 2.0, y: 3.0 };
+    let neg_p: Vec2 = -p;
+    let sub_pq: Vec2 = p - q;
+    print(neg_p.x);
+    print(neg_p.y);
+    print(sub_pq.x);
+    print(sub_pq.y);
+    return 0;
+}
