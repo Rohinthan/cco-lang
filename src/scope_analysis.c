@@ -158,10 +158,11 @@ static void analyze_block(ScopeStack *stack, AstNode *block_node, bool is_loop) 
 
             int scope_idx = -1;
             int owned_idx = find_owned_in_stack(stack, stmt->as.assign.name, &scope_idx);
-            bool val_is_heap = ((stmt->as.assign.value->type == NODE_ALLOC && !stmt->as.assign.value->as.alloc.is_map && stmt->as.assign.value->as.alloc.elem_type != TY_CLASS) || (stmt->as.assign.value->type == NODE_LITERAL && stmt->as.assign.value->as.literal.lit_type == TY_STRING) || (stmt->as.assign.value->type == NODE_CALL && is_stdlib_heap_fn(stmt->as.assign.value->as.call.callee)));
+            bool val_is_heap = ((stmt->as.assign.value->type == NODE_ALLOC && !stmt->as.assign.value->as.alloc.is_map && stmt->as.assign.value->as.alloc.elem_type != TY_CLASS) || (stmt->as.assign.value->type == NODE_LITERAL && stmt->as.assign.value->as.literal.lit_type == TY_STRING) || (stmt->as.assign.value->type == NODE_FSTRING) || (stmt->as.assign.value->type == NODE_CALL && is_stdlib_heap_fn(stmt->as.assign.value->as.call.callee)));
             if (owned_idx != -1 && val_is_heap) {
                 stmt->free_old_on_reassign = true;
                 bool val_is_str = (stmt->as.assign.value->type == NODE_LITERAL && stmt->as.assign.value->as.literal.lit_type == TY_STRING) ||
+                                  (stmt->as.assign.value->type == NODE_FSTRING) ||
                                   (stmt->as.assign.value->type == NODE_CALL && (strcmp(stmt->as.assign.value->as.call.callee, "concat") == 0 || strcmp(stmt->as.assign.value->as.call.callee, "substring") == 0 || strcmp(stmt->as.assign.value->as.call.callee, "read_file") == 0 || strcmp(stmt->as.assign.value->as.call.callee, "read_line") == 0 || strcmp(stmt->as.assign.value->as.call.callee, "program_name") == 0));
                 bool val_is_arr = !val_is_str;
                 add_free_to_node(stack, stmt, stmt->as.assign.name, val_is_arr);
@@ -408,6 +409,11 @@ static void analyze_node(ScopeStack *stack, AstNode *node) {
         }
         case NODE_INDEX:
             analyze_node(stack, node->as.index.index);
+            break;
+        case NODE_FSTRING:
+            for (int i = 0; i < node->as.fstring.part_count; i++) {
+                analyze_node(stack, node->as.fstring.parts[i]);
+            }
             break;
         default:
             break;
@@ -1683,6 +1689,11 @@ static void analyze_own_node(OwnScopeStack *stack, AstNode *node) {
             break;
         case NODE_MEMBER:
             analyze_own_node(stack, node->as.member.object);
+            break;
+        case NODE_FSTRING:
+            for (int i = 0; i < node->as.fstring.part_count; i++) {
+                analyze_own_node(stack, node->as.fstring.parts[i]);
+            }
             break;
         default:
             break;
