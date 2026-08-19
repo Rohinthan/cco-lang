@@ -1,0 +1,13 @@
+class Point {
+    x: int;
+    y: int;
+}
+
+fn operator+(a: Point, b: Point) -> Point {
+    let p: Point = alloc(Point, 1)[0];
+    return p;
+}
+
+fn main() -> int {
+    return 0;
+}

@@ -1,0 +1,7 @@
+error: operator overloading is only supported for struct types in this version — 'Point' is a class
+  --> tests/programs/79_operator_overload_class_ERROR.cco:6:14
+    |
+  6 | fn operator+(a: Point, b: Point) -> Point {
+    |              ^ classes not supported for operator overloading in v16
+    |
+note: structs are copied values with no ownership question; class operator overloading is a separate feature for later
