@@ -1,6 +1,5 @@
 # Cco v15.0 Implementation Report: F-String Interpolation
 
-**Author**: Antigravity  
 **Version**: v15.0  
 **Status**: Completed & Verified (74/74 Integration Tests Passing, 98/98 Lexer Comparison Files Passing, 0 Memory Leaks under Valgrind)
 
