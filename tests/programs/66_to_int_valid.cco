@@ -1,0 +1,13 @@
+fn main() -> int {
+    let a: int = to_int("42");
+    print(a);
+    let b: int = to_int(" -100 ");
+    print(b);
+    let c: int = to_int("0");
+    print(c);
+    let f1: float = to_float("3.14159");
+    print(f1);
+    let f2: float = to_float(" -0.5 ");
+    print(f2);
+    return 0;
+}
