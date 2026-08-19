@@ -1,0 +1,9 @@
+fn main() -> int {
+    let count: int = arg_count();
+    print(count);
+    let argv: string[] = args();
+    for a in argv {
+        print(a);
+    }
+    return 0;
+}
