@@ -1727,28 +1727,33 @@ static void gen_stmt(CodegenCtx *ctx, AstNode *stmt) {
 
         case NODE_RETURN:
             if (stmt->as.return_stmt.value) {
+                Type ret_type = TY_INT;
+                const char *ret_class = NULL;
+                bool ret_is_array = false;
+                bool ret_heap = false;
+                if (ctx->current_function) {
+                    if (ctx->current_function->type == NODE_FUNCTION) {
+                        ret_type = ctx->current_function->as.function.return_type;
+                        ret_class = ctx->current_function->as.function.return_class_name;
+                        ret_is_array = ctx->current_function->as.function.return_is_array;
+                        ret_heap = ctx->current_function->as.function.returns_heap_pointer;
+                    } else if (ctx->current_function->type == NODE_METHOD) {
+                        ret_type = ctx->current_function->as.method.return_type;
+                        ret_class = ctx->current_function->as.method.return_class_name;
+                        ret_is_array = ctx->current_function->as.method.return_is_array;
+                        ret_heap = ctx->current_function->as.method.returns_heap_pointer;
+                    }
+                }
+
                 if (stmt->frees_count > 0 || stmt->releases_count > 0) {
                     emit_indent(ctx);
-                    Type ret_type = TY_INT;
-                    const char *ret_class = NULL;
-                    bool ret_is_array = false;
-                    bool ret_heap = false;
-                    if (ctx->current_function) {
-                        if (ctx->current_function->type == NODE_FUNCTION) {
-                            ret_type = ctx->current_function->as.function.return_type;
-                            ret_class = ctx->current_function->as.function.return_class_name;
-                            ret_is_array = ctx->current_function->as.function.return_is_array;
-                            ret_heap = ctx->current_function->as.function.returns_heap_pointer;
-                        } else if (ctx->current_function->type == NODE_METHOD) {
-                            ret_type = ctx->current_function->as.method.return_type;
-                            ret_class = ctx->current_function->as.method.return_class_name;
-                            ret_is_array = ctx->current_function->as.method.return_is_array;
-                            ret_heap = ctx->current_function->as.method.returns_heap_pointer;
-                        }
-                    }
                     const char *ret_type_str = c_type_str_decl(ctx, ret_type, ret_class, ret_is_array, ret_heap);
                     sb_appendf(&ctx->sb, "%s __cco_ret_val = ", ret_type_str);
-                    gen_expr(ctx, stmt->as.return_stmt.value);
+                    if (ret_type == TY_STRING && !ret_is_array && stmt->as.return_stmt.value->type == NODE_LITERAL) {
+                        sb_appendf(&ctx->sb, "strdup(\"%s\")", stmt->as.return_stmt.value->as.literal.val.s);
+                    } else {
+                        gen_expr(ctx, stmt->as.return_stmt.value);
+                    }
                     sb_append(&ctx->sb, ";\n");
 
                     emit_frees(ctx, stmt);
@@ -1759,7 +1764,11 @@ static void gen_stmt(CodegenCtx *ctx, AstNode *stmt) {
                 } else {
                     emit_indent(ctx);
                     sb_append(&ctx->sb, "return ");
-                    gen_expr(ctx, stmt->as.return_stmt.value);
+                    if (ret_type == TY_STRING && !ret_is_array && stmt->as.return_stmt.value->type == NODE_LITERAL) {
+                        sb_appendf(&ctx->sb, "strdup(\"%s\")", stmt->as.return_stmt.value->as.literal.val.s);
+                    } else {
+                        gen_expr(ctx, stmt->as.return_stmt.value);
+                    }
                     sb_append(&ctx->sb, ";\n");
                 }
             } else {
