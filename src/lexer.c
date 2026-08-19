@@ -109,6 +109,7 @@ TokenArray lex_source(const char *source) {
         // Strings
         if (c == '"') {
             int start_col = col;
+            int start_line = line;
             pos++; // Skip opening quote
             col++;
             int start_pos = pos;
@@ -116,19 +117,16 @@ TokenArray lex_source(const char *source) {
                 if (source[pos] == '\\' && source[pos + 1] != '\0') {
                     pos += 2;
                     col += 2;
+                } else if (source[pos] == '\n') {
+                    fatal_lexer_error(start_line, start_col, "unterminated string literal");
                 } else {
-                    if (source[pos] == '\n') {
-                        line++;
-                        col = 1;
-                    } else {
-                        col++;
-                    }
+                    col++;
                     pos++;
                 }
             }
 
             if (source[pos] == '\0') {
-                fatal_lexer_error(line, start_col, "unterminated string literal");
+                fatal_lexer_error(start_line, start_col, "unterminated string literal");
             }
 
             int len = pos - start_pos;
@@ -139,7 +137,7 @@ TokenArray lex_source(const char *source) {
             pos++; // Skip closing quote
             col++;
 
-            Token tok = {TOKEN_STRING_LIT, buf, line, start_col};
+            Token tok = {TOKEN_STRING_LIT, buf, start_line, start_col};
             append_token(&array, tok);
             continue;
         }
@@ -228,6 +226,7 @@ TokenArray lex_source(const char *source) {
         // Character Literals
         if (c == '\'') {
             int start_col = col;
+            int start_line = line;
             pos++; // Skip opening quote
             col++;
             char ch_val = '\0';
@@ -241,17 +240,21 @@ TokenArray lex_source(const char *source) {
                 else if (source[pos] == '\'') ch_val = '\'';
                 else ch_val = source[pos];
                 pos++; col++;
-            } else {
+            } else if (source[pos] != '\0' && source[pos] != '\n' && source[pos] != '\'') {
                 ch_val = source[pos];
                 pos++; col++;
+            } else {
+                fatal_lexer_error(start_line, start_col, "unterminated character literal");
             }
             if (source[pos] == '\'') {
                 pos++; col++;
+            } else {
+                fatal_lexer_error(start_line, start_col, "unterminated character literal");
             }
             char *buf = malloc(2);
             buf[0] = ch_val;
             buf[1] = '\0';
-            Token tok = {TOKEN_CHAR_LIT, buf, line, start_col};
+            Token tok = {TOKEN_CHAR_LIT, buf, start_line, start_col};
             append_token(&array, tok);
             continue;
         }
