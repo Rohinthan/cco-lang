@@ -1,0 +1,2 @@
+literal braces: {not code} and value: 10
+just braces: {} and single open { and close }
