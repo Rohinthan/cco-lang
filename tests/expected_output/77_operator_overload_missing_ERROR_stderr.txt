@@ -1,0 +1,7 @@
+error: no 'operator+' defined for struct 'Vec2'
+  --> tests/programs/77_operator_overload_missing_ERROR.cco:9:21
+    |
+  9 |     let r: Vec2 = p + q;
+    |                     ^ missing operator definition
+    |
+note: fn operator+(a: Vec2, b: Vec2) -> Vec2 { ... }
