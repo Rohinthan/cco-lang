@@ -97,12 +97,26 @@ void test_dump_tokens_format() {
     printf("[PASS] test_dump_tokens_format\n");
 }
 
+void test_interface_tokens() {
+    const char *src = "interface Printable impl Self";
+    TokenArray arr = lex_source(src);
+    assert(arr.count == 5);
+    assert(arr.tokens[0].type == TOKEN_INTERFACE);
+    assert(arr.tokens[1].type == TOKEN_IDENT);
+    assert(arr.tokens[2].type == TOKEN_IMPL);
+    assert(arr.tokens[3].type == TOKEN_SELF_TYPE);
+    assert(arr.tokens[4].type == TOKEN_EOF);
+    free_tokens(&arr);
+    printf("[PASS] test_interface_tokens\n");
+}
+
 int main() {
     printf("Running Lexer Unit Tests...\n");
     test_basic_tokens();
     test_string_and_comments();
     test_class_tokens();
     test_dump_tokens_format();
+    test_interface_tokens();
     printf("All Lexer tests passed!\n");
     return 0;
 }

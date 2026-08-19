@@ -3,6 +3,7 @@
 #include "ast.h"
 #include "parser.h"
 #include "module_resolver.h"
+#include "trait_resolver.h"
 #include "scope_analysis.h"
 #include "codegen.h"
 #include <stdio.h>
@@ -83,6 +84,9 @@ int main(int argc, char **argv) {
 
     AstArena *arena = create_ast_arena();
     AstNode *ast = resolve_program(input_path, arena);
+
+    // Trait conformance checking and monomorphization
+    resolve_and_monomorphize_traits(ast, arena);
 
     // 3. Scope Analysis & Auto-free Annotation Pass
     analyze_scopes(ast, arena);

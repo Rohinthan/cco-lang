@@ -1,0 +1,7 @@
+error: interfaces can only be implemented by classes — 'Vec2' is a struct, which cannot have methods
+  --> tests/programs/84_interface_struct_impl_ERROR.cco:10:1
+    |
+ 10 | impl Printable for Vec2;
+    | ^ structs cannot implement interfaces
+    |
+note: structs are lightweight value types without methods in Cco

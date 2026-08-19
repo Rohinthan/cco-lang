@@ -1,0 +1,6 @@
+error: 'reset' is not part of interface 'Printable' — only interface methods can be called on a `impl Trait`-typed parameter
+  --> tests/programs/86_interface_non_interface_method_ERROR.cco:23:10
+    |
+ 23 |     item.reset();
+    |          ^ not part of interface
+    |

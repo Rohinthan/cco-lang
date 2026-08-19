@@ -111,6 +111,32 @@ ClassTable *build_class_table(AstNode *program, AstArena *arena) {
         }
     }
 
+    ct->interface_count = program->as.program.interface_count;
+    ct->interface_capacity = ct->interface_count;
+    if (ct->interface_count > 0) {
+        ct->interfaces = (InterfaceDef *)arena_alloc_array(arena, ct->interface_count, sizeof(InterfaceDef));
+    } else {
+        ct->interfaces = NULL;
+    }
+
+    for (int i = 0; i < program->as.program.interface_count; i++) {
+        AstNode *iface_node = program->as.program.interfaces[i];
+        InterfaceDef *idef = &ct->interfaces[i];
+        idef->name = arena_strdup(arena, iface_node->as.interface_decl.name);
+        idef->method_count = iface_node->as.interface_decl.method_count;
+        idef->interface_node = iface_node;
+        if (idef->method_count > 0) {
+            idef->methods = (InterfaceMethodInfo *)arena_alloc_array(arena, idef->method_count, sizeof(InterfaceMethodInfo));
+            for (int m = 0; m < idef->method_count; m++) {
+                AstNode *m_node = iface_node->as.interface_decl.methods[m];
+                idef->methods[m].name = arena_strdup(arena, m_node->as.interface_method.name);
+                idef->methods[m].method_node = m_node;
+            }
+        } else {
+            idef->methods = NULL;
+        }
+    }
+
     return ct;
 }
 
@@ -144,6 +170,26 @@ EnumDef *find_enum(ClassTable *ct, const char *name) {
     return NULL;
 }
 
+InterfaceDef *find_interface(ClassTable *ct, const char *name) {
+    if (!ct || !name) return NULL;
+    for (int i = 0; i < ct->interface_count; i++) {
+        if (strcmp(ct->interfaces[i].name, name) == 0) {
+            return &ct->interfaces[i];
+        }
+    }
+    return NULL;
+}
+
+InterfaceMethodInfo *find_interface_method(InterfaceDef *idef, const char *method_name) {
+    if (!idef || !method_name) return NULL;
+    for (int i = 0; i < idef->method_count; i++) {
+        if (strcmp(idef->methods[i].name, method_name) == 0) {
+            return &idef->methods[i];
+        }
+    }
+    return NULL;
+}
+
 EnumVariantDef *find_enum_variant(EnumDef *edef, const char *variant_name) {
     if (!edef || !variant_name) return NULL;
     for (int i = 0; i < edef->variant_count; i++) {
@@ -169,6 +215,7 @@ TypeKind resolve_type_name(ClassTable *ct, const char *name) {
     if (find_class(ct, name) != NULL) return TYPE_KIND_CLASS;
     if (find_struct(ct, name) != NULL) return TYPE_KIND_STRUCT;
     if (find_enum(ct, name) != NULL) return TYPE_KIND_ENUM;
+    if (find_interface(ct, name) != NULL) return TYPE_KIND_INTERFACE;
     return TYPE_KIND_UNKNOWN;
 }
 

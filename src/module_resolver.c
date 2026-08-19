@@ -38,6 +38,14 @@ typedef struct {
     int enum_count;
     int enum_cap;
 
+    AstNode **merged_interfaces;
+    int interface_count;
+    int interface_cap;
+
+    AstNode **merged_impls;
+    int impl_count;
+    int impl_cap;
+
     AstNode **merged_functions;
     int fn_count;
     int fn_cap;
@@ -228,6 +236,80 @@ static void check_and_add_enum(ResolverCtx *ctx, AstNode *en, const char *canoni
     ctx->merged_enums[ctx->enum_count++] = en;
 }
 
+static void check_and_add_interface(ResolverCtx *ctx, AstNode *iface, const char *canonical_path) {
+    iface->source_file = canonical_path;
+    const char *iname = iface->as.interface_decl.name;
+    for (int i = 0; i < ctx->interface_count; i++) {
+        AstNode *existing = ctx->merged_interfaces[i];
+        if (strcmp(existing->as.interface_decl.name, iname) == 0) {
+            char short_msg[256];
+            snprintf(short_msg, sizeof(short_msg), "duplicate definition of '%s'", iname);
+            ErrorLocation primary = {iface->source_file, iface->line, iface->col};
+            ErrorLocation note_loc = {existing->source_file, existing->line, existing->col};
+            print_formatted_error(short_msg, primary, "duplicate definition", "first defined here:", &note_loc, "first defined here", NULL);
+        }
+    }
+    for (int i = 0; i < ctx->class_count; i++) {
+        AstNode *existing = ctx->merged_classes[i];
+        if (strcmp(existing->as.class_decl.name, iname) == 0) {
+            char short_msg[256];
+            snprintf(short_msg, sizeof(short_msg), "duplicate definition of '%s'", iname);
+            ErrorLocation primary = {iface->source_file, iface->line, iface->col};
+            ErrorLocation note_loc = {existing->source_file, existing->line, existing->col};
+            print_formatted_error(short_msg, primary, "duplicate definition", "first defined here:", &note_loc, "first defined here", NULL);
+        }
+    }
+    for (int i = 0; i < ctx->struct_count; i++) {
+        AstNode *existing = ctx->merged_structs[i];
+        if (strcmp(existing->as.struct_decl.name, iname) == 0) {
+            char short_msg[256];
+            snprintf(short_msg, sizeof(short_msg), "duplicate definition of '%s'", iname);
+            ErrorLocation primary = {iface->source_file, iface->line, iface->col};
+            ErrorLocation note_loc = {existing->source_file, existing->line, existing->col};
+            print_formatted_error(short_msg, primary, "duplicate definition", "first defined here:", &note_loc, "first defined here", NULL);
+        }
+    }
+    for (int i = 0; i < ctx->enum_count; i++) {
+        AstNode *existing = ctx->merged_enums[i];
+        if (strcmp(existing->as.enum_decl.name, iname) == 0) {
+            char short_msg[256];
+            snprintf(short_msg, sizeof(short_msg), "duplicate definition of '%s'", iname);
+            ErrorLocation primary = {iface->source_file, iface->line, iface->col};
+            ErrorLocation note_loc = {existing->source_file, existing->line, existing->col};
+            print_formatted_error(short_msg, primary, "duplicate definition", "first defined here:", &note_loc, "first defined here", NULL);
+        }
+    }
+
+    if (ctx->interface_count >= ctx->interface_cap) {
+        ctx->interface_cap = ctx->interface_cap == 0 ? 4 : ctx->interface_cap * 2;
+        ctx->merged_interfaces = realloc(ctx->merged_interfaces, ctx->interface_cap * sizeof(AstNode *));
+    }
+    ctx->merged_interfaces[ctx->interface_count++] = iface;
+}
+
+static void check_and_add_impl(ResolverCtx *ctx, AstNode *imp, const char *canonical_path) {
+    imp->source_file = canonical_path;
+    const char *iname = imp->as.impl_decl.interface_name;
+    const char *cname = imp->as.impl_decl.class_name;
+    for (int i = 0; i < ctx->impl_count; i++) {
+        AstNode *existing = ctx->merged_impls[i];
+        if (strcmp(existing->as.impl_decl.interface_name, iname) == 0 &&
+            strcmp(existing->as.impl_decl.class_name, cname) == 0) {
+            char short_msg[256];
+            snprintf(short_msg, sizeof(short_msg), "duplicate impl of '%s' for '%s'", iname, cname);
+            ErrorLocation primary = {imp->source_file, imp->line, imp->col};
+            ErrorLocation note_loc = {existing->source_file, existing->line, existing->col};
+            print_formatted_error(short_msg, primary, "duplicate impl", "first defined here:", &note_loc, "first defined here", NULL);
+        }
+    }
+
+    if (ctx->impl_count >= ctx->impl_cap) {
+        ctx->impl_cap = ctx->impl_cap == 0 ? 4 : ctx->impl_cap * 2;
+        ctx->merged_impls = realloc(ctx->merged_impls, ctx->impl_cap * sizeof(AstNode *));
+    }
+    ctx->merged_impls[ctx->impl_count++] = imp;
+}
+
 static void check_and_add_function(ResolverCtx *ctx, AstNode *fn, const char *canonical_path) {
     fn->source_file = canonical_path;
     const char *fname = fn->as.function.name;
@@ -365,6 +447,18 @@ static void resolve_file_rec(ResolverCtx *ctx, const char *raw_path, const char 
         check_and_add_enum(ctx, en, arena_display_path);
     }
 
+    for (int i = 0; i < file_ast->as.program.interface_count; i++) {
+        AstNode *iface = file_ast->as.program.interfaces[i];
+        tag_nodes_with_source(iface, arena_display_path);
+        check_and_add_interface(ctx, iface, arena_display_path);
+    }
+
+    for (int i = 0; i < file_ast->as.program.impl_count; i++) {
+        AstNode *imp = file_ast->as.program.impls[i];
+        tag_nodes_with_source(imp, arena_display_path);
+        check_and_add_impl(ctx, imp, arena_display_path);
+    }
+
     for (int i = 0; i < file_ast->as.program.count; i++) {
         AstNode *fn = file_ast->as.program.functions[i];
         tag_nodes_with_source(fn, arena_display_path);
@@ -408,6 +502,18 @@ AstNode *resolve_program(const char *entry_path, AstArena *arena) {
     }
     merged_prog->as.program.enum_count = ctx.enum_count;
 
+    merged_prog->as.program.interfaces = (AstNode **)arena_alloc_array(arena, ctx.interface_count, sizeof(AstNode *));
+    if (ctx.interface_count > 0 && ctx.merged_interfaces) {
+        memcpy(merged_prog->as.program.interfaces, ctx.merged_interfaces, ctx.interface_count * sizeof(AstNode *));
+    }
+    merged_prog->as.program.interface_count = ctx.interface_count;
+
+    merged_prog->as.program.impls = (AstNode **)arena_alloc_array(arena, ctx.impl_count, sizeof(AstNode *));
+    if (ctx.impl_count > 0 && ctx.merged_impls) {
+        memcpy(merged_prog->as.program.impls, ctx.merged_impls, ctx.impl_count * sizeof(AstNode *));
+    }
+    merged_prog->as.program.impl_count = ctx.impl_count;
+
     merged_prog->as.program.functions = (AstNode **)arena_alloc_array(arena, ctx.fn_count, sizeof(AstNode *));
     if (ctx.fn_count > 0 && ctx.merged_functions) {
         memcpy(merged_prog->as.program.functions, ctx.merged_functions, ctx.fn_count * sizeof(AstNode *));
@@ -417,6 +523,8 @@ AstNode *resolve_program(const char *entry_path, AstArena *arena) {
     if (ctx.merged_classes) free(ctx.merged_classes);
     if (ctx.merged_structs) free(ctx.merged_structs);
     if (ctx.merged_enums) free(ctx.merged_enums);
+    if (ctx.merged_interfaces) free(ctx.merged_interfaces);
+    if (ctx.merged_impls) free(ctx.merged_impls);
     if (ctx.merged_functions) free(ctx.merged_functions);
     for (int i = 0; i < ctx.resolved_count; i++) {
         free(ctx.resolved_paths[i]);

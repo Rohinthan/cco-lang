@@ -1,0 +1,19 @@
+interface Printable {
+    fn describe(self) -> void;
+}
+
+class Point {
+    x: int;
+    y: int;
+
+    fn describe(self) -> int {
+        return self.x + self.y;
+    }
+}
+
+impl Printable for Point;
+
+fn main() -> int {
+    let p: Point = Point { x: 1, y: 2 };
+    return 0;
+}

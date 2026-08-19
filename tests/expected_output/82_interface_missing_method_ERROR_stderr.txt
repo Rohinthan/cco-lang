@@ -1,0 +1,6 @@
+error: 'Point' does not implement 'Printable' — missing method 'describe(self) -> void'
+  --> tests/programs/82_interface_missing_method_ERROR.cco:10:1
+    |
+ 10 | impl Printable for Point;
+    | ^ missing required interface method
+    |

@@ -60,14 +60,27 @@ Parser create_parser(TokenArray tokens, AstArena *arena) {
 static AstNode *parse_expr(Parser *p);
 static AstNode *parse_block(Parser *p);
 static AstNode *parse_statement(Parser *p);
-static Type parse_type_with_class(Parser *p, char **out_class_name, bool *out_is_borrowed, bool *out_is_array, bool *out_is_map, Type *out_key_type) {
+
+static Type parse_type_full(Parser *p, char **out_class_name, bool *out_is_borrowed, bool *out_is_array, bool *out_is_map, Type *out_key_type, bool *out_is_impl_trait, bool allow_self, bool allow_impl) {
     if (out_class_name) *out_class_name = NULL;
     if (out_is_borrowed) *out_is_borrowed = false;
     if (out_is_array) *out_is_array = false;
     if (out_is_map) *out_is_map = false;
     if (out_key_type) *out_key_type = TY_INT;
+    if (out_is_impl_trait) *out_is_impl_trait = false;
 
     bool is_borrowed = match(p, TOKEN_AMP);
+
+    if (match(p, TOKEN_IMPL)) {
+        if (!allow_impl) {
+            fatal_parser_error(previous(p).line, previous(p).col, "impl", "'impl Interface' is only supported in function parameter position in v17");
+        }
+        Token iface_tok = consume(p, TOKEN_IDENT, "Expected interface name after 'impl'");
+        if (out_is_impl_trait) *out_is_impl_trait = true;
+        if (out_class_name) *out_class_name = arena_strdup(p->arena, iface_tok.lexeme);
+        if (out_is_borrowed) *out_is_borrowed = is_borrowed;
+        return TY_CLASS;
+    }
 
     if (match(p, TOKEN_MAP)) {
         consume(p, TOKEN_LBRACKET, "Expected '[' after 'map'");
@@ -100,7 +113,7 @@ static Type parse_type_with_class(Parser *p, char **out_class_name, bool *out_is
         }
         consume(p, TOKEN_RBRACKET, "Expected ']' after map key type");
 
-        Type val_t = parse_type_with_class(p, out_class_name, out_is_borrowed, out_is_array, NULL, NULL);
+        Type val_t = parse_type_full(p, out_class_name, out_is_borrowed, out_is_array, NULL, NULL, NULL, allow_self, false);
         if (out_is_map) *out_is_map = true;
         if (out_key_type) *out_key_type = key_t;
         return val_t;
@@ -113,6 +126,18 @@ static Type parse_type_with_class(Parser *p, char **out_class_name, bool *out_is
     else if (match(p, TOKEN_TYPE_BOOL)) t = TY_BOOL;
     else if (match(p, TOKEN_TYPE_STRING)) t = TY_STRING;
     else if (match(p, TOKEN_TYPE_VOID)) t = TY_VOID;
+    else if (match(p, TOKEN_SELF_TYPE)) {
+        if (!allow_self) {
+            fatal_parser_error(previous(p).line, previous(p).col, "Self", "'Self' is only allowed in interface method signatures");
+        }
+        if (out_class_name) {
+            *out_class_name = arena_strdup(p->arena, "Self");
+        }
+        if (out_is_borrowed) {
+            *out_is_borrowed = is_borrowed;
+        }
+        t = TY_CLASS;
+    }
     else if (match(p, TOKEN_IDENT)) {
         Token tok = previous(p);
         if (out_class_name) {
@@ -133,6 +158,10 @@ static Type parse_type_with_class(Parser *p, char **out_class_name, bool *out_is
     }
 
     return t;
+}
+
+static Type parse_type_with_class(Parser *p, char **out_class_name, bool *out_is_borrowed, bool *out_is_array, bool *out_is_map, Type *out_key_type) {
+    return parse_type_full(p, out_class_name, out_is_borrowed, out_is_array, out_is_map, out_key_type, NULL, false, false);
 }
 
 static AstNode *parse_fstring_lit(Parser *p, Token tok) {
@@ -1493,6 +1522,8 @@ static AstNode *parse_function(Parser *p) {
     bool *param_is_array = NULL;
     char **param_class_names = NULL;
     bool *param_is_borrowed = NULL;
+    bool *param_is_impl_trait = NULL;
+    char **param_impl_trait_names = NULL;
     int *param_lines = NULL;
     int *param_cols = NULL;
     int param_count = 0;
@@ -1505,7 +1536,10 @@ static AstNode *parse_function(Parser *p) {
             char *p_cls = NULL;
             bool p_borrowed = false;
             bool p_is_arr = false;
-            Type p_type = parse_type_with_class(p, &p_cls, &p_borrowed, &p_is_arr, NULL, NULL);
+            bool p_is_map = false;
+            Type p_key_t = TY_INT;
+            bool p_is_impl = false;
+            Type p_type = parse_type_full(p, &p_cls, &p_borrowed, &p_is_arr, &p_is_map, &p_key_t, &p_is_impl, false, true);
 
             if (param_count >= param_cap) {
                 param_cap = param_cap == 0 ? 4 : param_cap * 2;
@@ -1514,6 +1548,8 @@ static AstNode *parse_function(Parser *p) {
                 bool *new_arr = (bool *)arena_alloc_array(p->arena, param_cap, sizeof(bool));
                 char **new_cls = (char **)arena_alloc_array(p->arena, param_cap, sizeof(char *));
                 bool *new_bor = (bool *)arena_alloc_array(p->arena, param_cap, sizeof(bool));
+                bool *new_impl = (bool *)arena_alloc_array(p->arena, param_cap, sizeof(bool));
+                char **new_impl_names = (char **)arena_alloc_array(p->arena, param_cap, sizeof(char *));
                 int *new_lines = (int *)arena_alloc_array(p->arena, param_cap, sizeof(int));
                 int *new_cols = (int *)arena_alloc_array(p->arena, param_cap, sizeof(int));
                 if (param_names) {
@@ -1522,6 +1558,8 @@ static AstNode *parse_function(Parser *p) {
                     if (param_is_array) memcpy(new_arr, param_is_array, param_count * sizeof(bool));
                     memcpy(new_cls, param_class_names, param_count * sizeof(char *));
                     memcpy(new_bor, param_is_borrowed, param_count * sizeof(bool));
+                    if (param_is_impl_trait) memcpy(new_impl, param_is_impl_trait, param_count * sizeof(bool));
+                    if (param_impl_trait_names) memcpy(new_impl_names, param_impl_trait_names, param_count * sizeof(char *));
                     memcpy(new_lines, param_lines, param_count * sizeof(int));
                     memcpy(new_cols, param_cols, param_count * sizeof(int));
                 }
@@ -1530,14 +1568,18 @@ static AstNode *parse_function(Parser *p) {
                 param_is_array = new_arr;
                 param_class_names = new_cls;
                 param_is_borrowed = new_bor;
+                param_is_impl_trait = new_impl;
+                param_impl_trait_names = new_impl_names;
                 param_lines = new_lines;
                 param_cols = new_cols;
             }
             param_names[param_count] = arena_strdup(p->arena, p_name.lexeme);
             param_types[param_count] = p_type;
             param_is_array[param_count] = p_is_arr;
-            param_class_names[param_count] = p_cls;
+            param_class_names[param_count] = p_is_impl ? NULL : p_cls;
             param_is_borrowed[param_count] = p_borrowed;
+            param_is_impl_trait[param_count] = p_is_impl;
+            param_impl_trait_names[param_count] = p_is_impl ? p_cls : NULL;
             param_lines[param_count] = p_name.line;
             param_cols[param_count] = p_name.col;
             param_count++;
@@ -1562,6 +1604,8 @@ static AstNode *parse_function(Parser *p) {
     node->as.function.param_is_array = param_is_array;
     node->as.function.param_class_names = param_class_names;
     node->as.function.param_is_borrowed = param_is_borrowed;
+    node->as.function.param_is_impl_trait = param_is_impl_trait;
+    node->as.function.param_impl_trait_names = param_impl_trait_names;
     node->as.function.param_lines = param_lines;
     node->as.function.param_cols = param_cols;
     node->as.function.param_count = param_count;
@@ -1572,6 +1616,146 @@ static AstNode *parse_function(Parser *p) {
     node->as.function.return_class_name = ret_cls;
     node->as.function.body = body;
     return node;
+}
+
+static AstNode *parse_interface(Parser *p) {
+    Token tok = consume(p, TOKEN_INTERFACE, "Expected 'interface'");
+    Token name_tok = consume(p, TOKEN_IDENT, "Expected interface name");
+    consume(p, TOKEN_LBRACE, "Expected '{' after interface name");
+
+    AstNode **methods = NULL;
+    int method_count = 0;
+    int method_cap = 0;
+
+    while (!check(p, TOKEN_RBRACE) && !is_at_end(p)) {
+        Token fn_tok = consume(p, TOKEN_FN, "Expected 'fn' in interface method signature");
+        Token m_name = consume(p, TOKEN_IDENT, "Expected method name in interface");
+        consume(p, TOKEN_LPAREN, "Expected '(' after method name");
+
+        // First parameter must be 'self'
+        Token self_tok = consume(p, TOKEN_SELF, "Expected 'self' as first parameter in interface method");
+
+        int param_cap = 4;
+        char **param_names = (char **)arena_alloc_array(p->arena, param_cap, sizeof(char *));
+        Type *param_types = (Type *)arena_alloc_array(p->arena, param_cap, sizeof(Type));
+        bool *param_is_array = (bool *)arena_alloc_array(p->arena, param_cap, sizeof(bool));
+        char **param_class_names = (char **)arena_alloc_array(p->arena, param_cap, sizeof(char *));
+        bool *param_is_borrowed = (bool *)arena_alloc_array(p->arena, param_cap, sizeof(bool));
+        int *param_lines = (int *)arena_alloc_array(p->arena, param_cap, sizeof(int));
+        int *param_cols = (int *)arena_alloc_array(p->arena, param_cap, sizeof(int));
+
+        param_names[0] = arena_strdup(p->arena, "self");
+        param_types[0] = TY_CLASS;
+        param_class_names[0] = arena_strdup(p->arena, "Self");
+        param_is_borrowed[0] = true;
+        param_is_array[0] = false;
+        param_lines[0] = self_tok.line;
+        param_cols[0] = self_tok.col;
+        int param_count = 1;
+
+        if (match(p, TOKEN_COMMA)) {
+            do {
+                Token p_name = consume(p, TOKEN_IDENT, "Expected parameter name");
+                consume(p, TOKEN_COLON, "Expected ':' after parameter name");
+                char *p_cls = NULL;
+                bool p_borrowed = false;
+                bool p_is_arr = false;
+                bool p_is_map = false;
+                Type p_key_t = TY_INT;
+                Type p_type = parse_type_full(p, &p_cls, &p_borrowed, &p_is_arr, &p_is_map, &p_key_t, NULL, true, false);
+
+                if (param_count >= param_cap) {
+                    param_cap = param_cap * 2;
+                    char **new_names = (char **)arena_alloc_array(p->arena, param_cap, sizeof(char *));
+                    Type *new_types = (Type *)arena_alloc_array(p->arena, param_cap, sizeof(Type));
+                    bool *new_arr = (bool *)arena_alloc_array(p->arena, param_cap, sizeof(bool));
+                    char **new_cls = (char **)arena_alloc_array(p->arena, param_cap, sizeof(char *));
+                    bool *new_bor = (bool *)arena_alloc_array(p->arena, param_cap, sizeof(bool));
+                    int *new_lines = (int *)arena_alloc_array(p->arena, param_cap, sizeof(int));
+                    int *new_cols = (int *)arena_alloc_array(p->arena, param_cap, sizeof(int));
+                    memcpy(new_names, param_names, param_count * sizeof(char *));
+                    memcpy(new_types, param_types, param_count * sizeof(Type));
+                    memcpy(new_arr, param_is_array, param_count * sizeof(bool));
+                    memcpy(new_cls, param_class_names, param_count * sizeof(char *));
+                    memcpy(new_bor, param_is_borrowed, param_count * sizeof(bool));
+                    memcpy(new_lines, param_lines, param_count * sizeof(int));
+                    memcpy(new_cols, param_cols, param_count * sizeof(int));
+                    param_names = new_names;
+                    param_types = new_types;
+                    param_is_array = new_arr;
+                    param_class_names = new_cls;
+                    param_is_borrowed = new_bor;
+                    param_lines = new_lines;
+                    param_cols = new_cols;
+                }
+                param_names[param_count] = arena_strdup(p->arena, p_name.lexeme);
+                param_types[param_count] = p_type;
+                param_is_array[param_count] = p_is_arr;
+                param_class_names[param_count] = p_cls;
+                param_is_borrowed[param_count] = p_borrowed;
+                param_lines[param_count] = p_name.line;
+                param_cols[param_count] = p_name.col;
+                param_count++;
+            } while (match(p, TOKEN_COMMA));
+        }
+
+        consume(p, TOKEN_RPAREN, "Expected ')' after parameters");
+        consume(p, TOKEN_ARROW, "Expected '->' after parameter list");
+
+        char *ret_cls = NULL;
+        bool ret_borrowed = false;
+        bool ret_is_arr = false;
+        bool ret_is_map = false;
+        Type ret_key_t = TY_INT;
+        Type ret_type = parse_type_full(p, &ret_cls, &ret_borrowed, &ret_is_arr, &ret_is_map, &ret_key_t, NULL, true, false);
+
+        consume(p, TOKEN_SEMICOLON, "Expected ';' after interface method signature");
+
+        AstNode *m_node = arena_alloc_node(p->arena, NODE_INTERFACE_METHOD, fn_tok.line, fn_tok.col);
+        m_node->as.interface_method.name = arena_strdup(p->arena, m_name.lexeme);
+        m_node->as.interface_method.param_names = param_names;
+        m_node->as.interface_method.param_types = param_types;
+        m_node->as.interface_method.param_is_array = param_is_array;
+        m_node->as.interface_method.param_class_names = param_class_names;
+        m_node->as.interface_method.param_is_borrowed = param_is_borrowed;
+        m_node->as.interface_method.param_lines = param_lines;
+        m_node->as.interface_method.param_cols = param_cols;
+        m_node->as.interface_method.param_count = param_count;
+        m_node->as.interface_method.return_type = ret_type;
+        m_node->as.interface_method.return_is_array = ret_is_arr;
+        m_node->as.interface_method.return_is_map = ret_is_map;
+        m_node->as.interface_method.return_key_type = ret_key_t;
+        m_node->as.interface_method.return_class_name = ret_cls;
+
+        if (method_count >= method_cap) {
+            method_cap = method_cap == 0 ? 4 : method_cap * 2;
+            AstNode **new_m = (AstNode **)arena_alloc_array(p->arena, method_cap, sizeof(AstNode *));
+            if (methods) memcpy(new_m, methods, method_count * sizeof(AstNode *));
+            methods = new_m;
+        }
+        methods[method_count++] = m_node;
+    }
+
+    consume(p, TOKEN_RBRACE, "Expected '}' after interface body");
+
+    AstNode *iface_node = arena_alloc_node(p->arena, NODE_INTERFACE, tok.line, tok.col);
+    iface_node->as.interface_decl.name = arena_strdup(p->arena, name_tok.lexeme);
+    iface_node->as.interface_decl.methods = methods;
+    iface_node->as.interface_decl.method_count = method_count;
+    return iface_node;
+}
+
+static AstNode *parse_impl(Parser *p) {
+    Token tok = consume(p, TOKEN_IMPL, "Expected 'impl'");
+    Token iface_tok = consume(p, TOKEN_IDENT, "Expected interface name after 'impl'");
+    consume(p, TOKEN_FOR, "Expected 'for' after interface name in impl declaration");
+    Token cls_tok = consume(p, TOKEN_IDENT, "Expected class name after 'for' in impl declaration");
+    consume(p, TOKEN_SEMICOLON, "Expected ';' after impl declaration");
+
+    AstNode *impl_node = arena_alloc_node(p->arena, NODE_IMPL, tok.line, tok.col);
+    impl_node->as.impl_decl.interface_name = arena_strdup(p->arena, iface_tok.lexeme);
+    impl_node->as.impl_decl.class_name = arena_strdup(p->arena, cls_tok.lexeme);
+    return impl_node;
 }
 
 static AstNode *parse_import_stmt(Parser *p) {
@@ -1601,6 +1785,14 @@ AstNode *parse_program(Parser *p) {
     int enum_count = 0;
     int enum_cap = 0;
 
+    AstNode **interfaces = NULL;
+    int interface_count = 0;
+    int interface_cap = 0;
+
+    AstNode **impls = NULL;
+    int impl_count = 0;
+    int impl_cap = 0;
+
     AstNode **functions = NULL;
     int fn_count = 0;
     int fn_cap = 0;
@@ -1620,6 +1812,26 @@ AstNode *parse_program(Parser *p) {
                 imports = new_imp;
             }
             imports[import_count++] = imp;
+        } else if (check(p, TOKEN_INTERFACE)) {
+            seen_decl = true;
+            AstNode *iface = parse_interface(p);
+            if (interface_count >= interface_cap) {
+                interface_cap = interface_cap == 0 ? 4 : interface_cap * 2;
+                AstNode **new_if = (AstNode **)arena_alloc_array(p->arena, interface_cap, sizeof(AstNode *));
+                if (interfaces) memcpy(new_if, interfaces, interface_count * sizeof(AstNode *));
+                interfaces = new_if;
+            }
+            interfaces[interface_count++] = iface;
+        } else if (check(p, TOKEN_IMPL)) {
+            seen_decl = true;
+            AstNode *imp = parse_impl(p);
+            if (impl_count >= impl_cap) {
+                impl_cap = impl_cap == 0 ? 4 : impl_cap * 2;
+                AstNode **new_im = (AstNode **)arena_alloc_array(p->arena, impl_cap, sizeof(AstNode *));
+                if (impls) memcpy(new_im, impls, impl_count * sizeof(AstNode *));
+                impls = new_im;
+            }
+            impls[impl_count++] = imp;
         } else if (check(p, TOKEN_CLASS)) {
             seen_decl = true;
             AstNode *cls = parse_class(p);
@@ -1661,13 +1873,17 @@ AstNode *parse_program(Parser *p) {
             }
             functions[fn_count++] = fn;
         } else {
-            fatal_parser_error(peek(p).line, peek(p).col, peek(p).lexeme, "Expected 'import', 'class', 'struct', 'enum', or 'fn'");
+            fatal_parser_error(peek(p).line, peek(p).col, peek(p).lexeme, "Expected 'import', 'interface', 'impl', 'class', 'struct', 'enum', or 'fn'");
         }
     }
 
     AstNode *prog = arena_alloc_node(p->arena, NODE_PROGRAM, 1, 1);
     prog->as.program.imports = imports;
     prog->as.program.import_count = import_count;
+    prog->as.program.interfaces = interfaces;
+    prog->as.program.interface_count = interface_count;
+    prog->as.program.impls = impls;
+    prog->as.program.impl_count = impl_count;
     prog->as.program.classes = classes;
     prog->as.program.class_count = class_count;
     prog->as.program.structs = structs;

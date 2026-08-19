@@ -56,6 +56,9 @@ static TokenType check_keyword(const char *str) {
     if (strcmp(str, "enum") == 0) return TOKEN_ENUM;
     if (strcmp(str, "match") == 0) return TOKEN_MATCH;
     if (strcmp(str, "operator") == 0) return TOKEN_OPERATOR;
+    if (strcmp(str, "interface") == 0) return TOKEN_INTERFACE;
+    if (strcmp(str, "impl") == 0) return TOKEN_IMPL;
+    if (strcmp(str, "Self") == 0) return TOKEN_SELF_TYPE;
     if (strcmp(str, "_") == 0) return TOKEN_UNDERSCORE;
     if (strcmp(str, "int") == 0) return TOKEN_TYPE_INT;
     if (strcmp(str, "float") == 0) return TOKEN_TYPE_FLOAT;
@@ -408,6 +411,10 @@ const char *token_type_to_string(TokenType type) {
         case TOKEN_MAP_NEW: return "map_new";
         case TOKEN_ENUM: return "enum";
         case TOKEN_MATCH: return "match";
+        case TOKEN_OPERATOR: return "operator";
+        case TOKEN_INTERFACE: return "interface";
+        case TOKEN_IMPL: return "impl";
+        case TOKEN_SELF_TYPE: return "Self";
         case TOKEN_UNDERSCORE: return "_";
         case TOKEN_TYPE_INT: return "int";
         case TOKEN_TYPE_FLOAT: return "float";
@@ -483,6 +490,9 @@ void dump_tokens(const TokenArray *array) {
             case TOKEN_ENUM:
             case TOKEN_MATCH:
             case TOKEN_OPERATOR:
+            case TOKEN_INTERFACE:
+            case TOKEN_IMPL:
+            case TOKEN_SELF_TYPE:
             case TOKEN_TYPE_INT:
             case TOKEN_TYPE_FLOAT:
             case TOKEN_TYPE_CHAR:

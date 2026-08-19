@@ -1,0 +1,27 @@
+interface Printable {
+    fn describe(self) -> void;
+}
+
+class Point {
+    x: int;
+    y: int;
+
+    fn describe(self) -> void {
+        print(f"Point({self.x}, {self.y})");
+    }
+}
+
+impl Printable for Point;
+
+fn announce_ref(item: &impl Printable) -> void {
+    item.describe();
+}
+
+fn main() -> int {
+    let p: Point = Point { x: 7, y: 14 };
+    announce_ref(p);
+    // p is borrowed, not moved — can still be used!
+    print(p.x);
+    print(p.y);
+    return 0;
+}

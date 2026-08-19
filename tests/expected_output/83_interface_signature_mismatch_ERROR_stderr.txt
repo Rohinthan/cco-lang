@@ -1,0 +1,12 @@
+error: 'Point.describe' does not match 'Printable.describe' — expected `fn describe(self) -> void`, found `fn describe(self) -> int`
+  --> tests/programs/83_interface_signature_mismatch_ERROR.cco:14:1
+    |
+ 14 | impl Printable for Point;
+    | ^ interface signature mismatch
+    |
+note: actual method defined here:
+  --> tests/programs/83_interface_signature_mismatch_ERROR.cco:9:5
+    |
+  9 |     fn describe(self) -> int {
+    |     ^ declared signature
+    |

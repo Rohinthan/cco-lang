@@ -1,6 +1,6 @@
 CC = gcc
 CFLAGS = -Wall -Wextra -Werror -pedantic-errors -std=c11 -Isrc
-SRC = src/errors.c src/lexer.c src/ast.c src/class_decl.c src/parser.c src/module_resolver.c src/scope_analysis.c src/codegen.c
+SRC = src/errors.c src/lexer.c src/ast.c src/class_decl.c src/parser.c src/module_resolver.c src/trait_resolver.c src/scope_analysis.c src/codegen.c
 MAIN_SRC = src/main.c
 LDFLAGS = -lm
 

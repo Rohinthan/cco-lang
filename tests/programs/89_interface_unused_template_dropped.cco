@@ -1,0 +1,27 @@
+interface Printable {
+    fn describe(self) -> void;
+}
+
+class Point {
+    x: int;
+    y: int;
+
+    fn describe(self) -> void {
+        print(f"Point({self.x}, {self.y})");
+    }
+}
+
+impl Printable for Point;
+
+// Unused generic template function — never called with any concrete class.
+// The compiler must drop it without generating invalid/unspecialized C code.
+fn unused_announcer(item: impl Printable) -> void {
+    item.describe();
+}
+
+fn main() -> int {
+    let p: Point = Point { x: 1, y: 2 };
+    print("alive");
+    p.describe();
+    return 0;
+}

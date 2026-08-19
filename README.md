@@ -1,8 +1,41 @@
-# Cco (C--) Compiler: A C-like Language with Operator Overloading for Structs, F-Strings, Self-Hosted Lexer, Tagged Unions, Pattern Matching, Hash Maps, Growable Arrays, Selective Prelude Emission, Lightweight Structs & Standard Library (v16.0)
+# Cco (C--) Compiler: A C-like Language with Interfaces via Monomorphization, Operator Overloading for Structs, F-Strings, Self-Hosted Lexer, Tagged Unions, Pattern Matching, Hash Maps, Growable Arrays, Selective Prelude Emission, Lightweight Structs & Standard Library (v17.0)
 
-**Cco (C--)** is a lightweight, systems programming language with explicit C-like syntax, **Operator Overloading for Structs (`operator+`, `operator-`, `operator==`, etc.)**, **Python-style F-String Interpolation (`f"Hello {name}, score: {score}"`)**, **Interactive I/O, Numeric Parsing & Randomness (`read_line`, `is_int`, `to_int`, `random_int`)**, **Command-Line Arguments (`args()`, `arg_count()`, `program_name()`)**, **a self-hosted lexer proof-of-concept (`selfhost/lexer.cco`)**, **scope-exit auto-free for raw allocations**, **compile-time single ownership with move semantics**, **Tagged Unions (`enum`) and Pattern Matching (`match`)**, **Hash Maps (`map[K]V`, `map_new`, `put`, `get`, `has`, `remove`, `keys`, `len`)**, **Growable Arrays (`list_new`, `push`, `pop`, `len`)**, **Selective Prelude Emission** (only emitting used stdlib helpers for clean generated C), **Lightweight Structs (Value Types)** (`struct Point2D { x: int; y: int; }`), **Arrays of Objects with for-each iteration** (`alloc(Point, n)`, `for p in pts`), **Minimal Multi-file Module/Import System** (`import "file.cco";`), and a **built-in Standard Library** (Strings, Math, File I/O). It transpiles Cco source code (`.cco`) into portable, standard C11 source code (`.c`), which is compiled to native machine binaries using `gcc` or `clang`.
+**Cco (C--)** is a lightweight, systems programming language with explicit C-like syntax, **Interfaces with Compile-Time Monomorphization (`interface`, `impl`, `impl Trait`)**, **Operator Overloading for Structs (`operator+`, `operator-`, `operator==`, etc.)**, **Python-style F-String Interpolation (`f"Hello {name}, score: {score}"`)**, **Interactive I/O, Numeric Parsing & Randomness (`read_line`, `is_int`, `to_int`, `random_int`)**, **Command-Line Arguments (`args()`, `arg_count()`, `program_name()`)**, **a self-hosted lexer proof-of-concept (`selfhost/lexer.cco`)**, **scope-exit auto-free for raw allocations**, **compile-time single ownership with move semantics**, **Tagged Unions (`enum`) and Pattern Matching (`match`)**, **Hash Maps (`map[K]V`, `map_new`, `put`, `get`, `has`, `remove`, `keys`, `len`)**, **Growable Arrays (`list_new`, `push`, `pop`, `len`)**, **Selective Prelude Emission** (only emitting used stdlib helpers for clean generated C), **Lightweight Structs (Value Types)** (`struct Point2D { x: int; y: int; }`), **Arrays of Objects with for-each iteration** (`alloc(Point, n)`, `for p in pts`), **Minimal Multi-file Module/Import System** (`import "file.cco";`), and a **built-in Standard Library** (Strings, Math, File I/O). It transpiles Cco source code (`.cco`) into portable, standard C11 source code (`.c`), which is compiled to native machine binaries using `gcc` or `clang`.
 
-> **Write it like Python's class/struct/enum/map/f-string syntax reads with clean C++-style operator overloading on value structs. Compile it and it runs like C with zero runtime reference counting overhead, zero GC pauses, clean inspectable generated C via selective prelude emission, stack-allocated value structs, Rust-like compile-time ownership safety across multi-file programs, exhaustive pattern matching, and GCC/Rust-style diagnostic error messages.**
+> **Write it like Python's class/struct/enum/map/f-string syntax reads with clean Rust-style interfaces via zero-cost compile-time monomorphization and C++-style operator overloading on value structs. Compile it and it runs like C with zero runtime vtables, zero GC pauses, clean inspectable generated C via selective prelude emission, stack-allocated value structs, Rust-like compile-time ownership safety across multi-file programs, exhaustive pattern matching, and GCC/Rust-style diagnostic error messages.**
+
+---
+
+## 🧩 Interfaces via Compile-Time Monomorphization (v17.0)
+
+Cco v17.0 introduces interfaces without runtime vtables or fat pointers, resolved entirely via compile-time monomorphization:
+
+- **Interface Declaration**: Define method signatures with required receiver `self` and optional `Self` type:
+  ```cco
+  interface Printable {
+      fn describe(self) -> void;
+  }
+
+  interface Comparable {
+      fn compare_to(self, other: &Self) -> int;
+  }
+  ```
+- **Explicit Impl Assertion**: No duck typing; classes explicitly declare conformance:
+  ```cco
+  impl Printable for Point;
+  impl Comparable for Score;
+  ```
+- **Generic Functions via `impl Trait`**: Functions accept any type satisfying an interface:
+  ```cco
+  fn announce(item: &impl Printable) -> void {
+      item.describe();
+  }
+  ```
+- **Compile-Time Specialization (Zero Vtables)**:
+  - Each call site with a distinct concrete class generates a specialized function (e.g. `announce__Point(item)`).
+  - Inside generic functions, only declared interface methods can be called.
+  - Unused template functions are dropped at compile time (zero dead code).
+  - Monomorphized functions seamlessly inherit Cco's compile-time ownership and borrow checking rules.
 
 ---
 

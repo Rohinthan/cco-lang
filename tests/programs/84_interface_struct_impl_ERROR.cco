@@ -1,0 +1,15 @@
+interface Printable {
+    fn describe(self) -> void;
+}
+
+struct Vec2 {
+    x: int;
+    y: int;
+}
+
+impl Printable for Vec2;
+
+fn main() -> int {
+    let v: Vec2 = Vec2 { x: 1, y: 2 };
+    return 0;
+}

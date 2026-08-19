@@ -1,0 +1,24 @@
+interface Printable {
+    fn describe(self) -> void;
+}
+
+class Point {
+    x: int;
+    y: int;
+
+    fn describe(self) -> void {
+        print(f"Point({self.x}, {self.y})");
+    }
+}
+
+impl Printable for Point;
+
+fn announce(item: impl Printable) -> void {
+    item.describe();
+}
+
+fn main() -> int {
+    let p: Point = Point { x: 10, y: 20 };
+    announce(p);
+    return 0;
+}

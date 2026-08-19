@@ -1,0 +1,39 @@
+interface Printable {
+    fn describe(self) -> void;
+}
+
+class Point {
+    x: int;
+    y: int;
+
+    fn describe(self) -> void {
+        print(f"Point({self.x}, {self.y})");
+    }
+}
+
+class Circle {
+    radius: int;
+
+    fn describe(self) -> void {
+        print(f"Circle(r={self.radius})");
+    }
+}
+
+impl Printable for Point;
+impl Printable for Circle;
+
+// Generic template function specialized at compile-time via monomorphization
+fn announce(item: &impl Printable) -> void {
+    item.describe();
+}
+
+fn main() -> int {
+    let p: Point = Point { x: 10, y: 25 };
+    let c: Circle = Circle { radius: 50 };
+
+    print("=== Interfaces via Monomorphization ===");
+    announce(p);
+    announce(c);
+
+    return 0;
+}

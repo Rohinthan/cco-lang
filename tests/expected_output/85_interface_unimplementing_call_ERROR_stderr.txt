@@ -1,0 +1,6 @@
+error: 'Circle' does not implement 'Printable'
+  --> tests/programs/85_interface_unimplementing_call_ERROR.cco:31:14
+    |
+ 31 |     announce(c);
+    |              ^ does not implement interface
+    |

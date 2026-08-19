@@ -1687,6 +1687,13 @@ static void analyze_own_node(OwnScopeStack *stack, AstNode *node) {
         case NODE_PRINT:
             analyze_own_node(stack, node->as.print_stmt.value);
             break;
+        case NODE_BINARY:
+            analyze_own_node(stack, node->as.binary.left);
+            analyze_own_node(stack, node->as.binary.right);
+            break;
+        case NODE_UNARY:
+            analyze_own_node(stack, node->as.unary.operand);
+            break;
         case NODE_MEMBER:
             analyze_own_node(stack, node->as.member.object);
             break;

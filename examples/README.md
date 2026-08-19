@@ -20,6 +20,7 @@ Welcome to the Cco example program gallery. These examples demonstrate the featu
 | [`12_cli_args.cco`](12_cli_args.cco) | Command-Line Arguments | `program_name()`, `arg_count()`, `args()`, command-line processing |
 | [`13_number_guess.cco`](13_number_guess.cco) | Interactive Number Guessing Game | F-Strings (`f"..."`), `read_line()`, `is_int()`, `to_int()`, `random_seed()`, `random_int()` |
 | [`vec2_operators.cco`](vec2_operators.cco) | Struct Operator Overloading | Overloaded struct operators (`operator+`, `operator-`, `operator==`), value semantics |
+| [`printable_interface.cco`](printable_interface.cco) | Interfaces & Monomorphization | Interfaces (`interface`), explicit impls (`impl Trait for Class;`), generic functions (`impl Trait`), compile-time monomorphization |
 
 ## Compiling & Running Examples
 

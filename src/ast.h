@@ -63,7 +63,10 @@ typedef enum {
     NODE_MATCH,
     NODE_MATCH_ARM,
     NODE_FSTRING,
-    NODE_FSTRING_TEXT
+    NODE_FSTRING_TEXT,
+    NODE_INTERFACE,
+    NODE_INTERFACE_METHOD,
+    NODE_IMPL
 } NodeType;
 
 typedef struct AstNode AstNode;
@@ -104,6 +107,10 @@ struct AstNode {
             int struct_count;
             AstNode **enums;
             int enum_count;
+            AstNode **interfaces;
+            int interface_count;
+            AstNode **impls;
+            int impl_count;
             AstNode **functions;
             int count;
         } program;
@@ -194,11 +201,41 @@ struct AstNode {
 
         struct {
             char *name;
+            AstNode **methods;
+            int method_count;
+        } interface_decl;
+
+        struct {
+            char *name;
             char **param_names;
             Type *param_types;
             bool *param_is_array;
             char **param_class_names;
             bool *param_is_borrowed;
+            int *param_lines;
+            int *param_cols;
+            int param_count;
+            Type return_type;
+            bool return_is_array;
+            bool return_is_map;
+            Type return_key_type;
+            char *return_class_name;
+        } interface_method;
+
+        struct {
+            char *interface_name;
+            char *class_name;
+        } impl_decl;
+
+        struct {
+            char *name;
+            char **param_names;
+            Type *param_types;
+            bool *param_is_array;
+            char **param_class_names;
+            bool *param_is_borrowed;
+            bool *param_is_impl_trait;
+            char **param_impl_trait_names;
             int *param_lines;
             int *param_cols;
             int param_count;

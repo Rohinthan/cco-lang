@@ -7,7 +7,8 @@ typedef enum {
     TYPE_KIND_UNKNOWN,
     TYPE_KIND_CLASS,
     TYPE_KIND_STRUCT,
-    TYPE_KIND_ENUM
+    TYPE_KIND_ENUM,
+    TYPE_KIND_INTERFACE
 } TypeKind;
 
 typedef struct FieldInfo {
@@ -20,6 +21,18 @@ typedef struct MethodInfo {
     char *name;
     AstNode *method_node; // NODE_METHOD
 } MethodInfo;
+
+typedef struct InterfaceMethodInfo {
+    char *name;
+    AstNode *method_node; // NODE_INTERFACE_METHOD
+} InterfaceMethodInfo;
+
+typedef struct InterfaceDef {
+    char *name;
+    InterfaceMethodInfo *methods;
+    int method_count;
+    AstNode *interface_node;
+} InterfaceDef;
 
 typedef struct ClassDef {
     char *name;
@@ -59,12 +72,17 @@ typedef struct ClassTable {
     EnumDef *enums;
     int enum_count;
     int enum_capacity;
+    InterfaceDef *interfaces;
+    int interface_count;
+    int interface_capacity;
 } ClassTable;
 
 ClassTable *build_class_table(AstNode *program, AstArena *arena);
 ClassDef *find_class(ClassTable *ct, const char *name);
 StructDef *find_struct(ClassTable *ct, const char *name);
 EnumDef *find_enum(ClassTable *ct, const char *name);
+InterfaceDef *find_interface(ClassTable *ct, const char *name);
+InterfaceMethodInfo *find_interface_method(InterfaceDef *idef, const char *method_name);
 EnumVariantDef *find_enum_variant(EnumDef *edef, const char *variant_name);
 FieldInfo *find_variant_field(EnumVariantDef *vdef, const char *field_name);
 TypeKind resolve_type_name(ClassTable *ct, const char *name);

@@ -1,0 +1,34 @@
+interface Comparable {
+    fn compare_to(self, other: &Self) -> int;
+}
+
+class Score {
+    points: int;
+
+    fn compare_to(self, other: &Score) -> int {
+        if (self.points > other.points) {
+            return 1;
+        }
+        if (self.points < other.points) {
+            return -1;
+        }
+        return 0;
+    }
+}
+
+impl Comparable for Score;
+
+fn is_greater(a: &impl Comparable, b: &impl Comparable) -> bool {
+    return a.compare_to(b) > 0;
+}
+
+fn main() -> int {
+    let s1: Score = Score { points: 100 };
+    let s2: Score = Score { points: 50 };
+    if (is_greater(s1, s2)) {
+        print("s1 wins");
+    } else {
+        print("s2 wins");
+    }
+    return 0;
+}

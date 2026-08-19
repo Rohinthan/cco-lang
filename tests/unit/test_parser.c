@@ -226,6 +226,44 @@ void test_parse_enum() {
     printf("[PASS] test_parse_enum\n");
 }
 
+void test_parse_interface() {
+    const char *src = "interface Describable { fn describe(self) -> void; }\n"
+                      "class Point { x: int; y: int; fn describe(self) -> void { print(self.x); } }\n"
+                      "impl Describable for Point;\n"
+                      "fn announce(item: impl Describable) -> void { item.describe(); }";
+    TokenArray tokens = lex_source(src);
+    AstArena *arena = create_ast_arena();
+    Parser parser = create_parser(tokens, arena);
+
+    AstNode *prog = parse_program(&parser);
+    assert(prog != NULL);
+    assert(prog->type == NODE_PROGRAM);
+    assert(prog->as.program.interface_count == 1);
+    assert(prog->as.program.impl_count == 1);
+    assert(prog->as.program.class_count == 1);
+    assert(prog->as.program.count == 1);
+
+    AstNode *iface = prog->as.program.interfaces[0];
+    assert(iface->type == NODE_INTERFACE);
+    assert(strcmp(iface->as.interface_decl.name, "Describable") == 0);
+    assert(iface->as.interface_decl.method_count == 1);
+    assert(strcmp(iface->as.interface_decl.methods[0]->as.interface_method.name, "describe") == 0);
+
+    AstNode *imp = prog->as.program.impls[0];
+    assert(imp->type == NODE_IMPL);
+    assert(strcmp(imp->as.impl_decl.interface_name, "Describable") == 0);
+    assert(strcmp(imp->as.impl_decl.class_name, "Point") == 0);
+
+    AstNode *fn = prog->as.program.functions[0];
+    assert(fn->as.function.param_count == 1);
+    assert(fn->as.function.param_is_impl_trait[0] == true);
+    assert(strcmp(fn->as.function.param_impl_trait_names[0], "Describable") == 0);
+
+    free_ast_arena(arena);
+    free_tokens(&tokens);
+    printf("[PASS] test_parse_interface\n");
+}
+
 int main() {
     printf("Running Parser Unit Tests...\n");
     test_parse_simple_func();
@@ -234,6 +272,7 @@ int main() {
     test_parse_borrowed_param();
     test_parse_map();
     test_parse_enum();
+    test_parse_interface();
     printf("All Parser tests passed!\n");
     return 0;
 }
