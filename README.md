@@ -1,8 +1,30 @@
-# Cco (C--) Compiler: A C-like Language with Self-Hosted Lexer, Tagged Unions, Pattern Matching, Hash Maps, Growable Arrays, Selective Prelude Emission, Lightweight Structs & Standard Library (v12.0)
+# Cco (C--) Compiler: A C-like Language with F-Strings, Self-Hosted Lexer, Tagged Unions, Pattern Matching, Hash Maps, Growable Arrays, Selective Prelude Emission, Lightweight Structs & Standard Library (v15.0)
 
-**Cco (C--)** is a lightweight, systems programming language with explicit C-like syntax, **a self-hosted lexer proof-of-concept (`selfhost/lexer.cco`)**, **scope-exit auto-free for raw allocations**, **compile-time single ownership with move semantics**, **Tagged Unions (`enum`) and Pattern Matching (`match`)**, **Hash Maps (`map[K]V`, `map_new`, `put`, `get`, `has`, `remove`, `keys`, `len`)**, **Growable Arrays (`list_new`, `push`, `pop`, `len`)**, **Selective Prelude Emission** (only emitting used stdlib helpers for clean generated C), **Lightweight Structs (Value Types)** (`struct Point2D { x: int; y: int; }`), **Arrays of Objects with for-each iteration** (`alloc(Point, n)`, `for p in pts`), **Minimal Multi-file Module/Import System** (`import "file.cco";`), and a **built-in Standard Library** (Strings, Math, File I/O). It transpiles Cco source code (`.cco`) into portable, standard C11 source code (`.c`), which is compiled to native machine binaries using `gcc` or `clang`.
+**Cco (C--)** is a lightweight, systems programming language with explicit C-like syntax, **Python-style F-String Interpolation (`f"Hello {name}, score: {score}"`)**, **Interactive I/O, Numeric Parsing & Randomness (`read_line`, `is_int`, `to_int`, `random_int`)**, **Command-Line Arguments (`args()`, `arg_count()`, `program_name()`)**, **a self-hosted lexer proof-of-concept (`selfhost/lexer.cco`)**, **scope-exit auto-free for raw allocations**, **compile-time single ownership with move semantics**, **Tagged Unions (`enum`) and Pattern Matching (`match`)**, **Hash Maps (`map[K]V`, `map_new`, `put`, `get`, `has`, `remove`, `keys`, `len`)**, **Growable Arrays (`list_new`, `push`, `pop`, `len`)**, **Selective Prelude Emission** (only emitting used stdlib helpers for clean generated C), **Lightweight Structs (Value Types)** (`struct Point2D { x: int; y: int; }`), **Arrays of Objects with for-each iteration** (`alloc(Point, n)`, `for p in pts`), **Minimal Multi-file Module/Import System** (`import "file.cco";`), and a **built-in Standard Library** (Strings, Math, File I/O). It transpiles Cco source code (`.cco`) into portable, standard C11 source code (`.c`), which is compiled to native machine binaries using `gcc` or `clang`.
 
-> **Write it like Python's class/struct/enum/map syntax reads. Compile it and it runs like C with zero runtime reference counting overhead, zero GC pauses, clean inspectable generated C via selective prelude emission, stack-allocated value structs, Rust-like compile-time ownership safety across multi-file programs, exhaustive pattern matching, and GCC/Rust-style diagnostic error messages.**
+> **Write it like Python's class/struct/enum/map/f-string syntax reads. Compile it and it runs like C with zero runtime reference counting overhead, zero GC pauses, clean inspectable generated C via selective prelude emission, stack-allocated value structs, Rust-like compile-time ownership safety across multi-file programs, exhaustive pattern matching, and GCC/Rust-style diagnostic error messages.**
+
+---
+
+## 🧵 Python-Style F-String Interpolation (v15.0)
+
+Cco v15.0 introduces native string interpolation with full recursive expression parsing:
+
+- **Syntax**: Prefix string literals with `f`, e.g. `f"Hello {name}, score: {score + 10}"`.
+- **Automatic Type Conversion**: Expressions of type `int`, `float`, `bool`, and `char` inside `{...}` are automatically converted to strings via prelude helpers (`__cco_int_to_str`, `__cco_float_to_str`, `__cco_bool_to_str`, `__cco_char_to_str`).
+- **Arbitrary Expressions**: Supports nested function calls, arithmetic, and method calls inside `{...}` (e.g. `f"Square of {a} is {square(a)}"`).
+- **Escaped Braces**: Double braces `{{` and `}}` render literal `{` and `}` without interpolation.
+- **Zero-Leak Ownership**: Desugars to balanced `__cco_concat_free()` chains that automatically free temporary intermediate string allocations.
+
+```cco
+fn main() -> int {
+    let name: string = "Alice";
+    let score: float = 98.5;
+    let rank: int = 1;
+    print(f"Player {name} achieved rank #{rank} with score {score}!");
+    return 0;
+}
+```
 
 ---
 
@@ -334,7 +356,12 @@ make test
 | `67_to_int_invalid_RUNTIME_ERROR` | Catching invalid numeric string in `to_int()` with formatted runtime error | **PASS** | Runtime Error (As Expected) |
 | `68_is_int_is_float_guard` | Safe parse-guarding pattern (`is_int()`, `is_float()`) avoiding runtime fatal crashes | **PASS** | 0 Bytes Leaked |
 | `69_random_seeded_deterministic` | Deterministic random sequence verification via `random_seed()` & `random_int()` | **PASS** | 0 Bytes Leaked |
-| `compare_lexers` (v12) | Self-hosted lexer diff harness across all 92 `.cco` files in corpus (100% byte-identical) | **PASS** | 0 Bytes Leaked |
+| `70_fstring_basic` | Single integer variable interpolation inside f-string (`f"x = {x}"`) | **PASS** | 0 Bytes Leaked |
+| `71_fstring_multiple_exprs` | Multiple interpolations across mixed primitive types (`int`, `float`, `string`, `bool`) | **PASS** | 0 Bytes Leaked |
+| `72_fstring_escaped_braces` | Escaped brace literals `{{` and `}}` rendering literal `{` and `}` without interpolation | **PASS** | 0 Bytes Leaked |
+| `73_fstring_nested_expr` | Complex nested arithmetic and function calls inside `{...}` (`f"{a + b * 2}"`, `f"{greet(\"Bob\")}"`) | **PASS** | 0 Bytes Leaked |
+| `74_fstring_unbalanced_ERROR` | Rejecting unbalanced or unterminated f-strings at compile time with diagnostic caret | **PASS** | Compile Error (As Expected) |
+| `compare_lexers` (v12) | Self-hosted lexer diff harness across all 98 `.cco` files in corpus (100% byte-identical) | **PASS** | 0 Bytes Leaked |
 
 ---
 
