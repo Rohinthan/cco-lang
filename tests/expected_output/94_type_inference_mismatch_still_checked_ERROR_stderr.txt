@@ -1,0 +1,6 @@
+error: type mismatch in variable declaration — 'x' is declared with an incompatible type
+  --> tests/programs/94_type_inference_mismatch_still_checked_ERROR.cco:2:5
+    |
+  2 |     let x: int = "hello";
+    |     ^ type mismatch
+    |
