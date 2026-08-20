@@ -1,0 +1,33 @@
+fn main() -> int {
+    random_seed(12345);
+    let secret = random_int(1, 20);
+    print("=== Guess the Number (between 1 and 20) ===");
+
+    let attempts = 0;
+    let won = false;
+
+    while (!won && attempts < 5) {
+        attempts++;
+        print(f"Attempt #{attempts}: Enter your guess: ");
+        let guess_str = read_line();
+
+        if (!is_int(guess_str)) {
+            print("Please enter a valid whole number!");
+        } else {
+            let guess = to_int(guess_str);
+            if (guess == secret) {
+                print(f"Congratulations! You guessed the number {secret} in {attempts} attempts!");
+                won = true;
+            } else if (guess < secret) {
+                print("Too low! Try higher.");
+            } else {
+                print("Too high! Try lower.");
+            }
+        }
+    }
+
+    if (!won) {
+        print(f"Game over! The secret number was {secret}.");
+    }
+    return 0;
+}
