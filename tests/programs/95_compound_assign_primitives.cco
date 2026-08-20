@@ -1,0 +1,25 @@
+fn main() -> int {
+    let a = 10;
+    a += 5;
+    print(a);
+    a -= 3;
+    print(a);
+    a *= 2;
+    print(a);
+    a /= 4;
+    print(a);
+    a %= 4;
+    print(a);
+
+    let f = 10.0;
+    f += 2.5;
+    print(f);
+    f -= 1.0;
+    print(f);
+    f *= 2.0;
+    print(f);
+    f /= 2.0;
+    print(f);
+
+    return 0;
+}
