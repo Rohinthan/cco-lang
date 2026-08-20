@@ -1,0 +1,12 @@
+struct Vec2 {
+    x: float;
+    y: float;
+}
+
+fn operator<(a: Vec2, b: Vec2) -> Vec2 {
+    return a;
+}
+
+fn main() -> int {
+    return 0;
+}

@@ -1,0 +1,6 @@
+error: 'operator<' must return bool
+  --> tests/programs/92_operator_overload_comparison_wrong_return_ERROR.cco:6:1
+    |
+  6 | fn operator<(a: Vec2, b: Vec2) -> Vec2 {
+    | ^ comparison operators must return bool
+    |
