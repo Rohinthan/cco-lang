@@ -445,6 +445,48 @@ fn lex(source: string) -> Token[] {
                 i = i + 2; col = col + 2;
                 continue;
             }
+            if (c == '+' && next_c == '+') {
+                let sym: string = substring(source, i, i + 2);
+                tokens = push(tokens, Token { kind: TokenKind.Symbol { text: sym }, line: line, col: col });
+                i = i + 2; col = col + 2;
+                continue;
+            }
+            if (c == '-' && next_c == '-') {
+                let sym: string = substring(source, i, i + 2);
+                tokens = push(tokens, Token { kind: TokenKind.Symbol { text: sym }, line: line, col: col });
+                i = i + 2; col = col + 2;
+                continue;
+            }
+            if (c == '+' && next_c == '=') {
+                let sym: string = substring(source, i, i + 2);
+                tokens = push(tokens, Token { kind: TokenKind.Symbol { text: sym }, line: line, col: col });
+                i = i + 2; col = col + 2;
+                continue;
+            }
+            if (c == '-' && next_c == '=') {
+                let sym: string = substring(source, i, i + 2);
+                tokens = push(tokens, Token { kind: TokenKind.Symbol { text: sym }, line: line, col: col });
+                i = i + 2; col = col + 2;
+                continue;
+            }
+            if (c == '*' && next_c == '=') {
+                let sym: string = substring(source, i, i + 2);
+                tokens = push(tokens, Token { kind: TokenKind.Symbol { text: sym }, line: line, col: col });
+                i = i + 2; col = col + 2;
+                continue;
+            }
+            if (c == '/' && next_c == '=') {
+                let sym: string = substring(source, i, i + 2);
+                tokens = push(tokens, Token { kind: TokenKind.Symbol { text: sym }, line: line, col: col });
+                i = i + 2; col = col + 2;
+                continue;
+            }
+            if (c == '%' && next_c == '=') {
+                let sym: string = substring(source, i, i + 2);
+                tokens = push(tokens, Token { kind: TokenKind.Symbol { text: sym }, line: line, col: col });
+                i = i + 2; col = col + 2;
+                continue;
+            }
             if (c == '&' && next_c == '&') {
                 let sym: string = substring(source, i, i + 2);
                 tokens = push(tokens, Token { kind: TokenKind.Symbol { text: sym }, line: line, col: col });
