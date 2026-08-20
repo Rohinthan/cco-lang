@@ -58,6 +58,7 @@ typedef enum {
     NODE_IMPORT,
     NODE_STRUCT,
     NODE_STRUCT_FIELD,
+    NODE_COMPOUND_ASSIGN,
     NODE_ENUM,
     NODE_VARIANT,
     NODE_MATCH,
@@ -267,7 +268,14 @@ struct AstNode {
             char *class_name;
             AstNode *value;
             bool retain_rhs;
+            bool has_explicit_type;
         } let;
+
+        struct {
+            AstNode *target;
+            char op[8];
+            AstNode *value;
+        } compound_assign;
 
         struct {
             char *name;
