@@ -4,6 +4,8 @@
 
 > **Write it like Python's concise syntax (`let x = 0; total += i; i++;`) with clean Rust-style interfaces via zero-cost compile-time monomorphization and C++-style operator overloading on value structs. Compile it and it runs like C with zero runtime vtables, zero GC pauses, clean inspectable generated C via selective prelude emission, stack-allocated value structs, Rust-like compile-time ownership safety across multi-file programs, exhaustive pattern matching, and GCC/Rust-style diagnostic error messages.**
 
+📖 **New to Cco? Check out the [Cco Beginner's Guide & Tutorial (`docs/LEARN.md`)](docs/LEARN.md) for a step-by-step walkthrough of 10 complete, real programs!**
+
 ---
 
 ## ⚡ Type Inference & Compound Assignment (v19.0)
