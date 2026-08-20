@@ -68,6 +68,10 @@ static const char *get_operator_fn_c_name(const char *struct_name, const char *o
     else if (strcmp(op_symbol, "/") == 0) op_name = "div";
     else if (strcmp(op_symbol, "==") == 0) op_name = "eq";
     else if (strcmp(op_symbol, "!=") == 0) op_name = "ne";
+    else if (strcmp(op_symbol, "<") == 0) op_name = "lt";
+    else if (strcmp(op_symbol, ">") == 0) op_name = "gt";
+    else if (strcmp(op_symbol, "<=") == 0) op_name = "le";
+    else if (strcmp(op_symbol, ">=") == 0) op_name = "ge";
 
     snprintf(buf, sizeof(buf), "__cco_operator_%s_%s", op_name, struct_name ? struct_name : "unknown");
     return buf;
@@ -1093,7 +1097,9 @@ static void gen_expr(CodegenCtx *ctx, AstNode *expr) {
                     char short_msg[256];
                     snprintf(short_msg, sizeof(short_msg), "no 'operator%s' defined for struct '%s'", expr->as.binary.op, lcls);
                     char note_msg[256];
-                    if (strcmp(expr->as.binary.op, "==") == 0 || strcmp(expr->as.binary.op, "!=") == 0) {
+                    if (strcmp(expr->as.binary.op, "==") == 0 || strcmp(expr->as.binary.op, "!=") == 0 ||
+                        strcmp(expr->as.binary.op, "<") == 0 || strcmp(expr->as.binary.op, ">") == 0 ||
+                        strcmp(expr->as.binary.op, "<=") == 0 || strcmp(expr->as.binary.op, ">=") == 0) {
                         snprintf(note_msg, sizeof(note_msg), "fn operator%s(a: %s, b: %s) -> bool { ... }", expr->as.binary.op, lcls, lcls);
                     } else {
                         snprintf(note_msg, sizeof(note_msg), "fn operator%s(a: %s, b: %s) -> %s { ... }", expr->as.binary.op, lcls, lcls, lcls);
