@@ -1,0 +1,24 @@
+class Point {
+    x: float;
+    y: float;
+
+    fn translate(self, dx: float, dy: float) -> void {
+        self.x += dx;
+        self.y += dy;
+    }
+
+    fn display(self) -> void {
+        print(f"Point coordinates: ({self.x}, {self.y})");
+    }
+}
+
+fn main() -> int {
+    let p = Point { x: 3.5, y: 7.0 };
+    p.display();
+
+    print("Translating point by dx = 1.5, dy = -2.0...");
+    p.translate(1.5, -2.0);
+    p.display();
+
+    return 0;
+}
