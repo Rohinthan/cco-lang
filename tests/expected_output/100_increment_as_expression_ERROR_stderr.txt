@@ -1,0 +1,6 @@
+error: syntax error: '++' can only be used as a statement in this version at '++'
+  --> tests/programs/100_increment_as_expression_ERROR.cco:3:14
+    |
+  3 |     let x = i++;
+    |              ^ syntax error here
+    |
