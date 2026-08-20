@@ -1,0 +1,26 @@
+fn main() -> int {
+    print("Enter value for a: ");
+    let a_str = read_line();
+    if (!is_float(a_str)) {
+        print("Error: Invalid number.");
+        return 1;
+    }
+    let a = to_float(a_str);
+
+    print("Enter value for b: ");
+    let b_str = read_line();
+    if (!is_float(b_str)) {
+        print("Error: Invalid number.");
+        return 1;
+    }
+    let b = to_float(b_str);
+
+    print(f"Before swap: a = {a}, b = {b}");
+
+    let temp = a;
+    a = b;
+    b = temp;
+
+    print(f"After swap: a = {a}, b = {b}");
+    return 0;
+}
