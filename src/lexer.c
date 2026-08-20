@@ -337,6 +337,41 @@ TokenArray lex_source(const char *source) {
             append_token(&array, (Token){TOKEN_GE, strdup(">="), line, start_col});
             continue;
         }
+        if (c == '+' && source[pos + 1] == '+') {
+            pos += 2; col += 2;
+            append_token(&array, (Token){TOKEN_INCREMENT, strdup("++"), line, start_col});
+            continue;
+        }
+        if (c == '-' && source[pos + 1] == '-') {
+            pos += 2; col += 2;
+            append_token(&array, (Token){TOKEN_DECREMENT, strdup("--"), line, start_col});
+            continue;
+        }
+        if (c == '+' && source[pos + 1] == '=') {
+            pos += 2; col += 2;
+            append_token(&array, (Token){TOKEN_PLUS_EQ, strdup("+="), line, start_col});
+            continue;
+        }
+        if (c == '-' && source[pos + 1] == '=') {
+            pos += 2; col += 2;
+            append_token(&array, (Token){TOKEN_MINUS_EQ, strdup("-="), line, start_col});
+            continue;
+        }
+        if (c == '*' && source[pos + 1] == '=') {
+            pos += 2; col += 2;
+            append_token(&array, (Token){TOKEN_STAR_EQ, strdup("*="), line, start_col});
+            continue;
+        }
+        if (c == '/' && source[pos + 1] == '=') {
+            pos += 2; col += 2;
+            append_token(&array, (Token){TOKEN_SLASH_EQ, strdup("/="), line, start_col});
+            continue;
+        }
+        if (c == '%' && source[pos + 1] == '=') {
+            pos += 2; col += 2;
+            append_token(&array, (Token){TOKEN_PERCENT_EQ, strdup("%="), line, start_col});
+            continue;
+        }
         if (c == '&' && source[pos + 1] == '&') {
             pos += 2; col += 2;
             append_token(&array, (Token){TOKEN_AND, strdup("&&"), line, start_col});
@@ -455,6 +490,13 @@ const char *token_type_to_string(TokenType type) {
         case TOKEN_STAR: return "*";
         case TOKEN_SLASH: return "/";
         case TOKEN_PERCENT: return "%";
+        case TOKEN_PLUS_EQ: return "+=";
+        case TOKEN_MINUS_EQ: return "-=";
+        case TOKEN_STAR_EQ: return "*=";
+        case TOKEN_SLASH_EQ: return "/=";
+        case TOKEN_PERCENT_EQ: return "%=";
+        case TOKEN_INCREMENT: return "++";
+        case TOKEN_DECREMENT: return "--";
         case TOKEN_NOT: return "!";
         case TOKEN_AND: return "&&";
         case TOKEN_OR: return "||";
