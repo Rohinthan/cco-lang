@@ -638,6 +638,14 @@ static AstNode *parse_call_or_index(Parser *p) {
 }
 
 static AstNode *parse_unary(Parser *p) {
+    if (check(p, TOKEN_INCREMENT)) {
+        Token op = advance(p);
+        fatal_parser_error(op.line, op.col, op.lexeme, "'++' can only be used as a statement in this version");
+    }
+    if (check(p, TOKEN_DECREMENT)) {
+        Token op = advance(p);
+        fatal_parser_error(op.line, op.col, op.lexeme, "'--' can only be used as a statement in this version");
+    }
     if (match(p, TOKEN_NOT) || match(p, TOKEN_MINUS) || match(p, TOKEN_AMP)) {
         Token op = previous(p);
         AstNode *operand = parse_unary(p);
@@ -754,17 +762,29 @@ static AstNode *parse_let_stmt(Parser *p) {
     Token tok = consume(p, TOKEN_LET, "Expected 'let'");
     Token name_tok = consume(p, TOKEN_IDENT, "Expected variable name after 'let'");
 
+    bool has_explicit_type = false;
     Type var_type = TY_INT;
     char *class_name = NULL;
     bool is_array = false;
     bool is_map = false;
     Type key_type = TY_INT;
     if (match(p, TOKEN_COLON)) {
+        has_explicit_type = true;
         var_type = parse_type_with_class(p, &class_name, NULL, &is_array, &is_map, &key_type);
     }
 
     consume(p, TOKEN_ASSIGN, "Expected '=' in variable declaration");
     AstNode *value = parse_expr(p);
+
+    if (check(p, TOKEN_INCREMENT)) {
+        Token op = advance(p);
+        fatal_parser_error(op.line, op.col, op.lexeme, "'++' can only be used as a statement in this version");
+    }
+    if (check(p, TOKEN_DECREMENT)) {
+        Token op = advance(p);
+        fatal_parser_error(op.line, op.col, op.lexeme, "'--' can only be used as a statement in this version");
+    }
+
     consume(p, TOKEN_SEMICOLON, "Expected ';' after let statement");
 
     AstNode *node = arena_alloc_node(p->arena, NODE_LET, tok.line, tok.col);
@@ -775,11 +795,39 @@ static AstNode *parse_let_stmt(Parser *p) {
     node->as.let.key_type = key_type;
     node->as.let.class_name = class_name;
     node->as.let.value = value;
+    node->as.let.has_explicit_type = has_explicit_type;
     return node;
 }
 
 static AstNode *parse_assign_or_expr_stmt(Parser *p) {
     AstNode *lhs = parse_expr(p);
+
+    if (match(p, TOKEN_INCREMENT)) {
+        consume(p, TOKEN_SEMICOLON, "Expected ';' after '++'");
+        AstNode *node = arena_alloc_node(p->arena, NODE_COMPOUND_ASSIGN, lhs->line, lhs->col);
+        node->as.compound_assign.target = lhs;
+        snprintf(node->as.compound_assign.op, sizeof(node->as.compound_assign.op), "++");
+        node->as.compound_assign.value = NULL;
+        return node;
+    }
+    if (match(p, TOKEN_DECREMENT)) {
+        consume(p, TOKEN_SEMICOLON, "Expected ';' after '--'");
+        AstNode *node = arena_alloc_node(p->arena, NODE_COMPOUND_ASSIGN, lhs->line, lhs->col);
+        node->as.compound_assign.target = lhs;
+        snprintf(node->as.compound_assign.op, sizeof(node->as.compound_assign.op), "--");
+        node->as.compound_assign.value = NULL;
+        return node;
+    }
+    if (match(p, TOKEN_PLUS_EQ) || match(p, TOKEN_MINUS_EQ) || match(p, TOKEN_STAR_EQ) || match(p, TOKEN_SLASH_EQ) || match(p, TOKEN_PERCENT_EQ)) {
+        Token op = previous(p);
+        AstNode *value = parse_expr(p);
+        consume(p, TOKEN_SEMICOLON, "Expected ';' after compound assignment");
+        AstNode *node = arena_alloc_node(p->arena, NODE_COMPOUND_ASSIGN, lhs->line, lhs->col);
+        node->as.compound_assign.target = lhs;
+        snprintf(node->as.compound_assign.op, sizeof(node->as.compound_assign.op), "%s", op.lexeme);
+        node->as.compound_assign.value = value;
+        return node;
+    }
 
     if (match(p, TOKEN_ASSIGN)) {
         AstNode *value = parse_expr(p);
@@ -872,7 +920,27 @@ static AstNode *parse_for_stmt(Parser *p) {
     AstNode *step = NULL;
     if (check(p, TOKEN_IDENT)) {
         Token name_tok = advance(p);
-        if (match(p, TOKEN_ASSIGN)) {
+        AstNode *id_node = arena_alloc_node(p->arena, NODE_IDENT, step_tok.line, step_tok.col);
+        id_node->as.ident.name = arena_strdup(p->arena, name_tok.lexeme);
+
+        if (match(p, TOKEN_INCREMENT)) {
+            step = arena_alloc_node(p->arena, NODE_COMPOUND_ASSIGN, step_tok.line, step_tok.col);
+            step->as.compound_assign.target = id_node;
+            snprintf(step->as.compound_assign.op, sizeof(step->as.compound_assign.op), "++");
+            step->as.compound_assign.value = NULL;
+        } else if (match(p, TOKEN_DECREMENT)) {
+            step = arena_alloc_node(p->arena, NODE_COMPOUND_ASSIGN, step_tok.line, step_tok.col);
+            step->as.compound_assign.target = id_node;
+            snprintf(step->as.compound_assign.op, sizeof(step->as.compound_assign.op), "--");
+            step->as.compound_assign.value = NULL;
+        } else if (match(p, TOKEN_PLUS_EQ) || match(p, TOKEN_MINUS_EQ) || match(p, TOKEN_STAR_EQ) || match(p, TOKEN_SLASH_EQ) || match(p, TOKEN_PERCENT_EQ)) {
+            Token op = previous(p);
+            AstNode *val = parse_expr(p);
+            step = arena_alloc_node(p->arena, NODE_COMPOUND_ASSIGN, step_tok.line, step_tok.col);
+            step->as.compound_assign.target = id_node;
+            snprintf(step->as.compound_assign.op, sizeof(step->as.compound_assign.op), "%s", op.lexeme);
+            step->as.compound_assign.value = val;
+        } else if (match(p, TOKEN_ASSIGN)) {
             AstNode *val = parse_expr(p);
             step = arena_alloc_node(p->arena, NODE_ASSIGN, step_tok.line, step_tok.col);
             step->as.assign.name = arena_strdup(p->arena, name_tok.lexeme);
@@ -880,12 +948,28 @@ static AstNode *parse_for_stmt(Parser *p) {
         } else if (match(p, TOKEN_LBRACKET)) {
             AstNode *idx = parse_expr(p);
             consume(p, TOKEN_RBRACKET, "Expected ']'");
-            consume(p, TOKEN_ASSIGN, "Expected '='");
-            AstNode *val = parse_expr(p);
-            step = arena_alloc_node(p->arena, NODE_INDEX_ASSIGN, step_tok.line, step_tok.col);
-            step->as.index_assign.array_name = arena_strdup(p->arena, name_tok.lexeme);
-            step->as.index_assign.index = idx;
-            step->as.index_assign.value = val;
+            if (match(p, TOKEN_INCREMENT) || match(p, TOKEN_DECREMENT) || match(p, TOKEN_PLUS_EQ) || match(p, TOKEN_MINUS_EQ) || match(p, TOKEN_STAR_EQ) || match(p, TOKEN_SLASH_EQ) || match(p, TOKEN_PERCENT_EQ)) {
+                Token op = previous(p);
+                AstNode *idx_node = arena_alloc_node(p->arena, NODE_INDEX, step_tok.line, step_tok.col);
+                idx_node->as.index.array_expr = id_node;
+                idx_node->as.index.array_name = arena_strdup(p->arena, name_tok.lexeme);
+                idx_node->as.index.index = idx;
+
+                AstNode *val = NULL;
+                if (op.type != TOKEN_INCREMENT && op.type != TOKEN_DECREMENT) {
+                    val = parse_expr(p);
+                }
+                step = arena_alloc_node(p->arena, NODE_COMPOUND_ASSIGN, step_tok.line, step_tok.col);
+                step->as.compound_assign.target = idx_node;
+                snprintf(step->as.compound_assign.op, sizeof(step->as.compound_assign.op), "%s", op.lexeme);
+                step->as.compound_assign.value = val;
+            } else if (match(p, TOKEN_ASSIGN)) {
+                AstNode *val = parse_expr(p);
+                step = arena_alloc_node(p->arena, NODE_INDEX_ASSIGN, step_tok.line, step_tok.col);
+                step->as.index_assign.array_name = arena_strdup(p->arena, name_tok.lexeme);
+                step->as.index_assign.index = idx;
+                step->as.index_assign.value = val;
+            }
         } else {
             p->current--;
             step = parse_expr(p);
@@ -1796,6 +1880,348 @@ static AstNode *parse_import_stmt(Parser *p) {
     return node;
 }
 
+static AstNode *clone_target_node(AstArena *arena, AstNode *target) {
+    if (!target) return NULL;
+    if (target->type == NODE_IDENT) {
+        AstNode *n = arena_alloc_node(arena, NODE_IDENT, target->line, target->col);
+        n->as.ident.name = arena_strdup(arena, target->as.ident.name);
+        return n;
+    }
+    if (target->type == NODE_INDEX) {
+        AstNode *n = arena_alloc_node(arena, NODE_INDEX, target->line, target->col);
+        n->as.index.array_expr = clone_target_node(arena, target->as.index.array_expr);
+        n->as.index.array_name = target->as.index.array_name ? arena_strdup(arena, target->as.index.array_name) : NULL;
+        n->as.index.index = target->as.index.index;
+        return n;
+    }
+    if (target->type == NODE_MEMBER) {
+        AstNode *n = arena_alloc_node(arena, NODE_MEMBER, target->line, target->col);
+        n->as.member.object = clone_target_node(arena, target->as.member.object);
+        n->as.member.member_name = arena_strdup(arena, target->as.member.member_name);
+        return n;
+    }
+    return target;
+}
+
+static AstNode *make_assign_from_target(AstArena *arena, AstNode *target, AstNode *rhs, int line, int col) {
+    if (target->type == NODE_IDENT) {
+        AstNode *node = arena_alloc_node(arena, NODE_ASSIGN, line, col);
+        node->as.assign.name = arena_strdup(arena, target->as.ident.name);
+        node->as.assign.value = rhs;
+        return node;
+    }
+    if (target->type == NODE_INDEX) {
+        AstNode *node = arena_alloc_node(arena, NODE_INDEX_ASSIGN, line, col);
+        node->as.index_assign.array_expr = target->as.index.array_expr;
+        node->as.index_assign.array_name = target->as.index.array_name ? arena_strdup(arena, target->as.index.array_name) : NULL;
+        node->as.index_assign.index = target->as.index.index;
+        node->as.index_assign.value = rhs;
+        return node;
+    }
+    if (target->type == NODE_MEMBER) {
+        AstNode *node = arena_alloc_node(arena, NODE_MEMBER_ASSIGN, line, col);
+        node->as.member_assign.object = target->as.member.object;
+        node->as.member_assign.member_name = arena_strdup(arena, target->as.member.member_name);
+        node->as.member_assign.value = rhs;
+        return node;
+    }
+    return NULL;
+}
+
+static void infer_ast_expr_type(AstArena *arena, AstNode *program, AstNode *fn, AstNode *expr, Type *out_type, char **out_class, bool *out_is_array, bool *out_is_map, Type *out_key_type) {
+    *out_type = TY_INT;
+    *out_class = NULL;
+    *out_is_array = false;
+    *out_is_map = false;
+    *out_key_type = TY_INT;
+
+    if (!expr) return;
+
+    if (expr->type == NODE_LITERAL) {
+        *out_type = expr->as.literal.lit_type;
+        return;
+    }
+    if (expr->type == NODE_FSTRING || expr->type == NODE_FSTRING_TEXT) {
+        *out_type = TY_STRING;
+        return;
+    }
+    if (expr->type == NODE_ALLOC) {
+        *out_type = expr->as.alloc.elem_type;
+        *out_class = expr->as.alloc.class_name ? arena_strdup(arena, expr->as.alloc.class_name) : NULL;
+        *out_is_array = !expr->as.alloc.is_map;
+        *out_is_map = expr->as.alloc.is_map;
+        *out_key_type = expr->as.alloc.key_type;
+        return;
+    }
+    if (expr->type == NODE_NEW) {
+        *out_type = TY_CLASS;
+        *out_class = expr->as.new_expr.class_name ? arena_strdup(arena, expr->as.new_expr.class_name) : NULL;
+        return;
+    }
+    if (expr->type == NODE_BINARY) {
+        if (strcmp(expr->as.binary.op, "==") == 0 || strcmp(expr->as.binary.op, "!=") == 0 ||
+            strcmp(expr->as.binary.op, "<") == 0 || strcmp(expr->as.binary.op, ">") == 0 ||
+            strcmp(expr->as.binary.op, "<=") == 0 || strcmp(expr->as.binary.op, ">=") == 0 ||
+            strcmp(expr->as.binary.op, "&&") == 0 || strcmp(expr->as.binary.op, "||") == 0) {
+            *out_type = TY_BOOL;
+            return;
+        }
+        Type lt, rt; char *lc = NULL, *rc = NULL; bool la, ra, lm, rm; Type lk, rk;
+        infer_ast_expr_type(arena, program, fn, expr->as.binary.left, &lt, &lc, &la, &lm, &lk);
+        infer_ast_expr_type(arena, program, fn, expr->as.binary.right, &rt, &rc, &ra, &rm, &rk);
+        if (lt == TY_CLASS && lc) {
+            *out_type = TY_CLASS;
+            *out_class = arena_strdup(arena, lc);
+        } else if (lt == TY_FLOAT || rt == TY_FLOAT) {
+            *out_type = TY_FLOAT;
+        } else {
+            *out_type = TY_INT;
+        }
+        return;
+    }
+    if (expr->type == NODE_UNARY) {
+        if (strcmp(expr->as.unary.op, "!") == 0) {
+            *out_type = TY_BOOL;
+            return;
+        }
+        infer_ast_expr_type(arena, program, fn, expr->as.unary.operand, out_type, out_class, out_is_array, out_is_map, out_key_type);
+        return;
+    }
+    if (expr->type == NODE_IDENT) {
+        const char *var_name = expr->as.ident.name;
+        if (fn && fn->type == NODE_FUNCTION) {
+            for (int p = 0; p < fn->as.function.param_count; p++) {
+                if (strcmp(fn->as.function.param_names[p], var_name) == 0) {
+                    *out_type = fn->as.function.param_types[p];
+                    *out_class = fn->as.function.param_class_names ? fn->as.function.param_class_names[p] : NULL;
+                    *out_is_array = fn->as.function.param_is_array ? fn->as.function.param_is_array[p] : false;
+                    return;
+                }
+            }
+        } else if (fn && fn->type == NODE_METHOD) {
+            for (int p = 0; p < fn->as.method.param_count; p++) {
+                if (strcmp(fn->as.method.param_names[p], var_name) == 0) {
+                    *out_type = fn->as.method.param_types[p];
+                    *out_class = fn->as.method.param_class_names ? fn->as.method.param_class_names[p] : NULL;
+                    *out_is_array = fn->as.method.param_is_array ? fn->as.method.param_is_array[p] : false;
+                    return;
+                }
+            }
+        }
+        AstNode *body = (fn && fn->type == NODE_FUNCTION) ? fn->as.function.body : (fn ? fn->as.method.body : NULL);
+        if (body && body->type == NODE_BLOCK) {
+            for (int s = 0; s < body->as.block.count; s++) {
+                AstNode *st = body->as.block.stmts[s];
+                if (st && st->type == NODE_LET && strcmp(st->as.let.name, var_name) == 0) {
+                    *out_type = st->as.let.var_type;
+                    *out_class = st->as.let.class_name;
+                    *out_is_array = st->as.let.is_array;
+                    *out_is_map = st->as.let.is_map;
+                    *out_key_type = st->as.let.key_type;
+                    return;
+                }
+            }
+        }
+        return;
+    }
+    if (expr->type == NODE_CALL) {
+        const char *callee = expr->as.call.callee;
+        if (strcmp(callee, "concat") == 0 || strcmp(callee, "substring") == 0 || strcmp(callee, "read_file") == 0 || strcmp(callee, "read_line") == 0 || strcmp(callee, "program_name") == 0) {
+            *out_type = TY_STRING;
+            return;
+        }
+        if (strcmp(callee, "args") == 0) {
+            *out_type = TY_STRING;
+            *out_is_array = true;
+            return;
+        }
+        if (strcmp(callee, "sqrt") == 0 || strcmp(callee, "sin") == 0 || strcmp(callee, "cos") == 0 || strcmp(callee, "tan") == 0 || strcmp(callee, "pow") == 0 || strcmp(callee, "abs_float") == 0 || strcmp(callee, "floor") == 0 || strcmp(callee, "ceil") == 0 || strcmp(callee, "min_float") == 0 || strcmp(callee, "max_float") == 0 || strcmp(callee, "to_float") == 0) {
+            *out_type = TY_FLOAT;
+            return;
+        }
+        if (strcmp(callee, "equals") == 0 || strcmp(callee, "is_int") == 0 || strcmp(callee, "is_float") == 0 || strcmp(callee, "has") == 0 || strcmp(callee, "write_file") == 0) {
+            *out_type = TY_BOOL;
+            return;
+        }
+        if (strcmp(callee, "char_at") == 0) {
+            *out_type = TY_CHAR;
+            return;
+        }
+        if (strcmp(callee, "to_int") == 0 || strcmp(callee, "len") == 0 || strcmp(callee, "abs_int") == 0 || strcmp(callee, "min_int") == 0 || strcmp(callee, "max_int") == 0 || strcmp(callee, "arg_count") == 0 || strcmp(callee, "random_int") == 0) {
+            *out_type = TY_INT;
+            return;
+        }
+        if (strcmp(callee, "get") == 0 && expr->as.call.arg_count == 2) {
+            Type mt; char *mc = NULL; bool ma, mm; Type mk;
+            infer_ast_expr_type(arena, program, fn, expr->as.call.args[0], &mt, &mc, &ma, &mm, &mk);
+            *out_type = mt;
+            *out_class = mc;
+            return;
+        }
+        if (strcmp(callee, "pop") == 0 && expr->as.call.arg_count == 1) {
+            Type at; char *ac = NULL; bool aa, am; Type ak;
+            infer_ast_expr_type(arena, program, fn, expr->as.call.args[0], &at, &ac, &aa, &am, &ak);
+            *out_type = at;
+            *out_class = ac;
+            return;
+        }
+        if (program && program->type == NODE_PROGRAM) {
+            for (int f = 0; f < program->as.program.count; f++) {
+                AstNode *target_fn = program->as.program.functions[f];
+                if (strcmp(target_fn->as.function.name, callee) == 0) {
+                    *out_type = target_fn->as.function.return_type;
+                    *out_class = target_fn->as.function.return_class_name ? arena_strdup(arena, target_fn->as.function.return_class_name) : NULL;
+                    *out_is_array = target_fn->as.function.return_is_array;
+                    *out_is_map = target_fn->as.function.return_is_map;
+                    *out_key_type = target_fn->as.function.return_key_type;
+                    return;
+                }
+            }
+        }
+    }
+    if (expr->type == NODE_INDEX) {
+        Type at; char *ac = NULL; bool aa, am; Type ak;
+        infer_ast_expr_type(arena, program, fn, expr->as.index.array_expr ? expr->as.index.array_expr : expr, &at, &ac, &aa, &am, &ak);
+        *out_type = at;
+        *out_class = ac;
+        return;
+    }
+}
+
+static AstNode *desugar_stmt_node(AstArena *arena, AstNode *program, AstNode *fn, AstNode *stmt) {
+    if (!stmt) return NULL;
+
+    if (stmt->type == NODE_LET) {
+        if (!stmt->as.let.has_explicit_type) {
+            Type vt; char *vc = NULL; bool va = false, vm = false; Type vk = TY_INT;
+            infer_ast_expr_type(arena, program, fn, stmt->as.let.value, &vt, &vc, &va, &vm, &vk);
+            stmt->as.let.var_type = vt;
+            stmt->as.let.class_name = vc;
+            stmt->as.let.is_array = va;
+            stmt->as.let.is_map = vm;
+            stmt->as.let.key_type = vk;
+        } else {
+            if (stmt->as.let.value && stmt->as.let.value->type == NODE_LITERAL) {
+                Type val_t = stmt->as.let.value->as.literal.lit_type;
+                if (stmt->as.let.var_type != val_t && !(stmt->as.let.var_type == TY_FLOAT && val_t == TY_INT)) {
+                    char short_msg[256];
+                    snprintf(short_msg, sizeof(short_msg), "type mismatch in variable declaration — '%s' is declared with an incompatible type", stmt->as.let.name);
+                    ErrorLocation primary = {get_error_filename(), stmt->line, stmt->col};
+                    print_formatted_error(short_msg, primary, "type mismatch", NULL, NULL, NULL, NULL);
+                    exit(1);
+                }
+            }
+        }
+        return stmt;
+    }
+
+    if (stmt->type == NODE_COMPOUND_ASSIGN) {
+        AstNode *target = stmt->as.compound_assign.target;
+        const char *op = stmt->as.compound_assign.op;
+        AstNode *val = stmt->as.compound_assign.value;
+
+        Type tt; char *tc = NULL; bool ta = false, tm = false; Type tk = TY_INT;
+        infer_ast_expr_type(arena, program, fn, target, &tt, &tc, &ta, &tm, &tk);
+
+        if (strcmp(op, "++") == 0) {
+            AstNode *lit1 = arena_alloc_node(arena, NODE_LITERAL, stmt->line, stmt->col);
+            lit1->as.literal.lit_type = TY_INT;
+            lit1->as.literal.val.i = 1;
+            AstNode *bin = arena_alloc_node(arena, NODE_BINARY, stmt->line, stmt->col);
+            snprintf(bin->as.binary.op, sizeof(bin->as.binary.op), "+");
+            bin->as.binary.left = clone_target_node(arena, target);
+            bin->as.binary.right = lit1;
+            return make_assign_from_target(arena, target, bin, stmt->line, stmt->col);
+        }
+        if (strcmp(op, "--") == 0) {
+            AstNode *lit1 = arena_alloc_node(arena, NODE_LITERAL, stmt->line, stmt->col);
+            lit1->as.literal.lit_type = TY_INT;
+            lit1->as.literal.val.i = 1;
+            AstNode *bin = arena_alloc_node(arena, NODE_BINARY, stmt->line, stmt->col);
+            snprintf(bin->as.binary.op, sizeof(bin->as.binary.op), "-");
+            bin->as.binary.left = clone_target_node(arena, target);
+            bin->as.binary.right = lit1;
+            return make_assign_from_target(arena, target, bin, stmt->line, stmt->col);
+        }
+        if (tt == TY_STRING && strcmp(op, "+=") == 0) {
+            AstNode *call = arena_alloc_node(arena, NODE_CALL, stmt->line, stmt->col);
+            call->as.call.callee = arena_strdup(arena, "concat");
+            call->as.call.args = (AstNode **)arena_alloc_array(arena, 2, sizeof(AstNode *));
+            call->as.call.args[0] = clone_target_node(arena, target);
+            call->as.call.args[1] = val;
+            call->as.call.arg_count = 2;
+            return make_assign_from_target(arena, target, call, stmt->line, stmt->col);
+        }
+
+        AstNode *bin = arena_alloc_node(arena, NODE_BINARY, stmt->line, stmt->col);
+        bin->as.binary.op[0] = op[0];
+        bin->as.binary.op[1] = '\0';
+        bin->as.binary.left = clone_target_node(arena, target);
+        bin->as.binary.right = val;
+        return make_assign_from_target(arena, target, bin, stmt->line, stmt->col);
+    }
+
+    if (stmt->type == NODE_BLOCK) {
+        for (int i = 0; i < stmt->as.block.count; i++) {
+            stmt->as.block.stmts[i] = desugar_stmt_node(arena, program, fn, stmt->as.block.stmts[i]);
+        }
+        return stmt;
+    }
+    if (stmt->type == NODE_IF) {
+        stmt->as.if_stmt.then_b = desugar_stmt_node(arena, program, fn, stmt->as.if_stmt.then_b);
+        if (stmt->as.if_stmt.else_b) {
+            stmt->as.if_stmt.else_b = desugar_stmt_node(arena, program, fn, stmt->as.if_stmt.else_b);
+        }
+        return stmt;
+    }
+    if (stmt->type == NODE_WHILE) {
+        stmt->as.while_stmt.body = desugar_stmt_node(arena, program, fn, stmt->as.while_stmt.body);
+        return stmt;
+    }
+    if (stmt->type == NODE_FOR) {
+        if (stmt->as.for_stmt.init) {
+            stmt->as.for_stmt.init = desugar_stmt_node(arena, program, fn, stmt->as.for_stmt.init);
+        }
+        if (stmt->as.for_stmt.step && stmt->as.for_stmt.step->type == NODE_COMPOUND_ASSIGN) {
+            stmt->as.for_stmt.step = desugar_stmt_node(arena, program, fn, stmt->as.for_stmt.step);
+        }
+        stmt->as.for_stmt.body = desugar_stmt_node(arena, program, fn, stmt->as.for_stmt.body);
+        return stmt;
+    }
+    if (stmt->type == NODE_FOR_EACH) {
+        stmt->as.for_each.body = desugar_stmt_node(arena, program, fn, stmt->as.for_each.body);
+        return stmt;
+    }
+    if (stmt->type == NODE_MATCH) {
+        for (int a = 0; a < stmt->as.match_stmt.arm_count; a++) {
+            stmt->as.match_stmt.arms[a]->as.match_arm.body = desugar_stmt_node(arena, program, fn, stmt->as.match_stmt.arms[a]->as.match_arm.body);
+        }
+        return stmt;
+    }
+
+    return stmt;
+}
+
+static void desugar_and_infer_program(AstArena *arena, AstNode *program) {
+    if (!program || program->type != NODE_PROGRAM) return;
+
+    for (int f = 0; f < program->as.program.count; f++) {
+        AstNode *fn = program->as.program.functions[f];
+        if (fn && fn->as.function.body) {
+            fn->as.function.body = desugar_stmt_node(arena, program, fn, fn->as.function.body);
+        }
+    }
+    for (int c = 0; c < program->as.program.class_count; c++) {
+        AstNode *cls = program->as.program.classes[c];
+        for (int m = 0; m < cls->as.class_decl.method_count; m++) {
+            AstNode *mn = cls->as.class_decl.methods[m];
+            if (mn && mn->as.method.body) {
+                mn->as.method.body = desugar_stmt_node(arena, program, mn, mn->as.method.body);
+            }
+        }
+    }
+}
+
 AstNode *parse_program(Parser *p) {
     AstNode **imports = NULL;
     int import_count = 0;
@@ -2034,6 +2460,8 @@ AstNode *parse_program(Parser *p) {
             }
         }
     }
+
+    desugar_and_infer_program(p->arena, prog);
 
     return prog;
 }
