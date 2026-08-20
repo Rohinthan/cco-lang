@@ -1,0 +1,49 @@
+class Greeter {
+    greeting: string;
+
+    fn say_hello(self) -> void {
+        print(self.greeting);
+    }
+}
+
+fn add_nums(a: int, b: int) -> int {
+    return a + b;
+}
+
+fn main() -> int {
+    let a = 42;
+    let b = 3.14;
+    let c = "Cco v19 inference";
+    let d = true;
+    let ch = 'X';
+
+    print(a);
+    print(b);
+    print(c);
+    print(d);
+    print(ch);
+
+    let sum = add_nums(10, 20);
+    print(sum);
+
+    let g = Greeter { greeting: "Hello from Greeter!" };
+    g.say_hello();
+
+    let arr = alloc(int, 3);
+    arr[0] = 100;
+    arr[1] = 200;
+    arr[2] = 300;
+    print(arr[0]);
+    print(arr[1]);
+    print(arr[2]);
+
+    let m = map_new(string, int);
+    m = put(m, "one", 1);
+    m = put(m, "two", 2);
+    let v1 = get(m, "one");
+    let v2 = get(m, "two");
+    print(v1);
+    print(v2);
+
+    return 0;
+}

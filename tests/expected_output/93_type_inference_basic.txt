@@ -1,0 +1,12 @@
+42
+3.14
+Cco v19 inference
+true
+X
+30
+Hello from Greeter!
+100
+200
+300
+1
+2
