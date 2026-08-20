@@ -1,9 +1,9 @@
-// Interactive Number Guessing Game in Cco v15
-// Demonstrates f-strings, random_seed(), random_int(), read_line(), is_int(), to_int()
+// Interactive Number Guessing Game in Cco v19
+// Demonstrates f-strings, random_seed(), random_int(), read_line(), is_int(), to_int(), and type inference
 
 fn play_round(secret: int, guess_str: string) -> bool {
     if (is_int(guess_str)) {
-        let guess: int = to_int(guess_str);
+        let guess = to_int(guess_str);
         if (guess == secret) {
             print(f"Correct! You guessed the secret number: {secret}.");
             return true;
@@ -23,18 +23,18 @@ fn play_round(secret: int, guess_str: string) -> bool {
 
 fn main() -> int {
     random_seed(12345);
-    let secret: int = random_int(1, 50);
+    let secret = random_int(1, 50);
 
     print("Secret number chosen between 1 and 50.");
     print("Testing simulated guesses:");
 
-    let g1: string = "10";
-    let w1: bool = play_round(secret, g1);
+    let g1 = "10";
+    let w1 = play_round(secret, g1);
     if (!w1) {
-        let g2: string = "invalid_guess";
-        let w2: bool = play_round(secret, g2);
+        let g2 = "invalid_guess";
+        let w2 = play_round(secret, g2);
         if (!w2) {
-            let g3: string = "40";
+            let g3 = "40";
             play_round(secret, g3);
         }
     }
