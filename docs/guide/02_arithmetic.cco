@@ -1,0 +1,21 @@
+fn main() -> int {
+    print("Enter the first number: ");
+    let input1 = read_line();
+    if (!is_float(input1)) {
+        print("Error: Invalid number entered.");
+        return 1;
+    }
+    let num1 = to_float(input1);
+
+    print("Enter the second number: ");
+    let input2 = read_line();
+    if (!is_float(input2)) {
+        print("Error: Invalid number entered.");
+        return 1;
+    }
+    let num2 = to_float(input2);
+
+    let sum = num1 + num2;
+    print(f"sum: {num1} + {num2} = {sum}");
+    return 0;
+}
