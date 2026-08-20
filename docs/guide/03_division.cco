@@ -1,0 +1,25 @@
+fn main() -> int {
+    print("Enter numerator: ");
+    let input1 = read_line();
+    if (!is_float(input1)) {
+        print("Error: Invalid number entered.");
+        return 1;
+    }
+    let num1 = to_float(input1);
+
+    print("Enter denominator: ");
+    let input2 = read_line();
+    if (!is_float(input2)) {
+        print("Error: Invalid number entered.");
+        return 1;
+    }
+    let num2 = to_float(input2);
+
+    if (num2 == 0.0) {
+        print("Error: Division by zero is not allowed.");
+    } else {
+        let result = num1 / num2;
+        print(f"result: {num1} / {num2} = {result}");
+    }
+    return 0;
+}
