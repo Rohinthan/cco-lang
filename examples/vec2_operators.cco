@@ -15,6 +15,14 @@ fn operator==(a: Vec2, b: Vec2) -> bool {
     return a.x == b.x && a.y == b.y;
 }
 
+fn magnitude_sq(v: Vec2) -> float {
+    return v.x * v.x + v.y * v.y;
+}
+
+fn operator<(a: Vec2, b: Vec2) -> bool {
+    return magnitude_sq(a) < magnitude_sq(b);
+}
+
 fn main() -> int {
     let p: Vec2 = Vec2 { x: 1.0, y: 2.0 };
     let q: Vec2 = Vec2 { x: 3.0, y: 4.0 };
@@ -24,5 +32,7 @@ fn main() -> int {
     print(neg.x);        // -1.0
     print(p == p);       // true
     print(p == q);       // false
+    print(p < q);        // true (5.0 < 25.0)
+    print(q < p);        // false
     return 0;
 }
