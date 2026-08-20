@@ -1,0 +1,21 @@
+fn main() -> int {
+    print("Enter base of the triangle: ");
+    let b_str = read_line();
+    if (!is_float(b_str)) {
+        print("Error: Invalid base value.");
+        return 1;
+    }
+    let base = to_float(b_str);
+
+    print("Enter height of the triangle: ");
+    let h_str = read_line();
+    if (!is_float(h_str)) {
+        print("Error: Invalid height value.");
+        return 1;
+    }
+    let height = to_float(h_str);
+
+    let area = 0.5 * base * height;
+    print(f"The area of the triangle is: {area}");
+    return 0;
+}
