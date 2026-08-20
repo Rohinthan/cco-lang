@@ -1,0 +1,13 @@
+fn main() -> int {
+    print("Enter temperature in Celsius: ");
+    let c_str = read_line();
+    if (!is_float(c_str)) {
+        print("Error: Invalid temperature value.");
+        return 1;
+    }
+    let celsius = to_float(c_str);
+    let fahrenheit = (celsius * 9.0 / 5.0) + 32.0;
+
+    print(f"{celsius} Celsius is equal to {fahrenheit} Fahrenheit");
+    return 0;
+}
