@@ -1,0 +1,6 @@
+fn main() -> int {
+    random_seed(42);
+    let secret = random_int(1, 100);
+    print(f"Random number between 1 and 100: {secret}");
+    return 0;
+}
