@@ -1,0 +1,23 @@
+fn main() -> int {
+    let i = 0;
+    i++;
+    print(i);
+    i++;
+    print(i);
+    i--;
+    print(i);
+
+    let sum = 0;
+    for (let k = 0; k < 5; k++) {
+        sum += k;
+    }
+    print(sum);
+
+    let countdown = 0;
+    for (let k = 5; k > 0; k--) {
+        countdown += k;
+    }
+    print(countdown);
+
+    return 0;
+}
