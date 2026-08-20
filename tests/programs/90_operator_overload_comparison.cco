@@ -1,0 +1,48 @@
+struct Vec2 {
+    x: float;
+    y: float;
+}
+
+fn magnitude_sq(v: Vec2) -> float {
+    return v.x * v.x + v.y * v.y;
+}
+
+fn operator<(a: Vec2, b: Vec2) -> bool {
+    return magnitude_sq(a) < magnitude_sq(b);
+}
+
+fn operator>(a: Vec2, b: Vec2) -> bool {
+    return magnitude_sq(a) > magnitude_sq(b);
+}
+
+fn operator<=(a: Vec2, b: Vec2) -> bool {
+    return magnitude_sq(a) <= magnitude_sq(b);
+}
+
+fn operator>=(a: Vec2, b: Vec2) -> bool {
+    return magnitude_sq(a) >= magnitude_sq(b);
+}
+
+fn main() -> int {
+    let p: Vec2 = Vec2 { x: 1.0, y: 1.0 };
+    let q: Vec2 = Vec2 { x: 3.0, y: 4.0 };
+    let r: Vec2 = Vec2 { x: 1.0, y: 1.0 };
+
+    print(p < q);
+    print(q < p);
+    print(p < r);
+
+    print(p > q);
+    print(q > p);
+    print(p > r);
+
+    print(p <= q);
+    print(q <= p);
+    print(p <= r);
+
+    print(p >= q);
+    print(q >= p);
+    print(p >= r);
+
+    return 0;
+}
