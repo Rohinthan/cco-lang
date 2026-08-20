@@ -1,0 +1,11 @@
+struct Point {
+    x: int;
+    y: int;
+}
+
+fn main() -> int {
+    let p = Point { x: 1, y: 2 };
+    let q = Point { x: 3, y: 4 };
+    p += q;
+    return 0;
+}

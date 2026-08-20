@@ -1,0 +1,7 @@
+error: no 'operator+' defined for struct 'Point'
+  --> tests/programs/98_compound_assign_missing_operator_ERROR.cco:9:5
+    |
+  9 |     p += q;
+    |     ^ missing operator definition
+    |
+note: fn operator+(a: Point, b: Point) -> Point { ... }
