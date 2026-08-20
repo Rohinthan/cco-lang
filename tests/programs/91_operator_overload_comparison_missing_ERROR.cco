@@ -1,0 +1,11 @@
+struct Vec2 {
+    x: float;
+    y: float;
+}
+
+fn main() -> int {
+    let p: Vec2 = Vec2 { x: 1.0, y: 1.0 };
+    let q: Vec2 = Vec2 { x: 3.0, y: 4.0 };
+    print(p < q);
+    return 0;
+}

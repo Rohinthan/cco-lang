@@ -1,0 +1,7 @@
+error: no 'operator<' defined for struct 'Vec2'
+  --> tests/programs/91_operator_overload_comparison_missing_ERROR.cco:9:13
+    |
+  9 |     print(p < q);
+    |             ^ missing operator definition
+    |
+note: fn operator<(a: Vec2, b: Vec2) -> bool { ... }
