@@ -69,6 +69,13 @@ typedef enum {
     TOKEN_STAR,       // *
     TOKEN_SLASH,      // /
     TOKEN_PERCENT,    // %
+    TOKEN_PLUS_EQ,    // +=
+    TOKEN_MINUS_EQ,   // -=
+    TOKEN_STAR_EQ,    // *=
+    TOKEN_SLASH_EQ,   // /=
+    TOKEN_PERCENT_EQ, // %=
+    TOKEN_INCREMENT,  // ++
+    TOKEN_DECREMENT,  // --
     TOKEN_NOT,        // !
     TOKEN_AND,        // &&
     TOKEN_OR,         // ||
