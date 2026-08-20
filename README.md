@@ -1,53 +1,21 @@
-# Cco (C--) Compiler: A C-like Language with Interfaces via Monomorphization, Operator Overloading for Structs, F-Strings, Self-Hosted Lexer, Tagged Unions, Pattern Matching, Hash Maps, Growable Arrays, Selective Prelude Emission, Lightweight Structs & Standard Library (v17.0)
+# Cco (C--) Compiler: A C-like Language with Comparison & Arithmetic Operator Overloading for Structs, Interfaces via Monomorphization, F-Strings, Self-Hosted Lexer, Tagged Unions, Pattern Matching, Hash Maps, Growable Arrays, Selective Prelude Emission, Lightweight Structs & Standard Library (v18.0)
 
-**Cco (C--)** is a lightweight, systems programming language with explicit C-like syntax, **Interfaces with Compile-Time Monomorphization (`interface`, `impl`, `impl Trait`)**, **Operator Overloading for Structs (`operator+`, `operator-`, `operator==`, etc.)**, **Python-style F-String Interpolation (`f"Hello {name}, score: {score}"`)**, **Interactive I/O, Numeric Parsing & Randomness (`read_line`, `is_int`, `to_int`, `random_int`)**, **Command-Line Arguments (`args()`, `arg_count()`, `program_name()`)**, **a self-hosted lexer proof-of-concept (`selfhost/lexer.cco`)**, **scope-exit auto-free for raw allocations**, **compile-time single ownership with move semantics**, **Tagged Unions (`enum`) and Pattern Matching (`match`)**, **Hash Maps (`map[K]V`, `map_new`, `put`, `get`, `has`, `remove`, `keys`, `len`)**, **Growable Arrays (`list_new`, `push`, `pop`, `len`)**, **Selective Prelude Emission** (only emitting used stdlib helpers for clean generated C), **Lightweight Structs (Value Types)** (`struct Point2D { x: int; y: int; }`), **Arrays of Objects with for-each iteration** (`alloc(Point, n)`, `for p in pts`), **Minimal Multi-file Module/Import System** (`import "file.cco";`), and a **built-in Standard Library** (Strings, Math, File I/O). It transpiles Cco source code (`.cco`) into portable, standard C11 source code (`.c`), which is compiled to native machine binaries using `gcc` or `clang`.
+**Cco (C--)** is a lightweight, systems programming language with explicit C-like syntax, **Operator Overloading for Structs (`operator+`, `operator-`, `operator==`, `operator<`, `operator>`, `operator<=`, `operator>=`, etc.)**, **Interfaces with Compile-Time Monomorphization (`interface`, `impl`, `impl Trait`)**, **Python-style F-String Interpolation (`f"Hello {name}, score: {score}"`)**, **Interactive I/O, Numeric Parsing & Randomness (`read_line`, `is_int`, `to_int`, `random_int`)**, **Command-Line Arguments (`args()`, `arg_count()`, `program_name()`)**, **a self-hosted lexer proof-of-concept (`selfhost/lexer.cco`)**, **scope-exit auto-free for raw allocations**, **compile-time single ownership with move semantics**, **Tagged Unions (`enum`) and Pattern Matching (`match`)**, **Hash Maps (`map[K]V`, `map_new`, `put`, `get`, `has`, `remove`, `keys`, `len`)**, **Growable Arrays (`list_new`, `push`, `pop`, `len`)**, **Selective Prelude Emission** (only emitting used stdlib helpers for clean generated C), **Lightweight Structs (Value Types)** (`struct Point2D { x: int; y: int; }`), **Arrays of Objects with for-each iteration** (`alloc(Point, n)`, `for p in pts`), **Minimal Multi-file Module/Import System** (`import "file.cco";`), and a **built-in Standard Library** (Strings, Math, File I/O). It transpiles Cco source code (`.cco`) into portable, standard C11 source code (`.c`), which is compiled to native machine binaries using `gcc` or `clang`.
 
 > **Write it like Python's class/struct/enum/map/f-string syntax reads with clean Rust-style interfaces via zero-cost compile-time monomorphization and C++-style operator overloading on value structs. Compile it and it runs like C with zero runtime vtables, zero GC pauses, clean inspectable generated C via selective prelude emission, stack-allocated value structs, Rust-like compile-time ownership safety across multi-file programs, exhaustive pattern matching, and GCC/Rust-style diagnostic error messages.**
 
 ---
 
-## 🧩 Interfaces via Compile-Time Monomorphization (v17.0)
+## ➕ Operator Overloading for Structs (v16.0 & v18.0)
 
-Cco v17.0 introduces interfaces without runtime vtables or fat pointers, resolved entirely via compile-time monomorphization:
-
-- **Interface Declaration**: Define method signatures with required receiver `self` and optional `Self` type:
-  ```cco
-  interface Printable {
-      fn describe(self) -> void;
-  }
-
-  interface Comparable {
-      fn compare_to(self, other: &Self) -> int;
-  }
-  ```
-- **Explicit Impl Assertion**: No duck typing; classes explicitly declare conformance:
-  ```cco
-  impl Printable for Point;
-  impl Comparable for Score;
-  ```
-- **Generic Functions via `impl Trait`**: Functions accept any type satisfying an interface:
-  ```cco
-  fn announce(item: &impl Printable) -> void {
-      item.describe();
-  }
-  ```
-- **Compile-Time Specialization (Zero Vtables)**:
-  - Each call site with a distinct concrete class generates a specialized function (e.g. `announce__Point(item)`).
-  - Inside generic functions, only declared interface methods can be called.
-  - Unused template functions are dropped at compile time (zero dead code).
-  - Monomorphized functions seamlessly inherit Cco's compile-time ownership and borrow checking rules.
-
----
-
-## ➕ Operator Overloading for Structs (v16.0)
-
-Cco v16.0 introduces clean operator overloading for value-type structs:
+Cco supports clean, compile-time operator overloading for value-type structs across **10 operators**:
 
 - **Syntax**: Top-level function declarations using `fn operator<op>(...)`:
-  - Binary arithmetic: `+`, `-`, `*`, `/` (2 parameters of the same struct type)
-  - Equality comparison: `==`, `!=` (2 parameters of the same struct type, returning `bool`)
-  - Unary negation: `-` (1 parameter of the struct type)
-- **Call-Site Desugaring**: Expressions like `p + q` or `-p` automatically desugar to plain C function calls (e.g. `__cco_operator_add_Vec2(p, q)`).
+  - **Binary Arithmetic**: `+`, `-`, `*`, `/` (2 parameters of the same struct type)
+  - **Equality Comparison**: `==`, `!=` (2 parameters of the same struct type, returning `bool`)
+  - **Ordering Comparison (v18.0)**: `<`, `>`, `<=`, `>=` (2 parameters of the same struct type, returning `bool`)
+  - **Unary Negation**: `-` (1 parameter of the struct type)
+- **Call-Site Desugaring**: Expressions like `p + q`, `-p`, or `p < q` automatically desugar to plain C function calls (e.g. `__cco_operator_add_Vec2(p, q)`, `__cco_operator_lt_Vec2(p, q)`).
 - **Deliberate Struct-Only Restriction**: Operator overloading is restricted to `struct` types (value types) only. Classes require move/borrow semantics and heap allocation lifecycles inside operator functions, which is deferred to preserve simplicity and zero memory leaks.
 
 ```cco
@@ -68,6 +36,14 @@ fn operator==(a: Vec2, b: Vec2) -> bool {
     return a.x == b.x && a.y == b.y;
 }
 
+fn magnitude_sq(v: Vec2) -> float {
+    return v.x * v.x + v.y * v.y;
+}
+
+fn operator<(a: Vec2, b: Vec2) -> bool {
+    return magnitude_sq(a) < magnitude_sq(b);
+}
+
 fn main() -> int {
     let p: Vec2 = Vec2 { x: 1.0, y: 2.0 };
     let q: Vec2 = Vec2 { x: 3.0, y: 4.0 };
@@ -76,6 +52,7 @@ fn main() -> int {
     print(sum.x);   // 4
     print(neg.x);   // -1
     print(p == p);  // true
+    print(p < q);   // true (5.0 < 25.0)
     return 0;
 }
 ```
