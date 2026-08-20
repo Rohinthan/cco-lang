@@ -1,0 +1,17 @@
+fn main() -> int {
+    let msg = "Hello";
+    msg += ", ";
+    msg += "World";
+    msg += "!";
+    print(msg);
+
+    let accum = "";
+    let i = 0;
+    while (i < 5) {
+        accum += "x";
+        i++;
+    }
+    print(accum);
+
+    return 0;
+}
