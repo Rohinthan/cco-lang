@@ -1520,8 +1520,20 @@ static AstNode *parse_function(Parser *p) {
         } else if (match(p, TOKEN_NE)) {
             op_tok = previous(p);
             op_symbol = "!=";
+        } else if (match(p, TOKEN_LT)) {
+            op_tok = previous(p);
+            op_symbol = "<";
+        } else if (match(p, TOKEN_GT)) {
+            op_tok = previous(p);
+            op_symbol = ">";
+        } else if (match(p, TOKEN_LE)) {
+            op_tok = previous(p);
+            op_symbol = "<=";
+        } else if (match(p, TOKEN_GE)) {
+            op_tok = previous(p);
+            op_symbol = ">=";
         } else {
-            fatal_parser_error(peek(p).line, peek(p).col, peek(p).lexeme, "Expected operator symbol (+, -, *, /, ==, !=) after 'operator'");
+            fatal_parser_error(peek(p).line, peek(p).col, peek(p).lexeme, "Expected operator symbol (+, -, *, /, ==, !=, <, >, <=, >=) after 'operator'");
         }
         char buf[64];
         snprintf(buf, sizeof(buf), "operator%s", op_symbol);
@@ -1916,7 +1928,10 @@ AstNode *parse_program(Parser *p) {
         const char *op = fn->as.function.operator_symbol;
         int arity = fn->as.function.param_count;
 
-        if (strcmp(op, "==") == 0 || strcmp(op, "!=") == 0 || strcmp(op, "+") == 0 || strcmp(op, "*") == 0 || strcmp(op, "/") == 0) {
+        if (strcmp(op, "==") == 0 || strcmp(op, "!=") == 0 ||
+            strcmp(op, "<") == 0 || strcmp(op, ">") == 0 ||
+            strcmp(op, "<=") == 0 || strcmp(op, ">=") == 0 ||
+            strcmp(op, "+") == 0 || strcmp(op, "*") == 0 || strcmp(op, "/") == 0) {
             if (arity != 2) {
                 char short_msg[256];
                 snprintf(short_msg, sizeof(short_msg), "'operator%s' requires exactly 2 parameters", op);
@@ -1989,7 +2004,9 @@ AstNode *parse_program(Parser *p) {
             }
         }
 
-        if (strcmp(op, "==") == 0 || strcmp(op, "!=") == 0) {
+        if (strcmp(op, "==") == 0 || strcmp(op, "!=") == 0 ||
+            strcmp(op, "<") == 0 || strcmp(op, ">") == 0 ||
+            strcmp(op, "<=") == 0 || strcmp(op, ">=") == 0) {
             if (fn->as.function.return_type != TY_BOOL) {
                 char short_msg[256];
                 snprintf(short_msg, sizeof(short_msg), "'operator%s' must return bool", op);
