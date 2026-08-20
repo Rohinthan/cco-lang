@@ -1,0 +1,13 @@
+fn main() -> int {
+    print("Enter distance in kilometers: ");
+    let km_str = read_line();
+    if (!is_float(km_str)) {
+        print("Error: Invalid kilometer value.");
+        return 1;
+    }
+    let km = to_float(km_str);
+    let miles = km * 0.621371;
+
+    print(f"{km} kilometers is equal to {miles} miles");
+    return 0;
+}
