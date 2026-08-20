@@ -1,8 +1,68 @@
-# Cco (C--) Compiler: A C-like Language with Comparison & Arithmetic Operator Overloading for Structs, Interfaces via Monomorphization, F-Strings, Self-Hosted Lexer, Tagged Unions, Pattern Matching, Hash Maps, Growable Arrays, Selective Prelude Emission, Lightweight Structs & Standard Library (v18.0)
+# Cco (C--) Compiler: A C-like Language with Type Inference for `let`, Compound Assignment, Comparison & Arithmetic Operator Overloading for Structs, Interfaces via Monomorphization, F-Strings, Self-Hosted Lexer, Tagged Unions, Pattern Matching, Hash Maps, Growable Arrays & Selective Prelude Emission (v19.0)
 
-**Cco (C--)** is a lightweight, systems programming language with explicit C-like syntax, **Operator Overloading for Structs (`operator+`, `operator-`, `operator==`, `operator<`, `operator>`, `operator<=`, `operator>=`, etc.)**, **Interfaces with Compile-Time Monomorphization (`interface`, `impl`, `impl Trait`)**, **Python-style F-String Interpolation (`f"Hello {name}, score: {score}"`)**, **Interactive I/O, Numeric Parsing & Randomness (`read_line`, `is_int`, `to_int`, `random_int`)**, **Command-Line Arguments (`args()`, `arg_count()`, `program_name()`)**, **a self-hosted lexer proof-of-concept (`selfhost/lexer.cco`)**, **scope-exit auto-free for raw allocations**, **compile-time single ownership with move semantics**, **Tagged Unions (`enum`) and Pattern Matching (`match`)**, **Hash Maps (`map[K]V`, `map_new`, `put`, `get`, `has`, `remove`, `keys`, `len`)**, **Growable Arrays (`list_new`, `push`, `pop`, `len`)**, **Selective Prelude Emission** (only emitting used stdlib helpers for clean generated C), **Lightweight Structs (Value Types)** (`struct Point2D { x: int; y: int; }`), **Arrays of Objects with for-each iteration** (`alloc(Point, n)`, `for p in pts`), **Minimal Multi-file Module/Import System** (`import "file.cco";`), and a **built-in Standard Library** (Strings, Math, File I/O). It transpiles Cco source code (`.cco`) into portable, standard C11 source code (`.c`), which is compiled to native machine binaries using `gcc` or `clang`.
+**Cco (C--)** is a lightweight, systems programming language with explicit C-like syntax, **Type Inference for `let` (`let x = 10;`, `let p = Point { ... }`)**, **Compound Assignment (`+=`, `-=`, `*=`, `/=`, `%=`, `++`, `--`)**, **Operator Overloading for Structs (`operator+`, `operator-`, `operator==`, `operator<`, etc.)**, **Interfaces with Compile-Time Monomorphization (`interface`, `impl`, `impl Trait`)**, **Python-style F-String Interpolation (`f"Hello {name}"`)**, **Interactive I/O & Numeric Parsing (`read_line`, `is_int`, `to_int`, `random_int`)**, **Command-Line Arguments (`args()`, `arg_count()`, `program_name()`)**, **a self-hosted lexer (`selfhost/lexer.cco`)**, **scope-exit auto-free for raw allocations**, **compile-time single ownership with move semantics**, **Tagged Unions (`enum`) and Pattern Matching (`match`)**, **Hash Maps (`map[K]V`)**, **Growable Arrays (`list_new`, `push`, `pop`, `len`)**, and **Selective Prelude Emission**. It transpiles Cco source code (`.cco`) into portable, standard C11 source code (`.c`), which is compiled to native machine binaries using `gcc` or `clang`.
 
-> **Write it like Python's class/struct/enum/map/f-string syntax reads with clean Rust-style interfaces via zero-cost compile-time monomorphization and C++-style operator overloading on value structs. Compile it and it runs like C with zero runtime vtables, zero GC pauses, clean inspectable generated C via selective prelude emission, stack-allocated value structs, Rust-like compile-time ownership safety across multi-file programs, exhaustive pattern matching, and GCC/Rust-style diagnostic error messages.**
+> **Write it like Python's concise syntax (`let x = 0; total += i; i++;`) with clean Rust-style interfaces via zero-cost compile-time monomorphization and C++-style operator overloading on value structs. Compile it and it runs like C with zero runtime vtables, zero GC pauses, clean inspectable generated C via selective prelude emission, stack-allocated value structs, Rust-like compile-time ownership safety across multi-file programs, exhaustive pattern matching, and GCC/Rust-style diagnostic error messages.**
+
+---
+
+## ⚡ Type Inference & Compound Assignment (v19.0)
+
+Cco v19.0 bridges the gap between Cco's static typing safety and Python's visual conciseness by adding **optional type inference for `let`** and **compound assignment statements**:
+
+### 1. Type Inference for `let`
+Type annotations on `let` are now completely **optional**. When omitted, the compiler infers the exact static type from the initializing expression:
+```cco
+let x = 10;                           // inferred: int
+let name = "hello";                   // inferred: string
+let pi = 3.14;                        // inferred: float
+let done = true;                      // inferred: bool
+let p = Point { x: 1, y: 2 };         // inferred: Point
+let arr = alloc(int, 5);              // inferred: int[]
+let m = map_new(string, int);         // inferred: map[string]int
+```
+*Note*: Explicit type annotations (`let x: int = 10;`) remain 100% valid and are still recommended where explicit documentation aids clarity.
+
+### 2. Compound Assignment & Increment / Decrement
+```cco
+total += i;      // desugars to: total = total + i;
+total -= i;      // desugars to: total = total - i;
+total *= 2;      // desugars to: total = total * 2;
+total /= 2;      // desugars to: total = total / 2;
+total %= 3;      // desugars to: total = total % 3;
+
+msg += " world"; // for strings: msg = concat(msg, " world"); (auto-frees old string)
+p += q;          // for structs: p = p + q; (resolves via operator+)
+
+i++;             // desugars to: i = i + 1; (statement-only)
+i--;             // desugars to: i = i - 1; (statement-only)
+```
+
+### Before and After Comparison
+
+```cco
+// BEFORE (v18.0)
+fn main() -> int {
+    let total: int = 0;
+    let i: int = 0;
+    while (i < 10) {
+        total = total + i;
+        i = i + 1;
+    }
+    print(total);
+    return 0;
+}
+
+// AFTER (v19.0)
+fn main() -> int {
+    let total = 0;
+    for (let i = 0; i < 10; i++) {
+        total += i;
+    }
+    print(total);
+    return 0;
+}
+```
 
 ---
 
