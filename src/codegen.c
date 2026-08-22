@@ -246,12 +246,22 @@ static const char *find_ident_class_in_node(AstNode *program, AstNode *node, con
 
     if (node->type == NODE_LET) {
         if (strcmp(node->as.let.name, var_name) == 0) {
-            return node->as.let.class_name;
+            if (node->as.let.class_name) return node->as.let.class_name;
+            if (node->as.let.value && node->as.let.value->type == NODE_ALLOC) {
+                return node->as.let.value->as.alloc.class_name;
+            }
         }
         return NULL;
     }
 
     if (node->type == NODE_FOR_EACH) {
+        if (strcmp(node->as.for_each.loop_var_name, var_name) == 0) {
+            if (node->as.for_each.collection_expr && node->as.for_each.collection_expr->type == NODE_IDENT) {
+                const char *arr_name = node->as.for_each.collection_expr->as.ident.name;
+                const char *arr_cls = find_ident_class_in_node(program, program, arr_name);
+                if (arr_cls) return arr_cls;
+            }
+        }
         return find_ident_class_in_node(program, node->as.for_each.body, var_name);
     }
 
