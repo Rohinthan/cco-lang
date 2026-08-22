@@ -2249,8 +2249,9 @@ static void gen_method(CodegenCtx *ctx, const char *class_name, AstNode *m_node)
         for (int i = 0; i < m_node->as.method.param_count; i++) {
             if (i > 0) sb_append(&ctx->sb, ", ");
             bool is_bor = m_node->as.method.param_is_borrowed ? m_node->as.method.param_is_borrowed[i] : false;
+            bool is_arr = m_node->as.method.param_is_array ? m_node->as.method.param_is_array[i] : false;
             sb_appendf(&ctx->sb, "%s %s",
-                       c_type_str_full(ctx, m_node->as.method.param_types[i], m_node->as.method.param_class_names[i], is_bor, false),
+                       is_arr ? c_type_str_decl(ctx, m_node->as.method.param_types[i], m_node->as.method.param_class_names[i], true, false) : c_type_str_full(ctx, m_node->as.method.param_types[i], m_node->as.method.param_class_names[i], is_bor, false),
                        m_node->as.method.param_names[i]);
         }
     }
@@ -2279,7 +2280,10 @@ static void gen_function(CodegenCtx *ctx, AstNode *fn) {
             for (int i = 0; i < fn->as.function.param_count; i++) {
                 if (i > 0) sb_append(&ctx->sb, ", ");
                 bool is_bor = fn->as.function.param_is_borrowed ? fn->as.function.param_is_borrowed[i] : false;
-                sb_appendf(&ctx->sb, "%s %s", c_type_str_full(ctx, fn->as.function.param_types[i], fn->as.function.param_class_names[i], is_bor, false), fn->as.function.param_names[i]);
+                bool is_arr = fn->as.function.param_is_array ? fn->as.function.param_is_array[i] : false;
+                sb_appendf(&ctx->sb, "%s %s",
+                           is_arr ? c_type_str_decl(ctx, fn->as.function.param_types[i], fn->as.function.param_class_names[i], true, false) : c_type_str_full(ctx, fn->as.function.param_types[i], fn->as.function.param_class_names[i], is_bor, false),
+                           fn->as.function.param_names[i]);
             }
         }
         sb_append(&ctx->sb, ") ");
@@ -2632,7 +2636,10 @@ char *generate_c_code(AstNode *program, AstArena *arena) {
             for (int p = 0; p < fn->as.function.param_count; p++) {
                 if (p > 0) sb_append(&ctx.sb, ", ");
                 bool is_bor = fn->as.function.param_is_borrowed ? fn->as.function.param_is_borrowed[p] : false;
-                sb_appendf(&ctx.sb, "%s %s", c_type_str_full(&ctx, fn->as.function.param_types[p], fn->as.function.param_class_names[p], is_bor, false), fn->as.function.param_names[p]);
+                bool is_arr = fn->as.function.param_is_array ? fn->as.function.param_is_array[p] : false;
+                sb_appendf(&ctx.sb, "%s %s",
+                           is_arr ? c_type_str_decl(&ctx, fn->as.function.param_types[p], fn->as.function.param_class_names[p], true, false) : c_type_str_full(&ctx, fn->as.function.param_types[p], fn->as.function.param_class_names[p], is_bor, false),
+                           fn->as.function.param_names[p]);
             }
         }
         sb_append(&ctx.sb, ");\n");
