@@ -1928,6 +1928,38 @@ static AstNode *make_assign_from_target(AstArena *arena, AstNode *target, AstNod
     return NULL;
 }
 
+static AstNode *find_let_in_node_rec(AstNode *node, const char *var_name) {
+    if (!node || !var_name) return NULL;
+    if (node->type == NODE_LET) {
+        if (strcmp(node->as.let.name, var_name) == 0) return node;
+        return NULL;
+    }
+    if (node->type == NODE_BLOCK) {
+        for (int i = 0; i < node->as.block.count; i++) {
+            AstNode *f = find_let_in_node_rec(node->as.block.stmts[i], var_name);
+            if (f) return f;
+        }
+        return NULL;
+    }
+    if (node->type == NODE_FOR) {
+        AstNode *f = find_let_in_node_rec(node->as.for_stmt.init, var_name);
+        if (f) return f;
+        return find_let_in_node_rec(node->as.for_stmt.body, var_name);
+    }
+    if (node->type == NODE_FOR_EACH) {
+        return find_let_in_node_rec(node->as.for_each.body, var_name);
+    }
+    if (node->type == NODE_WHILE) {
+        return find_let_in_node_rec(node->as.while_stmt.body, var_name);
+    }
+    if (node->type == NODE_IF) {
+        AstNode *f = find_let_in_node_rec(node->as.if_stmt.then_b, var_name);
+        if (f) return f;
+        return find_let_in_node_rec(node->as.if_stmt.else_b, var_name);
+    }
+    return NULL;
+}
+
 static void infer_ast_expr_type(AstArena *arena, AstNode *program, AstNode *fn, AstNode *expr, Type *out_type, char **out_class, bool *out_is_array, bool *out_is_map, Type *out_key_type) {
     *out_type = TY_INT;
     *out_class = NULL;
@@ -2009,17 +2041,15 @@ static void infer_ast_expr_type(AstArena *arena, AstNode *program, AstNode *fn, 
             }
         }
         AstNode *body = (fn && fn->type == NODE_FUNCTION) ? fn->as.function.body : (fn ? fn->as.method.body : NULL);
-        if (body && body->type == NODE_BLOCK) {
-            for (int s = 0; s < body->as.block.count; s++) {
-                AstNode *st = body->as.block.stmts[s];
-                if (st && st->type == NODE_LET && strcmp(st->as.let.name, var_name) == 0) {
-                    *out_type = st->as.let.var_type;
-                    *out_class = st->as.let.class_name;
-                    *out_is_array = st->as.let.is_array;
-                    *out_is_map = st->as.let.is_map;
-                    *out_key_type = st->as.let.key_type;
-                    return;
-                }
+        if (body) {
+            AstNode *st = find_let_in_node_rec(body, var_name);
+            if (st && st->type == NODE_LET) {
+                *out_type = st->as.let.var_type;
+                *out_class = st->as.let.class_name;
+                *out_is_array = st->as.let.is_array;
+                *out_is_map = st->as.let.is_map;
+                *out_key_type = st->as.let.key_type;
+                return;
             }
         }
         return;
