@@ -922,7 +922,13 @@ static void gen_expr(CodegenCtx *ctx, AstNode *expr) {
             if (expr->as.literal.lit_type == TY_INT) {
                 sb_appendf(&ctx->sb, "%ld", expr->as.literal.val.i);
             } else if (expr->as.literal.lit_type == TY_FLOAT) {
-                sb_appendf(&ctx->sb, "%g", expr->as.literal.val.f);
+                char fbuf[64];
+                snprintf(fbuf, sizeof(fbuf), "%g", expr->as.literal.val.f);
+                if (!strchr(fbuf, '.') && !strchr(fbuf, 'e') && !strchr(fbuf, 'E')) {
+                    sb_appendf(&ctx->sb, "%s.0", fbuf);
+                } else {
+                    sb_append(&ctx->sb, fbuf);
+                }
             } else if (expr->as.literal.lit_type == TY_STRING) {
                 sb_appendf(&ctx->sb, "\"%s\"", expr->as.literal.val.s);
             } else if (expr->as.literal.lit_type == TY_BOOL) {
