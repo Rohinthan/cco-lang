@@ -467,6 +467,41 @@ static Type find_ident_type_in_node(AstNode *program, AstNode *node, const char 
     return (Type)-1;
 }
 
+static const char *get_expr_class_name(AstNode *program, AstNode *fn, AstNode *expr) {
+    if (!expr) return NULL;
+    if (expr->type == NODE_IDENT && fn) {
+        const char *obj_name = expr->as.ident.name;
+        if (fn->type == NODE_METHOD && strcmp(obj_name, "self") == 0) {
+            return fn->as.method.param_class_names ? fn->as.method.param_class_names[0] : NULL;
+        } else if (fn->type == NODE_FUNCTION) {
+            for (int p = 0; p < fn->as.function.param_count; p++) {
+                if (strcmp(fn->as.function.param_names[p], obj_name) == 0) {
+                    return fn->as.function.param_class_names[p];
+                }
+            }
+        }
+        AstNode *body = (fn->type == NODE_FUNCTION) ? fn->as.function.body : fn->as.method.body;
+        return find_ident_class_in_node(program, body, obj_name);
+    }
+    if (expr->type == NODE_MEMBER && program && program->type == NODE_PROGRAM) {
+        if (expr->as.member.field_class_name) return expr->as.member.field_class_name;
+        const char *obj_cls = get_expr_class_name(program, fn, expr->as.member.object);
+        if (obj_cls) {
+            for (int c = 0; c < program->as.program.class_count; c++) {
+                AstNode *cls = program->as.program.classes[c];
+                if (strcmp(cls->as.class_decl.name, obj_cls) == 0) {
+                    for (int f = 0; f < cls->as.class_decl.field_count; f++) {
+                        if (strcmp(cls->as.class_decl.fields[f]->as.field.name, expr->as.member.member_name) == 0) {
+                            return cls->as.class_decl.fields[f]->as.field.class_name;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return NULL;
+}
+
 static Type infer_expr_type(AstNode *program, AstNode *fn, AstNode *expr) {
     if (!expr) return TY_INT;
 
@@ -503,18 +538,24 @@ static Type infer_expr_type(AstNode *program, AstNode *fn, AstNode *expr) {
             }
         }
     }
-    if (expr->type == NODE_METHOD_CALL) {
+    if (expr->type == NODE_METHOD_CALL && program && program->type == NODE_PROGRAM) {
         const char *mname = expr->as.method_call.method_name;
-        const char *cname = expr->as.method_call.target_class_name;
-        if (cname && program && program->type == NODE_PROGRAM) {
-            for (int c = 0; c < program->as.program.class_count; c++) {
-                AstNode *cls = program->as.program.classes[c];
-                if (strcmp(cls->as.class_decl.name, cname) == 0) {
-                    for (int m = 0; m < cls->as.class_decl.method_count; m++) {
-                        AstNode *mn = cls->as.class_decl.methods[m];
-                        if (strcmp(mn->as.method.name, mname) == 0) {
-                            return mn->as.method.return_type;
-                        }
+        for (int c = 0; c < program->as.program.class_count; c++) {
+            AstNode *cls = program->as.program.classes[c];
+            for (int m = 0; m < cls->as.class_decl.method_count; m++) {
+                AstNode *mn = cls->as.class_decl.methods[m];
+                if (strcmp(mn->as.method.name, mname) == 0) {
+                    return mn->as.method.return_type;
+                }
+            }
+        }
+        for (int t = 0; t < program->as.program.interface_count; t++) {
+            AstNode *tr = program->as.program.interfaces[t];
+            if (tr && tr->type == NODE_INTERFACE) {
+                for (int m = 0; m < tr->as.interface_decl.method_count; m++) {
+                    AstNode *mn = tr->as.interface_decl.methods[m];
+                    if (strcmp(mn->as.interface_method.name, mname) == 0) {
+                        return mn->as.interface_method.return_type;
                     }
                 }
             }
@@ -523,21 +564,8 @@ static Type infer_expr_type(AstNode *program, AstNode *fn, AstNode *expr) {
     if (expr->type == NODE_MEMBER && program && program->type == NODE_PROGRAM) {
         const char *mname = expr->as.member.member_name;
         const char *cname = expr->as.member.field_class_name;
-        if (!cname && expr->as.member.object->type == NODE_IDENT && fn) {
-            const char *obj_name = expr->as.member.object->as.ident.name;
-            if (fn->type == NODE_METHOD && strcmp(obj_name, "self") == 0) {
-                cname = fn->as.method.param_class_names ? fn->as.method.param_class_names[0] : NULL;
-            } else if (fn->type == NODE_FUNCTION) {
-                for (int p = 0; p < fn->as.function.param_count; p++) {
-                    if (strcmp(fn->as.function.param_names[p], obj_name) == 0) {
-                        cname = fn->as.function.param_class_names[p];
-                    }
-                }
-            }
-            if (!cname) {
-                AstNode *body = (fn->type == NODE_FUNCTION) ? fn->as.function.body : fn->as.method.body;
-                cname = find_ident_class_in_node(program, body, obj_name);
-            }
+        if (!cname) {
+            cname = get_expr_class_name(program, fn, expr->as.member.object);
         }
         if (cname) {
             for (int c = 0; c < program->as.program.class_count; c++) {
