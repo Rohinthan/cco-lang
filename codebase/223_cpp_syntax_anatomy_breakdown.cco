@@ -1,0 +1,15 @@
+// C++ Anatomy:
+// 1. #include <iostream>      --> In Cco: Built-in prelude (no headers needed)
+// 2. using namespace std;     --> In Cco: Clean global namespace (no std:: clutter)
+// 3. int main()               --> In Cco: fn main() -> int
+// 4. cout << "Text";          --> In Cco: print("Text")
+// 5. return 0;                --> In Cco: return 0;
+
+fn main() -> int {
+    print("=== C++ Syntax Anatomy vs Cco ===");
+    print("Line 1: fn main() -> int defines the entry point.");
+    print("Line 2: print() outputs text with an automatic newline.");
+    print("Line 3: return 0 signals successful execution to the OS.");
+
+    return 0;
+}

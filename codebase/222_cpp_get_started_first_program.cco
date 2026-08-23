@@ -1,0 +1,12 @@
+fn main() -> int {
+    // In C++ (myfirstprogram.cpp):
+    // #include <iostream>
+    // using namespace std;
+    // int main() {
+    //     cout << "Hello World!";
+    //     return 0;
+    // }
+
+    print("Hello World!");
+    return 0;
+}

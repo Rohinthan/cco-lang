@@ -1,0 +1,14 @@
+fn main() -> int {
+    let my_numbers: int[] = alloc(int, 4);
+    my_numbers[0] = 25;
+    my_numbers[1] = 50;
+    my_numbers[2] = 75;
+    my_numbers[3] = 100;
+
+    print("=== Sequential Array Traversal ===");
+    for num in my_numbers {
+        print(num);
+    }
+
+    return 0;
+}

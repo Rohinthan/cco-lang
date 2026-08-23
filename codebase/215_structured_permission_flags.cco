@@ -1,0 +1,48 @@
+struct Permissions {
+    can_read: bool;
+    can_write: bool;
+    can_execute: bool;
+}
+
+fn print_access(user: string, p: Permissions) -> void {
+    print(f"--- Access Rights for {user} ---");
+    if (p.can_read) {
+        print("Read: ALLOWED");
+    } else {
+        print("Read: DENIED");
+    }
+
+    if (p.can_write) {
+        print("Write: ALLOWED");
+    } else {
+        print("Write: DENIED");
+    }
+
+    if (p.can_execute) {
+        print("Execute: ALLOWED");
+    } else {
+        print("Execute: DENIED");
+    }
+}
+
+fn main() -> int {
+    // In C, bitmask flags (READ=1, WRITE=2, EXEC=4) use error-prone raw integers (e.g. 1 | 2 = 3).
+    // In Cco, structured boolean flag types are 100% type-safe and self-documenting!
+    let editor_perms: Permissions = Permissions {
+        can_read: true,
+        can_write: true,
+        can_execute: false
+    };
+
+    let admin_perms: Permissions = Permissions {
+        can_read: true,
+        can_write: true,
+        can_execute: true
+    };
+
+    print("=== Structured Permission Flags ===");
+    print_access("Editor", editor_perms);
+    print_access("Admin", admin_perms);
+
+    return 0;
+}

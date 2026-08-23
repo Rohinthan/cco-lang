@@ -1,0 +1,8 @@
+fn main() -> int {
+    let int_div = 5 / 2;
+    let float_div = 5.0 / 2.0;
+
+    print(f"Integer division (5 / 2): {int_div}");
+    print(f"Float division (5.0 / 2.0): {float_div}");
+    return 0;
+}

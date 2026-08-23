@@ -1,0 +1,6 @@
+fn main() -> int {
+    let x = 10;
+    x %= 4;
+    print(f"After modulus assignment (x %= 4): {x}");
+    return 0;
+}

@@ -1,0 +1,15 @@
+fn main() -> int {
+    let my_numbers: int[] = alloc(int, 4);
+    my_numbers[0] = 25;
+    my_numbers[1] = 50;
+    my_numbers[2] = 75;
+    my_numbers[3] = 100;
+
+    print("=== Accessing Array Elements ===");
+    print(f"First element [0]: {my_numbers[0]}");
+    print(f"Second element [1]: {my_numbers[1]}");
+    print(f"Third element [2]: {my_numbers[2]}");
+    print(f"Fourth element [3]: {my_numbers[3]}");
+
+    return 0;
+}

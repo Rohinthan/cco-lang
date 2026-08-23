@@ -1,0 +1,25 @@
+class Counter {
+    count: int;
+
+    fn next(self) -> int {
+        self.count += 1;
+        return self.count;
+    }
+}
+
+fn main() -> int {
+    // In C, 'static int myNum' inside a function creates global hidden state that cannot be reset.
+    // In Cco, stateful objects encapsulate persistent state safely!
+    let c1: Counter = Counter { count: 0 };
+
+    print("=== Persistent Counter Calls ===");
+    print(f"num = {c1.next()}");
+    print(f"num = {c1.next()}");
+    print(f"num = {c1.next()}");
+
+    // We can also create a second independent counter:
+    let c2: Counter = Counter { count: 10 };
+    print(f"Second counter: {c2.next()}");
+
+    return 0;
+}

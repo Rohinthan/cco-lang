@@ -1,0 +1,13 @@
+fn main() -> int {
+    let filename = "build/atomic/write_demo.txt";
+
+    // Step 1: Initial Write
+    write_file(filename, "Some text");
+    print(f"Initial: {read_file(filename)}");
+
+    // Step 2: Overwrite existing content
+    write_file(filename, "Hello World!");
+    print(f"After overwrite: {read_file(filename)}");
+
+    return 0;
+}

@@ -1,0 +1,14 @@
+fn main() -> int {
+    let i = 10;
+
+    // Executes at least once even when initial condition would be false
+    while (true) {
+        print(f"i is {i}");
+        i++;
+        if (i >= 5) {
+            break;
+        }
+    }
+
+    return 0;
+}

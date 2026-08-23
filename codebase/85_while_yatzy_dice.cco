@@ -1,0 +1,14 @@
+fn main() -> int {
+    let dice = 1;
+
+    while (dice <= 6) {
+        if (dice < 6) {
+            print(f"Dice roll {dice}: No Yatzy");
+        } else {
+            print(f"Dice roll {dice}: Yatzy!");
+        }
+        dice++;
+    }
+
+    return 0;
+}

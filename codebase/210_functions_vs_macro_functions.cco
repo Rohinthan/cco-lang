@@ -1,0 +1,16 @@
+fn square(x: int) -> int {
+    // In C, '#define SQUARE(x) ((x)*(x))' evaluates expressions multiple times.
+    // In Cco, functions evaluate arguments exactly once with full type safety!
+    return x * x;
+}
+
+fn main() -> int {
+    let num = 4;
+    let result = square(num);
+
+    print("=== Safe Functions vs Parameter Macros ===");
+    print(f"Square of {num}: {result}");
+    print(f"Square of (num + 2): {square(num + 2)}");
+
+    return 0;
+}

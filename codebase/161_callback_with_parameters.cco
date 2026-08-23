@@ -1,0 +1,24 @@
+interface BinaryAction {
+    fn execute(self, a: int, b: int) -> void;
+}
+
+class AddLogger {
+    prefix: string;
+
+    fn execute(self, a: int, b: int) -> void {
+        let sum = a + b;
+        print(f"{self.prefix} {a} + {b} = {sum}");
+    }
+}
+
+impl BinaryAction for AddLogger;
+
+fn calculate(action: impl BinaryAction, x: int, y: int) -> void {
+    action.execute(x, y);
+}
+
+fn main() -> int {
+    let logger: AddLogger = AddLogger { prefix: "The sum is:" };
+    calculate(logger, 5, 3);
+    return 0;
+}

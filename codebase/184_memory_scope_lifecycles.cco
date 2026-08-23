@@ -1,0 +1,30 @@
+class SensorBuffer {
+    name: string;
+    reading: int;
+}
+
+fn main() -> int {
+    print("=== Outer Scope Start ===");
+    let outer_val = 100;
+
+    // Inner scope with local dynamic allocations
+    {
+        print("--- Entering Inner Scope ---");
+        let local_sensor: SensorBuffer = SensorBuffer {
+            name: "Temperature Sensor A",
+            reading: 75
+        };
+        let dynamic_arr: int[] = alloc(int, 4);
+        dynamic_arr[0] = 10;
+        dynamic_arr[1] = 20;
+        dynamic_arr[2] = 30;
+        dynamic_arr[3] = 40;
+
+        print(f"Sensor: {local_sensor.name} -> {local_sensor.reading}");
+        print(f"Buffer elements: {dynamic_arr[0]}, {dynamic_arr[1]}, {dynamic_arr[2]}, {dynamic_arr[3]}");
+        print("--- Exiting Inner Scope (Memory Auto-Freed) ---");
+    }
+
+    print(f"=== Outer Scope End (outer_val={outer_val}) ===");
+    return 0;
+}

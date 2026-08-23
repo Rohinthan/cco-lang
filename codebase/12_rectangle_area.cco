@@ -1,0 +1,10 @@
+fn main() -> int {
+    let length = 4;
+    let width = 6;
+    let area = length * width;
+
+    print(f"Length: {length}");
+    print(f"Width: {width}");
+    print(f"Rectangle Area: {area}");
+    return 0;
+}

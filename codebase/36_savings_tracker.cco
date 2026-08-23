@@ -1,0 +1,7 @@
+fn main() -> int {
+    let savings = 100;
+    savings += 50;
+    savings -= 30;
+    print(f"Final savings balance: ${savings}");
+    return 0;
+}

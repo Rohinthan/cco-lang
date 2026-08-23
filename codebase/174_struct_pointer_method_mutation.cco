@@ -1,0 +1,23 @@
+class Car {
+    brand: string;
+    year: int;
+
+    fn set_year(self, new_year: int) -> void {
+        self.year = new_year;
+    }
+}
+
+fn main() -> int {
+    let my_car: Car = Car {
+        brand: "Toyota",
+        year: 2020
+    };
+
+    print("=== Method In-Place Update ===");
+    print(f"Initial: {my_car.brand} ({my_car.year})");
+
+    my_car.set_year(2025);
+    print(f"Updated: {my_car.brand} ({my_car.year})");
+
+    return 0;
+}

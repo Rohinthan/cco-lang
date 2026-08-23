@@ -1,0 +1,52 @@
+interface Operation {
+    fn compute(self, a: int, b: int) -> int;
+}
+
+class AddOp {
+    tag: int;
+
+    fn compute(self, a: int, b: int) -> int {
+        return a + b + self.tag;
+    }
+}
+
+class SubOp {
+    tag: int;
+
+    fn compute(self, a: int, b: int) -> int {
+        return a - b + self.tag;
+    }
+}
+
+class MulOp {
+    tag: int;
+
+    fn compute(self, a: int, b: int) -> int {
+        return (a * b) + self.tag;
+    }
+}
+
+impl Operation for AddOp;
+impl Operation for SubOp;
+impl Operation for MulOp;
+
+fn calculate(op: impl Operation, a: int, b: int) -> void {
+    let res = op.compute(a, b);
+    print(res);
+}
+
+fn main() -> int {
+    let adder: AddOp = AddOp { tag: 0 };
+    let suber: SubOp = SubOp { tag: 0 };
+    let muler: MulOp = MulOp { tag: 0 };
+
+    let x = 10;
+    let y = 5;
+
+    print("=== Dynamic Operation Dispatch ===");
+    calculate(adder, x, y);
+    calculate(suber, x, y);
+    calculate(muler, x, y);
+
+    return 0;
+}

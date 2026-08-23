@@ -1,0 +1,6 @@
+fn main() -> int {
+    for (let i = 0; i <= 100; i += 10) {
+        print(i);
+    }
+    return 0;
+}

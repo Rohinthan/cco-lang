@@ -1,0 +1,12 @@
+fn main() -> int {
+    let car_name = "Volvo";
+    let length = len(car_name);
+
+    print("=== Characters of 'Volvo' ===");
+    for (let i = 0; i < length; i++) {
+        let ch = char_at(car_name, i);
+        print(ch);
+    }
+
+    return 0;
+}

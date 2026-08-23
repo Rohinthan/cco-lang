@@ -1,0 +1,6 @@
+fn main() -> int {
+    let x = 12;
+    x /= 3;
+    print(f"After division assignment (x /= 3): {x}");
+    return 0;
+}

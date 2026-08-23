@@ -1,0 +1,11 @@
+fn main() -> int {
+    let x = 20;
+    let y = 18;
+
+    let is_greater = x > y;
+
+    if (is_greater) {
+        print("x is greater than y");
+    }
+    return 0;
+}

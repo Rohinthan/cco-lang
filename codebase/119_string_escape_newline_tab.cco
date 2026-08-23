@@ -1,0 +1,12 @@
+fn main() -> int {
+    let multiline = "Line 1\nLine 2";
+    let tabular = "Name:\tAlice\nAge:\t25";
+
+    print("=== Newline Escape (\\n) ===");
+    print(multiline);
+
+    print("\n=== Tab Escape (\\t) ===");
+    print(tabular);
+
+    return 0;
+}

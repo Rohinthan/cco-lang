@@ -1,0 +1,5 @@
+fn main() -> int {
+    let result = sqrt(16.0);
+    print(f"Square root of 16.0: {result}");
+    return 0;
+}

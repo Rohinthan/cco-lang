@@ -1,0 +1,12 @@
+// In Cco, you can place main() at the top and define functions below!
+// The compiler automatically emits forward declarations.
+fn main() -> int {
+    let result = add_numbers(5, 3);
+    print(f"Result is = {result}");
+    return 0;
+}
+
+// Function defined below main
+fn add_numbers(x: int, y: int) -> int {
+    return x + y;
+}

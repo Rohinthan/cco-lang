@@ -1,0 +1,18 @@
+fn main() -> int {
+    // Initialize an empty dynamic buffer
+    let dynamic_list: int[] = alloc(int, 0);
+
+    print("=== Dynamic Growth via push() ===");
+    // push() reallocates and returns the updated pointer
+    dynamic_list = push(dynamic_list, 100);
+    dynamic_list = push(dynamic_list, 200);
+    dynamic_list = push(dynamic_list, 300);
+    dynamic_list = push(dynamic_list, 400);
+    dynamic_list = push(dynamic_list, 500);
+
+    for item in dynamic_list {
+        print(item);
+    }
+
+    return 0;
+}

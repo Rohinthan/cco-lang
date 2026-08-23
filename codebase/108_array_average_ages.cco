@@ -1,0 +1,23 @@
+fn main() -> int {
+    let ages: int[] = alloc(int, 8);
+    ages[0] = 20;
+    ages[1] = 22;
+    ages[2] = 18;
+    ages[3] = 35;
+    ages[4] = 48;
+    ages[5] = 26;
+    ages[6] = 87;
+    ages[7] = 70;
+
+    let total_sum = 0.0;
+    let length = len(ages);
+
+    for (let i = 0; i < length; i++) {
+        total_sum += ages[i];
+    }
+
+    let avg = total_sum / (1.0 * length);
+    print(f"The average age is: {avg}");
+
+    return 0;
+}

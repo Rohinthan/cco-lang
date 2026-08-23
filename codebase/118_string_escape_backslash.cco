@@ -1,0 +1,5 @@
+fn main() -> int {
+    let txt = "The character \\ is called backslash.";
+    print(txt);
+    return 0;
+}

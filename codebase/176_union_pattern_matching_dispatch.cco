@@ -1,0 +1,32 @@
+enum Measurement {
+    Length { meters: int },
+    Temperature { celsius: float },
+    Unitless,
+}
+
+fn display_measurement(m: &Measurement) -> void {
+    match m {
+        Measurement.Length { meters } => {
+            print(f"Length: {meters} m");
+        }
+        Measurement.Temperature { celsius } => {
+            print(f"Temperature: {celsius} C");
+        }
+        Measurement.Unitless => {
+            print("Unitless measurement value");
+        }
+    }
+}
+
+fn main() -> int {
+    let m1: Measurement = Measurement.Length { meters: 150 };
+    let m2: Measurement = Measurement.Temperature { celsius: 36.6 };
+    let m3: Measurement = Measurement.Unitless;
+
+    print("=== Discriminated Union Pattern Match ===");
+    display_measurement(&m1);
+    display_measurement(&m2);
+    display_measurement(&m3);
+
+    return 0;
+}

@@ -1,0 +1,19 @@
+fn main() -> int {
+    let age = 20;
+    let is_citizen = true;
+
+    if (age >= 18) {
+        print("Old enough to vote.");
+
+        // Nested condition
+        if (is_citizen) {
+            print("And you are a citizen, so you can vote!");
+        } else {
+            print("But you must be a citizen to vote.");
+        }
+    } else {
+        print("Not old enough to vote.");
+    }
+
+    return 0;
+}

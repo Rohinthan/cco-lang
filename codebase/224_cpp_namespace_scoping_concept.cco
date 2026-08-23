@@ -1,0 +1,21 @@
+// In Cco, free functions live in a clean global namespace without C++ `namespace` blocks.
+// Symbol organization across files is achieved using `import` and clear naming conventions.
+
+fn math_add(a: int, b: int) -> int {
+    return a + b;
+}
+
+fn math_multiply(a: int, b: int) -> int {
+    return a * b;
+}
+
+fn main() -> int {
+    print("=== C++ Namespaces vs Cco Global & Module Scope ===");
+    let sum = math_add(15, 25);
+    let product = math_multiply(4, 5);
+
+    print(f"math_add(15, 25) = {sum}");
+    print(f"math_multiply(4, 5) = {product}");
+
+    return 0;
+}

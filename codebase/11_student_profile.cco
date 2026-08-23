@@ -1,0 +1,12 @@
+fn main() -> int {
+    let student_id = 15;
+    let student_age = 23;
+    let student_fee = 75.25;
+    let student_grade = 'B';
+
+    print(f"Student ID: {student_id}");
+    print(f"Student age: {student_age}");
+    print(f"Student fee: ${student_fee}");
+    print(f"Student grade: {student_grade}");
+    return 0;
+}

@@ -1,0 +1,8 @@
+// In Cco, modules do not require separate .h files or #ifndef include guards!
+fn add(x: int, y: int) -> int {
+    return x + y;
+}
+
+fn subtract(x: int, y: int) -> int {
+    return x - y;
+}

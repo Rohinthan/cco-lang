@@ -1,0 +1,14 @@
+fn main() -> int {
+    let time = 20;
+    let greeting = "";
+
+    // Clear, readable conditional assignment in Cco
+    if (time < 18) {
+        greeting = "Good day.";
+    } else {
+        greeting = "Good evening.";
+    }
+
+    print(greeting);
+    return 0;
+}

@@ -1,0 +1,7 @@
+fn main() -> int {
+    let x = 10;
+    let y = 5;
+    let diff = x - y;
+    print(f"Subtraction: {x} - {y} = {diff}");
+    return 0;
+}

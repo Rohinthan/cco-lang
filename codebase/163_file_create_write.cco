@@ -1,0 +1,10 @@
+fn main() -> int {
+    let filename = "build/atomic/sample.txt";
+    let content = "Hello from Cco File I/O!\nThis file was created safely.";
+
+    print("=== Creating & Writing to File ===");
+    let ok = write_file(filename, content);
+    print(f"File write success: {ok}");
+
+    return 0;
+}

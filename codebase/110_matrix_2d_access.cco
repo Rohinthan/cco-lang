@@ -1,0 +1,21 @@
+fn main() -> int {
+    // 2x3 Matrix represented as rows
+    let row0: int[] = alloc(int, 3);
+    row0[0] = 1;
+    row0[1] = 4;
+    row0[2] = 2;
+
+    let row1: int[] = alloc(int, 3);
+    row1[0] = 3;
+    row1[1] = 6;
+    row1[2] = 8;
+
+    print("=== Accessing 2D Matrix Elements ===");
+    print(f"matrix[0][2] (row 0, col 2): {row0[2]}");
+
+    // Modify element at row 0, col 0
+    row0[0] = 9;
+    print(f"Modified matrix[0][0]: {row0[0]}");
+
+    return 0;
+}

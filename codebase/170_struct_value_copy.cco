@@ -1,0 +1,24 @@
+struct MyStructure {
+    my_num: int;
+    my_letter: char;
+}
+
+fn main() -> int {
+    let s1: MyStructure = MyStructure {
+        my_num: 13,
+        my_letter: 'B'
+    };
+
+    // Copy s1 to s2
+    let s2: MyStructure = s1;
+
+    // Change s2 values independently
+    s2.my_num = 30;
+    s2.my_letter = 'C';
+
+    print("=== Independent Struct Copy ===");
+    print(f"s1: {s1.my_num} {s1.my_letter}");
+    print(f"s2: {s2.my_num} {s2.my_letter}");
+
+    return 0;
+}

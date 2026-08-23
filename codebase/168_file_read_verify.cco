@@ -1,0 +1,18 @@
+fn main() -> int {
+    let filename = "build/atomic/verify_test.txt";
+    let expected = "First Line\nSecond Line";
+
+    write_file(filename, expected);
+
+    print("=== Reading & Verifying File ===");
+    let actual = read_file(filename);
+
+    if (equals(actual, expected)) {
+        print("File content verified successfully!");
+        print(f"Content:\n{actual}");
+    } else {
+        print("File content mismatch!");
+    }
+
+    return 0;
+}

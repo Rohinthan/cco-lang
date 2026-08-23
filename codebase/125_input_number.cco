@@ -1,0 +1,6 @@
+fn main() -> int {
+    let input_str = read_line();
+    let my_num = to_int(input_str);
+    print(f"Your number is: {my_num}");
+    return 0;
+}

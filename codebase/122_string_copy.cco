@@ -1,0 +1,11 @@
+fn main() -> int {
+    let str1 = "Hello World!";
+
+    // In Cco, create an independent copied string buffer using interpolation or concat
+    let str2 = f"{str1}";
+
+    print(f"Original str1: {str1}");
+    print(f"Copied str2: {str2}");
+
+    return 0;
+}

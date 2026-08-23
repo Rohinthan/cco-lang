@@ -1,0 +1,11 @@
+fn main() -> int {
+    // In C++:
+    // #include <iostream>
+    // int main() {
+    //     std::cout << "Hello World from C++ & Cco!" << std::endl;
+    //     return 0;
+    // }
+
+    print("Hello World from C++ & Cco!");
+    return 0;
+}

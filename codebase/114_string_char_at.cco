@@ -1,0 +1,9 @@
+fn main() -> int {
+    let greetings = "Hello World!";
+    let first_char = char_at(greetings, 0);
+
+    print(f"Full string: {greetings}");
+    print(f"First character: {first_char}");
+
+    return 0;
+}

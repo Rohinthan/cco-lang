@@ -1,0 +1,17 @@
+fn main() -> int {
+    // Allocate space for 4 integers
+    let my_numbers: int[] = alloc(int, 4);
+
+    // Assign values to allocated slots
+    my_numbers[0] = 25;
+    my_numbers[1] = 50;
+    my_numbers[2] = 75;
+    my_numbers[3] = 100;
+
+    print("=== Array Allocated and Populated ===");
+    for (let i = 0; i < 4; i++) {
+        print(f"Index {i}: {my_numbers[i]}");
+    }
+
+    return 0;
+}

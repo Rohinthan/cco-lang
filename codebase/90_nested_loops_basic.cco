@@ -1,0 +1,13 @@
+fn main() -> int {
+    // Outer loop runs 2 times
+    for (let i = 1; i <= 2; i++) {
+        print(f"Outer: {i}");
+
+        // Inner loop runs 3 times for each outer iteration (2 * 3 = 6 times total)
+        for (let j = 1; j <= 3; j++) {
+            print(f" Inner: {j}");
+        }
+    }
+
+    return 0;
+}

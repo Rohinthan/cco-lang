@@ -1,0 +1,13 @@
+fn main() -> int {
+    let my_num = 10;
+
+    if (my_num > 0) {
+        print(f"{my_num} is a positive number.");
+    } else if (my_num < 0) {
+        print(f"{my_num} is a negative number.");
+    } else {
+        print("The value is 0.");
+    }
+
+    return 0;
+}

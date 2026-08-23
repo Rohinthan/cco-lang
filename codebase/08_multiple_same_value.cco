@@ -1,0 +1,8 @@
+fn main() -> int {
+    let base_val = 50;
+    let x = base_val;
+    let y = base_val;
+    let z = base_val;
+    print(f"Sum of identical values: {x + y + z}");
+    return 0;
+}

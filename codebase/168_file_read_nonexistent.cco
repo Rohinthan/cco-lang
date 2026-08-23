@@ -1,0 +1,14 @@
+fn main() -> int {
+    let non_existent_file = "build/atomic/non_existent_file.txt";
+
+    print("=== Safe Reading of Non-Existent File ===");
+    let result = read_file(non_existent_file);
+
+    if (equals(result, "")) {
+        print("Not able to open the file.");
+    } else {
+        print(f"File contents: {result}");
+    }
+
+    return 0;
+}

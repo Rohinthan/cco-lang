@@ -1,0 +1,18 @@
+fn process_user_input(raw_input: string) -> void {
+    if (is_int(raw_input)) {
+        let num = to_int(raw_input);
+        print(f"Input '{raw_input}' is a VALID integer: {num}");
+    } else {
+        print(f"Input '{raw_input}' is INVALID (Not an integer!)");
+    }
+}
+
+fn main() -> int {
+    print("=== Integer Format Validation with is_int() ===");
+    process_user_input("AB");
+    process_user_input("3.5");
+    process_user_input("35");
+    process_user_input("-42");
+
+    return 0;
+}

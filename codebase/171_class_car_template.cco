@@ -1,0 +1,18 @@
+class Car {
+    brand: string;
+    model: string;
+    year: int;
+}
+
+fn main() -> int {
+    let car1: Car = Car { brand: "BMW", model: "X5", year: 1999 };
+    let car2: Car = Car { brand: "Ford", model: "Mustang", year: 1969 };
+    let car3: Car = Car { brand: "Toyota", model: "Corolla", year: 2011 };
+
+    print("=== Real-Life Car Records ===");
+    print(f"{car1.brand} {car1.model} {car1.year}");
+    print(f"{car2.brand} {car2.model} {car2.year}");
+    print(f"{car3.brand} {car3.model} {car3.year}");
+
+    return 0;
+}

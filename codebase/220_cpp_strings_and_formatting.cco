@@ -1,0 +1,17 @@
+fn main() -> int {
+    // In C++20:
+    // #include <format>
+    // std::string msg = std::format("Product: {}, Price: ${:.2f}", "Laptop", 999.99);
+
+    let product = "Laptop";
+    let price = 999.99;
+    let stock = 15;
+
+    print("=== C++ std::string & std::format vs Cco f-strings ===");
+    print(f"Product: {product}");
+    print(f"Price: ${price}");
+    print(f"Stock Remaining: {stock} units");
+    print(f"Inventory Summary: {product} costs ${price} with {stock} units in stock.");
+
+    return 0;
+}

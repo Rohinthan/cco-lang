@@ -1,0 +1,6 @@
+fn main() -> int {
+    let x = 10;
+    x -= 3;
+    print(f"After subtraction assignment (x -= 3): {x}");
+    return 0;
+}

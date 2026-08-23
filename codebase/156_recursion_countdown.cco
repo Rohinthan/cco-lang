@@ -1,0 +1,12 @@
+fn countdown(n: int) -> void {
+    if (n > 0) {
+        print(n);
+        countdown(n - 1);
+    }
+}
+
+fn main() -> int {
+    print("=== Recursive Countdown ===");
+    countdown(5);
+    return 0;
+}

@@ -1,0 +1,23 @@
+fn main() -> int {
+    let my_numbers: int[] = alloc(int, 4);
+    my_numbers[0] = 25;
+    my_numbers[1] = 50;
+    my_numbers[2] = 75;
+    my_numbers[3] = 100;
+
+    print("=== Original Array Elements ===");
+    for (let i = 0; i < 4; i++) {
+        print(f"Index {i}: {my_numbers[i]}");
+    }
+
+    // In C: *(my_numbers) = 13; *(my_numbers + 1) = 17;
+    // In Cco: Safe, high-speed direct indexing
+    my_numbers[0] = 13;
+    my_numbers[1] = 17;
+
+    print("\n=== After In-Place Element Updates ===");
+    print(f"Element 0: {my_numbers[0]}");
+    print(f"Element 1: {my_numbers[1]}");
+
+    return 0;
+}

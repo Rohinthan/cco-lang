@@ -1,0 +1,15 @@
+fn main() -> int {
+    // Simulating user input loop (processed at least once)
+    let sample_inputs = 3;
+
+    while (true) {
+        print(f"Processing positive value: {sample_inputs}");
+        sample_inputs--;
+        if (sample_inputs <= 0) {
+            print("Loop exited after reaching non-positive value.");
+            break;
+        }
+    }
+
+    return 0;
+}

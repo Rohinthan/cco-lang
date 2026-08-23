@@ -1,0 +1,27 @@
+class ScoreData {
+    points: int;
+}
+
+class Session {
+    score: ScoreData;
+}
+
+fn update_session_score(s: &Session, new_points: int) -> void {
+    // In C: **pptr = 20; (dangerous manual double-dereference)
+    // In Cco: Safe, structured property indirection
+    s.score.points = new_points;
+}
+
+fn main() -> int {
+    let session: Session = Session {
+        score: ScoreData { points: 5 }
+    };
+
+    print(f"Original score: {session.score.points}");
+
+    // Mutate through nested object reference
+    update_session_score(&session, 20);
+
+    print(f"Updated score: {session.score.points}");
+    return 0;
+}

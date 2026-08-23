@@ -1,0 +1,10 @@
+fn main() -> int {
+    let my_age = 25;
+    let voting_age = 18;
+
+    let is_eligible = my_age >= voting_age;
+
+    print(f"My age: {my_age}, Voting age limit: {voting_age}");
+    print(f"Eligible to vote (my_age >= voting_age): {is_eligible}");
+    return 0;
+}

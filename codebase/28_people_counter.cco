@@ -1,0 +1,10 @@
+fn main() -> int {
+    let people = 0;
+    people++;
+    people++;
+    people++;
+    print(f"3 people entered: {people}");
+    people--;
+    print(f"1 person left: {people}");
+    return 0;
+}

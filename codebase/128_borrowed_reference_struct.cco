@@ -1,0 +1,19 @@
+struct Account {
+    balance: int;
+}
+
+fn deposit(acc: &Account, amount: int) -> void {
+    // Modify the value directly at the referenced memory address
+    acc.balance += amount;
+}
+
+fn main() -> int {
+    let my_acc: Account = Account { balance: 100 };
+    print(f"Initial balance: ${my_acc.balance}");
+
+    // Pass by reference (&) to modify memory directly without copying
+    deposit(&my_acc, 50);
+
+    print(f"Balance after deposit: ${my_acc.balance}");
+    return 0;
+}

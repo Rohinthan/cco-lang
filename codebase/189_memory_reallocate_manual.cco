@@ -1,0 +1,30 @@
+fn main() -> int {
+    // Step 1: Allocate initial buffer for 4 elements
+    let initial_size = 4;
+    let ptr1: int[] = alloc(int, initial_size);
+    ptr1[0] = 10;
+    ptr1[1] = 20;
+    ptr1[2] = 30;
+    ptr1[3] = 40;
+
+    print("=== Initial Buffer (4 elements) ===");
+    for x in ptr1 {
+        print(x);
+    }
+
+    // Step 2: Resize buffer to 6 elements (reallocating and copying data)
+    let new_size = 6;
+    let ptr2: int[] = alloc(int, new_size);
+    for (let i = 0; i < initial_size; i++) {
+        ptr2[i] = ptr1[i];
+    }
+    ptr2[4] = 50;
+    ptr2[5] = 60;
+
+    print("\n=== Resized Buffer (6 elements) ===");
+    for x in ptr2 {
+        print(x);
+    }
+
+    return 0;
+}

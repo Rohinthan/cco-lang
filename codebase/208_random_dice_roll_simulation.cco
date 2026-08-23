@@ -1,0 +1,16 @@
+fn roll_dice() -> int {
+    return random_int(1, 6);
+}
+
+fn main() -> int {
+    random_seed(12345);
+
+    print("=== Rolling Two Six-Sided Dice [1, 6] ===");
+    let dice1 = roll_dice();
+    let dice2 = roll_dice();
+    let total = dice1 + dice2;
+
+    print(f"You rolled {dice1} and {dice2} (total = {total})");
+
+    return 0;
+}

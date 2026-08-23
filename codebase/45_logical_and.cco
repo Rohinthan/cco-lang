@@ -1,0 +1,6 @@
+fn main() -> int {
+    let x = 7;
+    let is_between = x > 5 && x < 10;
+    print(f"Logical AND ({x} > 5 && {x} < 10): {is_between}");
+    return 0;
+}

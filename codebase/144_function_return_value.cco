@@ -1,0 +1,15 @@
+fn calculate_sum(x: int, y: int) -> int {
+    return x + y;
+}
+
+fn main() -> int {
+    let result1 = calculate_sum(5, 3);
+    let result2 = calculate_sum(8, 2);
+    let result3 = calculate_sum(15, 15);
+
+    print(f"Result1 is: {result1}");
+    print(f"Result2 is: {result2}");
+    print(f"Result3 is: {result3}");
+
+    return 0;
+}

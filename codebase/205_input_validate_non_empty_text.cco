@@ -1,0 +1,16 @@
+fn validate_and_greet(name: string) -> void {
+    if (len(name) > 0 && !equals(name, "")) {
+        print(f"Accepted: Hello, {name}!");
+    } else {
+        print("Rejected: Name cannot be empty.");
+    }
+}
+
+fn main() -> int {
+    print("=== Non-Empty Text Validation ===");
+    validate_and_greet("");
+    validate_and_greet("");
+    validate_and_greet("John");
+
+    return 0;
+}

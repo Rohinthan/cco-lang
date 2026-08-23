@@ -1,0 +1,7 @@
+fn main() -> int {
+    let x = 5;
+    let y = 6;
+    let z = 50;
+    print(f"Sum: {x + y + z}");
+    return 0;
+}

@@ -1,0 +1,20 @@
+fn main() -> int {
+    let numbers: int[] = alloc(int, 3);
+    numbers[0] = 10;
+    numbers[1] = 20;
+    numbers[2] = 30;
+
+    let target_index = 5;
+    let count = len(numbers);
+
+    print("=== Debugging Bounds-Checked Access ===");
+    print(f"[DEBUG] Target index = {target_index}, Array length = {count}");
+
+    if (target_index >= 0 && target_index < count) {
+        print(f"Value = {numbers[target_index]}");
+    } else {
+        print(f"Error: Index {target_index} is out of bounds for array of length {count}!");
+    }
+
+    return 0;
+}

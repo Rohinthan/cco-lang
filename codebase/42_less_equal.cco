@@ -1,0 +1,6 @@
+fn main() -> int {
+    let x = 3;
+    let y = 5;
+    print(f"Less or equal ({x} <= {y}): {x <= y}");
+    return 0;
+}

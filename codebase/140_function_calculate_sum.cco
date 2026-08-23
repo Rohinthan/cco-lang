@@ -1,0 +1,12 @@
+fn calculate_sum() -> void {
+    let x = 5;
+    let y = 10;
+    let sum = x + y;
+    print(f"The sum of x + y is: {sum}");
+}
+
+fn main() -> int {
+    print("=== Function Computation ===");
+    calculate_sum(); // call the function
+    return 0;
+}

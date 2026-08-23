@@ -1,0 +1,27 @@
+enum Weekday {
+    Monday,
+    Tuesday,
+    Wednesday,
+    Thursday,
+    Friday,
+    Saturday,
+    Sunday,
+}
+
+fn describe_day(d: &Weekday) -> void {
+    match d {
+        Weekday.Monday => { print("Monday: Start of work week"); }
+        Weekday.Tuesday => { print("Tuesday: Getting productive"); }
+        Weekday.Wednesday => { print("Wednesday: Midweek"); }
+        Weekday.Thursday => { print("Thursday: Almost weekend"); }
+        Weekday.Friday => { print("Friday: Weekend is near"); }
+        Weekday.Saturday => { print("Saturday: Weekend!"); }
+        Weekday.Sunday => { print("Sunday: Rest day"); }
+    }
+}
+
+fn main() -> int {
+    let today: Weekday = Weekday.Thursday;
+    describe_day(&today);
+    return 0;
+}

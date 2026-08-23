@@ -1,0 +1,14 @@
+fn main() -> int {
+    let i = 0;
+
+    // Run-at-least-once loop pattern (do...while semantics)
+    while (true) {
+        print(i);
+        i++;
+        if (i >= 5) {
+            break;
+        }
+    }
+
+    return 0;
+}

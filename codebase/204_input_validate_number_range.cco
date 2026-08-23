@@ -1,0 +1,28 @@
+fn validate_range(input_num: int) -> bool {
+    if (input_num >= 1 && input_num <= 5) {
+        return true;
+    } else {
+        return false;
+    }
+}
+
+fn main() -> int {
+    print("=== Number Range Validation (1 to 5) ===");
+
+    let sample_inputs: int[] = alloc(int, 4);
+    sample_inputs[0] = 8;
+    sample_inputs[1] = -2;
+    sample_inputs[2] = 4;
+    sample_inputs[3] = 5;
+
+    for num in sample_inputs {
+        let is_valid = validate_range(num);
+        if (is_valid) {
+            print(f"Testing {num}: VALID (Accepted: You chose {num})");
+        } else {
+            print(f"Testing {num}: INVALID (Out of range [1, 5])");
+        }
+    }
+
+    return 0;
+}

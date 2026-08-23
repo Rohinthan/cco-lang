@@ -1,0 +1,14 @@
+fn main() -> int {
+    // Statement 1: First instruction
+    print("Hello World!");
+
+    // Statement 2: Second instruction
+    print("Have a good day!");
+
+    // Statement 3: Variable computation instruction
+    let total_steps = 3;
+    print(f"Executed {total_steps} statements in sequence.");
+
+    // Statement 4: Exit statement
+    return 0;
+}

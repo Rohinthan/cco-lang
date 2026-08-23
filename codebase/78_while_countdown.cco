@@ -1,0 +1,11 @@
+fn main() -> int {
+    let countdown = 3;
+
+    while (countdown > 0) {
+        print(countdown);
+        countdown--;
+    }
+
+    print("Happy New Year!!");
+    return 0;
+}

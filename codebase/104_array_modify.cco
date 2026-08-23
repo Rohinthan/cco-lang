@@ -1,0 +1,15 @@
+fn main() -> int {
+    let my_numbers: int[] = alloc(int, 4);
+    my_numbers[0] = 25;
+    my_numbers[1] = 50;
+    my_numbers[2] = 75;
+    my_numbers[3] = 100;
+
+    print(f"Original first element: {my_numbers[0]}");
+
+    // Modify the first element
+    my_numbers[0] = 33;
+
+    print(f"Modified first element: {my_numbers[0]}");
+    return 0;
+}

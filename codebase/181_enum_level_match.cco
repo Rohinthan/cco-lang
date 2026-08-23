@@ -1,0 +1,28 @@
+enum Level {
+    Low,
+    Medium,
+    High,
+}
+
+fn check_level(lvl: &Level) -> void {
+    match lvl {
+        Level.Low => {
+            print("Low Level");
+        }
+        Level.Medium => {
+            print("Medium Level");
+        }
+        Level.High => {
+            print("High Level");
+        }
+    }
+}
+
+fn main() -> int {
+    let my_var: Level = Level.Medium;
+
+    print("=== Enum Level Dispatch ===");
+    check_level(&my_var);
+
+    return 0;
+}

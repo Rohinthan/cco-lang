@@ -1,0 +1,13 @@
+fn main() -> int {
+    let neg_num = -42;
+    let abs_val = abs_int(neg_num);
+
+    let smaller = min_int(10, 20);
+    let larger = max_int(10, 20);
+
+    print(f"abs_int({neg_num}): {abs_val}");
+    print(f"min_int(10, 20): {smaller}");
+    print(f"max_int(10, 20): {larger}");
+
+    return 0;
+}

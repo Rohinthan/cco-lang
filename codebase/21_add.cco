@@ -1,0 +1,7 @@
+fn main() -> int {
+    let x = 10;
+    let y = 5;
+    let sum = x + y;
+    print(f"Addition: {x} + {y} = {sum}");
+    return 0;
+}

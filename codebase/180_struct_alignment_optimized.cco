@@ -1,0 +1,20 @@
+struct OptimizedData {
+    b: int;
+    a: char;
+    c: char;
+}
+
+fn main() -> int {
+    let data: OptimizedData = OptimizedData {
+        b: 42,
+        a: 'X',
+        c: 'Y'
+    };
+
+    print("=== Optimized Field Ordering Struct ===");
+    print(f"b: {data.b}");
+    print(f"a: {data.a}");
+    print(f"c: {data.c}");
+
+    return 0;
+}

@@ -1,0 +1,20 @@
+class Car {
+    brand: string;
+    year: int;
+}
+
+fn main() -> int {
+    // Start with empty dynamic collection
+    let cars: Car[] = alloc(Car, 0);
+
+    print("=== Growing Array of Structs via push() ===");
+    cars = push(cars, Car { brand: "Toyota", year: 2010 });
+    cars = push(cars, Car { brand: "Audi", year: 2019 });
+    cars = push(cars, Car { brand: "Kia", year: 2022 });
+
+    for c in cars {
+        print(f"{c.brand} - {c.year}");
+    }
+
+    return 0;
+}

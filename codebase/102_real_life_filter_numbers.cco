@@ -1,0 +1,23 @@
+fn main() -> int {
+    let my_numbers: int[] = alloc(int, 5);
+    my_numbers[0] = 3;
+    my_numbers[1] = -1;
+    my_numbers[2] = 7;
+    my_numbers[3] = 0;
+    my_numbers[4] = 9;
+
+    print("=== Processing Numbers (Skip Negatives, Stop at Zero) ===");
+
+    for (let i = 0; i < 5; i++) {
+        let val = my_numbers[i];
+        if (val < 0) {
+            continue; // skip negative numbers
+        }
+        if (val == 0) {
+            break; // stop loop when zero is found
+        }
+        print(val);
+    }
+
+    return 0;
+}

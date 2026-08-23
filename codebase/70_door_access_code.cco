@@ -1,0 +1,11 @@
+fn main() -> int {
+    let door_code = 1337;
+
+    if (door_code == 1337) {
+        print("Correct code.\nThe door is now open.");
+    } else {
+        print("Wrong code.\nThe door remains closed.");
+    }
+
+    return 0;
+}

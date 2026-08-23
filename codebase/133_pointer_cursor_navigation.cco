@@ -1,0 +1,20 @@
+fn main() -> int {
+    let my_numbers: int[] = alloc(int, 3);
+    my_numbers[0] = 10;
+    my_numbers[1] = 20;
+    my_numbers[2] = 30;
+
+    let cursor = 0; // points to index 0 (10)
+    print(f"Current element: {my_numbers[cursor]}");
+
+    cursor++; // move to index 1 (20)
+    print(f"After cursor++: {my_numbers[cursor]}");
+
+    cursor--; // move back to index 0 (10)
+    print(f"After cursor--: {my_numbers[cursor]}");
+
+    cursor += 2; // jump 2 positions to index 2 (30)
+    print(f"After cursor += 2: {my_numbers[cursor]}");
+
+    return 0;
+}

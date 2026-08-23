@@ -1,0 +1,16 @@
+fn calculate_circle_area(radius: float) -> float {
+    // Type-safe constant replacing untyped C '#define PI 3.14159'
+    let pi: float = 3.14159;
+    return pi * radius * radius;
+}
+
+fn main() -> int {
+    let radius = 5.0;
+    let area = calculate_circle_area(radius);
+
+    print("=== Type-Safe Constants vs #define ===");
+    print(f"Radius: {radius}");
+    print(f"Calculated Circle Area: {area}");
+
+    return 0;
+}

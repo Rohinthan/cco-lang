@@ -1,0 +1,10 @@
+fn main() -> int {
+    let a = 33;
+    let b = 200;
+
+    if (!(a > b)) {
+        print("a is NOT greater than b");
+    }
+
+    return 0;
+}

@@ -1,0 +1,6 @@
+fn main() -> int {
+    let message = "Hello";
+    message += ", World!";
+    print(f"String += assignment: {message}");
+    return 0;
+}

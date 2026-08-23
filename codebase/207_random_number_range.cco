@@ -1,0 +1,15 @@
+fn main() -> int {
+    // Optional: seed the generator for deterministic reproducible testing
+    random_seed(42);
+
+    print("=== Random Numbers in Range [0, 9] ===");
+    let r1 = random_int(0, 9);
+    let r2 = random_int(0, 9);
+    let r3 = random_int(0, 9);
+
+    print(f"Random 1: {r1}");
+    print(f"Random 2: {r2}");
+    print(f"Random 3: {r3}");
+
+    return 0;
+}
