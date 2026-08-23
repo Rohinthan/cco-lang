@@ -1,6 +1,6 @@
 # Learn Cco by Example: A Python Programmer's Guide
 
-Welcome to **Cco** (C--)! This guide is designed for developers who are familiar with basic programming concepts—especially in languages like Python—and want to see how to write clean, idiomatic code in Cco. 
+Welcome to **Cco** This guide is designed for developers who are familiar with basic programming concepts—especially in languages like Python—and want to see how to write clean, idiomatic code in Cco. 
 
 Cco combines the visual conciseness and expressiveness of high-level scripting languages with the raw performance, zero-runtime overhead, and deterministic memory safety of C.
 
