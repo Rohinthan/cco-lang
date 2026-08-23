@@ -889,18 +889,7 @@ static AstNode *find_class_ast(AstNode *program, const char *name) {
 static void sb_append_escaped_string(StringBuffer *sb, const char *s) {
     sb_append(sb, "\"");
     if (s) {
-        while (*s) {
-            if (*s == '\n') sb_append(sb, "\\n");
-            else if (*s == '\t') sb_append(sb, "\\t");
-            else if (*s == '\r') sb_append(sb, "\\r");
-            else if (*s == '\\') sb_append(sb, "\\\\");
-            else if (*s == '\"') sb_append(sb, "\\\"");
-            else {
-                char ch[2] = {*s, '\0'};
-                sb_append(sb, ch);
-            }
-            s++;
-        }
+        sb_append(sb, s);
     }
     sb_append(sb, "\"");
 }

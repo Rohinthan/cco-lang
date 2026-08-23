@@ -4,11 +4,26 @@ SRC = src/errors.c src/lexer.c src/ast.c src/class_decl.c src/parser.c src/modul
 MAIN_SRC = src/main.c
 LDFLAGS = -lm
 
-all: cco
+all: cco gcco
 
 cco: $(SRC) $(MAIN_SRC)
 	@mkdir -p build
 	$(CC) $(CFLAGS) $(SRC) $(MAIN_SRC) -o cco $(LDFLAGS)
+
+gcco: cco
+	@cp -f cco gcco
+
+PREFIX ?= $(HOME)/.local
+
+install: cco gcco
+	@mkdir -p $(PREFIX)/bin
+	@cp -f cco $(PREFIX)/bin/cco
+	@cp -f gcco $(PREFIX)/bin/gcco
+	@echo "Successfully installed 'cco' and 'gcco' to $(PREFIX)/bin"
+
+uninstall:
+	@rm -f $(PREFIX)/bin/cco $(PREFIX)/bin/gcco
+	@echo "Removed 'cco' and 'gcco' from $(PREFIX)/bin"
 
 unit_tests: cco
 	@mkdir -p build
@@ -29,6 +44,6 @@ test: unit_tests test_selfhost
 	@bash tests/run_tests.sh
 
 clean:
-	rm -rf build cco selfhost/lexer_selfhosted selfhost/lexer_selfhosted.c target.cco
+	rm -rf build cco gcco selfhost/lexer_selfhosted selfhost/lexer_selfhosted.c target.cco
 
-.PHONY: all unit_tests test_selfhost test clean
+.PHONY: all install uninstall unit_tests test_selfhost test clean

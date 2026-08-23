@@ -1,0 +1,7 @@
+Header
+Name: Alice	Score: 95
+Footer
+
+Leading newline and trailing: Alice
+
+Quotes: "Alice" and backslash: \

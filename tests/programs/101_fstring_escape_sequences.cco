@@ -1,0 +1,8 @@
+fn main() -> int {
+    let name = "Alice";
+    let score = 95;
+    print(f"Header\nName: {name}\tScore: {score}\nFooter");
+    print(f"\nLeading newline and trailing: {name}\n");
+    print(f"Quotes: \"{name}\" and backslash: \\");
+    return 0;
+}
