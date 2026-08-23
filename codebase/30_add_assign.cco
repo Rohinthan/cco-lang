@@ -1,6 +1,0 @@
-fn main() -> int {
-    let x = 10;
-    x += 5;
-    print(f"After addition assignment (x += 5): {x}");
-    return 0;
-}

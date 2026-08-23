@@ -1,7 +1,0 @@
-fn main() -> int {
-    let is_logged_in = true;
-    let is_admin = false;
-    let regular_access = is_logged_in && !is_admin;
-    print(f"Regular user access: {regular_access}");
-    return 0;
-}

@@ -1,6 +1,0 @@
-fn main() -> int {
-    if (20 > 18) {
-        print("20 is greater than 18");
-    }
-    return 0;
-}

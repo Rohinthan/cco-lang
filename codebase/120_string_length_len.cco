@@ -1,9 +1,0 @@
-fn main() -> int {
-    let alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-    let length = len(alphabet);
-
-    print(f"Alphabet string: {alphabet}");
-    print(f"String length (len): {length}");
-
-    return 0;
-}

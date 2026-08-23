@@ -1,5 +1,0 @@
-fn main() -> int {
-    let is_open = true;
-    print(f"Logical NOT (!is_open): {!is_open}");
-    return 0;
-}

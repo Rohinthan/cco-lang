@@ -1,6 +1,0 @@
-fn main() -> int {
-    for (let i = 5; i > 0; i--) {
-        print(i);
-    }
-    return 0;
-}

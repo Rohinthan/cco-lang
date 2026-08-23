@@ -1,9 +1,0 @@
-fn main() -> int {
-    for (let i = 0; i < 10; i++) {
-        if (i == 4) {
-            continue;
-        }
-        print(i);
-    }
-    return 0;
-}

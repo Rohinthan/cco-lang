@@ -1,7 +1,0 @@
-fn main() -> int {
-    let message = "Good to see you,";
-    let fname = "John";
-
-    print(f"{message} {fname}!");
-    return 0;
-}

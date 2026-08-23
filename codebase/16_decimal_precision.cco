@@ -1,8 +1,0 @@
-fn main() -> int {
-    let price = 19.99;
-    let whole_float = 3.5;
-
-    print(f"Price: {price}");
-    print(f"Float: {whole_float}");
-    return 0;
-}

@@ -1,8 +1,0 @@
-fn my_function() -> void {
-    print("I just got executed!");
-}
-
-fn main() -> int {
-    my_function(); // call the function
-    return 0;
-}

@@ -1,6 +1,0 @@
-fn main() -> int {
-    let x = 7;
-    let is_outer = x < 5 || x > 6;
-    print(f"Logical OR ({x} < 5 || {x} > 6): {is_outer}");
-    return 0;
-}

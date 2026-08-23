@@ -1,9 +1,0 @@
-fn main() -> int {
-    let max_score = 500;
-    let user_score = 423;
-    let percentage = (1.0 * user_score / max_score) * 100.0;
-
-    print(f"User score: {user_score} / {max_score}");
-    print(f"Percentage: {percentage}%");
-    return 0;
-}

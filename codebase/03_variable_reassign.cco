@@ -1,7 +1,0 @@
-fn main() -> int {
-    let myNum = 15;
-    print(f"Initial: {myNum}");
-    myNum = 10;
-    print(f"Reassigned: {myNum}");
-    return 0;
-}

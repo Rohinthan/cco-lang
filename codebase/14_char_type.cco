@@ -1,8 +1,0 @@
-fn main() -> int {
-    let grade = 'A';
-    let word = "Apple";
-
-    print(f"Single char: {grade}");
-    print(f"Full string: {word}");
-    return 0;
-}

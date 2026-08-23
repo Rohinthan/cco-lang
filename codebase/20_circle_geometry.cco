@@ -1,9 +1,0 @@
-fn main() -> int {
-    let PI = 3.14159265;
-    let radius = 5.0;
-    let area = PI * radius * radius;
-
-    print(f"Radius: {radius}");
-    print(f"Area: {area}");
-    return 0;
-}

@@ -1,9 +1,0 @@
-fn main() -> int {
-    let txt1 = "We are the so-called \"Vikings\" from the north.";
-    let txt2 = "It\'s alright.";
-
-    print(txt1);
-    print(txt2);
-
-    return 0;
-}

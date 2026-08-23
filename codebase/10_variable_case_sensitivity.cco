@@ -1,6 +1,0 @@
-fn main() -> int {
-    let myVar = 100;
-    let myvar = 200;
-    print(f"myVar: {myVar}, myvar: {myvar}");
-    return 0;
-}

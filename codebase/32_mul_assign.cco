@@ -1,6 +1,0 @@
-fn main() -> int {
-    let x = 10;
-    x *= 2;
-    print(f"After multiplication assignment (x *= 2): {x}");
-    return 0;
-}

@@ -1,5 +1,0 @@
-fn main() -> int {
-    let x = 10;
-    print(f"Assigned value (=): {x}");
-    return 0;
-}

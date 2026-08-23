@@ -1,6 +1,0 @@
-fn main() -> int {
-    let myOtherNum = 23;
-    let myNum = myOtherNum;
-    print(f"Copied value: {myNum}");
-    return 0;
-}

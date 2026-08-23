@@ -1,7 +1,0 @@
-fn main() -> int {
-    let minutes_per_hour = 60;
-    let hours_worked = 8;
-    let total_minutes = minutes_per_hour * hours_worked;
-    print(f"Total minutes: {total_minutes}");
-    return 0;
-}

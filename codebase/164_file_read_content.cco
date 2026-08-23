@@ -1,9 +1,0 @@
-fn main() -> int {
-    let filename = "build/atomic/sample.txt";
-
-    print("=== Reading from File ===");
-    let text = read_file(filename);
-    print(f"File contents:\n{text}");
-
-    return 0;
-}

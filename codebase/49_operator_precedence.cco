@@ -1,7 +1,0 @@
-fn main() -> int {
-    let result1 = 2 + 3 * 4;
-    let result2 = (2 + 3) * 4;
-    print(f"2 + 3 * 4 = {result1}");
-    print(f"(2 + 3) * 4 = {result2}");
-    return 0;
-}

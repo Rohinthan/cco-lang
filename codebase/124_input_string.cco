@@ -1,5 +1,0 @@
-fn main() -> int {
-    let first_name = read_line();
-    print(f"Hello {first_name}");
-    return 0;
-}

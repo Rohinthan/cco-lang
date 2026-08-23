@@ -1,6 +1,0 @@
-fn main() -> int {
-    let x = 5;
-    x = x + 1;
-    print(f"Updated x: {x}");
-    return 0;
-}

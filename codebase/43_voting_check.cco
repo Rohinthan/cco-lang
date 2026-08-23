@@ -1,5 +1,0 @@
-fn main() -> int {
-    let age = 18;
-    print(f"Eligible to vote (age >= 18): {age >= 18}");
-    return 0;
-}
