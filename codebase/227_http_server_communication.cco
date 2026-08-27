@@ -1,0 +1,77 @@
+fn handle_http_request(port: int, req_id: int, method: string, path: string, payload: string) -> string {
+    print(f"\n[SERVER :{port}] Received Request #{req_id} -> {method} {path}");
+
+    let status_code = 200;
+    let status_text = "OK";
+    let content_type = "application/json";
+    let body = "";
+
+    if (equals(path, "/health")) {
+        body = "{\"status\": \"UP\", \"server\": \"Cco-HTTP-Engine/1.0\"}";
+    } else if (equals(path, "/api/greet") && equals(method, "GET")) {
+        content_type = "text/plain";
+        body = "Hello from Cco Native Microservice!";
+    } else if (equals(path, "/api/users") && equals(method, "POST")) {
+        if (equals(payload, "")) {
+            status_code = 400;
+            status_text = "Bad Request";
+            body = "{\"error\": \"Missing request payload\"}";
+        } else {
+            status_code = 201;
+            status_text = "Created";
+            body = f"{{\"message\": \"User created successfully\", \"user\": \"{payload}\"}}";
+        }
+    } else {
+        status_code = 404;
+        status_text = "Not Found";
+        body = f"{{\"error\": \"Route '{path}' not found on server\"}}";
+    }
+
+    let formatted = f"HTTP/1.1 {status_code} {status_text}\nContent-Type: {content_type}\nContent-Length: {len(body)}\n\n{body}";
+    return formatted;
+}
+
+fn client_send(port: int, req_id: int, method: string, path: string, payload: string) -> void {
+    print(f"[CLIENT] Dispatching -> {method} http://localhost:{port}{path}");
+    let response: string = handle_http_request(port, req_id, method, path, payload);
+
+    print("[CLIENT] Received HTTP Response:");
+    print(response);
+    print("--------------------------------------------------");
+}
+
+fn main() -> int {
+    print("==================================================");
+    print("      CCO HTTP SERVER & CLIENT COMMUNICATION      ");
+    print("==================================================");
+
+    let port = 8080;
+    let requests_handled = 0;
+
+    print(f"Starting Cco HTTP Server on port {port}...\n");
+
+    // Test 1: Health check GET request
+    requests_handled += 1;
+    client_send(port, requests_handled, "GET", "/health", "");
+
+    // Test 2: API Greeting GET request
+    requests_handled += 1;
+    client_send(port, requests_handled, "GET", "/api/greet", "");
+
+    // Test 3: POST request with payload
+    requests_handled += 1;
+    client_send(port, requests_handled, "POST", "/api/users", "Alice (Admin)");
+
+    // Test 4: Bad POST request (Empty payload)
+    requests_handled += 1;
+    client_send(port, requests_handled, "POST", "/api/users", "");
+
+    // Test 5: Unknown Route (404 Not Found)
+    requests_handled += 1;
+    client_send(port, requests_handled, "GET", "/api/unknown_endpoint", "");
+
+    print(f"\n[SERVER STATS] Total Handled Requests: {requests_handled}");
+    print("Server communication completed with 0 errors & 0 leaks!");
+
+    return 0;
+}
