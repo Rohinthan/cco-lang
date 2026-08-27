@@ -2116,6 +2116,40 @@ static void infer_ast_expr_type(AstArena *arena, AstNode *program, AstNode *fn, 
         *out_class = ac;
         return;
     }
+    if (expr->type == NODE_MEMBER) {
+        Type obj_t; char *obj_c = NULL; bool obj_a = false, obj_m = false; Type obj_k = TY_INT;
+        infer_ast_expr_type(arena, program, fn, expr->as.member.object, &obj_t, &obj_c, &obj_a, &obj_m, &obj_k);
+        const char *cname = expr->as.member.field_class_name ? expr->as.member.field_class_name : obj_c;
+        const char *mname = expr->as.member.member_name;
+        if (cname && program && program->type == NODE_PROGRAM) {
+            for (int s = 0; s < program->as.program.struct_count; s++) {
+                AstNode *st = program->as.program.structs[s];
+                if (strcmp(st->as.struct_decl.name, cname) == 0) {
+                    for (int f = 0; f < st->as.struct_decl.field_count; f++) {
+                        if (strcmp(st->as.struct_decl.fields[f]->as.struct_field_decl.name, mname) == 0) {
+                            *out_type = st->as.struct_decl.fields[f]->as.struct_field_decl.field_type;
+                            return;
+                        }
+                    }
+                }
+            }
+            for (int c = 0; c < program->as.program.class_count; c++) {
+                AstNode *cls = program->as.program.classes[c];
+                if (strcmp(cls->as.class_decl.name, cname) == 0) {
+                    for (int f = 0; f < cls->as.class_decl.field_count; f++) {
+                        if (strcmp(cls->as.class_decl.fields[f]->as.field.name, mname) == 0) {
+                            *out_type = cls->as.class_decl.fields[f]->as.field.type;
+                            *out_class = cls->as.class_decl.fields[f]->as.field.class_name ? arena_strdup(arena, cls->as.class_decl.fields[f]->as.field.class_name) : NULL;
+                            *out_is_array = cls->as.class_decl.fields[f]->as.field.is_array;
+                            *out_is_map = cls->as.class_decl.fields[f]->as.field.is_map;
+                            *out_key_type = cls->as.class_decl.fields[f]->as.field.key_type;
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 static AstNode *desugar_stmt_node(AstArena *arena, AstNode *program, AstNode *fn, AstNode *stmt) {
