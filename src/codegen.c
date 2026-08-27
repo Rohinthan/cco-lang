@@ -229,10 +229,24 @@ static const char *find_ident_class_in_node(AstNode *program, AstNode *node, con
     }
 
     if (node->type == NODE_FUNCTION) {
+        for (int p = 0; p < node->as.function.param_count; p++) {
+            if (strcmp(node->as.function.param_names[p], var_name) == 0) {
+                if (node->as.function.param_class_names && node->as.function.param_class_names[p]) {
+                    return node->as.function.param_class_names[p];
+                }
+            }
+        }
         return find_ident_class_in_node(program, node->as.function.body, var_name);
     }
 
     if (node->type == NODE_METHOD) {
+        for (int p = 0; p < node->as.method.param_count; p++) {
+            if (strcmp(node->as.method.param_names[p], var_name) == 0) {
+                if (node->as.method.param_class_names && node->as.method.param_class_names[p]) {
+                    return node->as.method.param_class_names[p];
+                }
+            }
+        }
         return find_ident_class_in_node(program, node->as.method.body, var_name);
     }
 
@@ -481,12 +495,19 @@ static const char *get_expr_class_name(AstNode *program, AstNode *fn, AstNode *e
     if (!expr) return NULL;
     if (expr->type == NODE_IDENT && fn) {
         const char *obj_name = expr->as.ident.name;
-        if (fn->type == NODE_METHOD && strcmp(obj_name, "self") == 0) {
-            return fn->as.method.param_class_names ? fn->as.method.param_class_names[0] : NULL;
+        if (fn->type == NODE_METHOD) {
+            if (strcmp(obj_name, "self") == 0) {
+                return fn->as.method.param_class_names ? fn->as.method.param_class_names[0] : NULL;
+            }
+            for (int p = 0; p < fn->as.method.param_count; p++) {
+                if (strcmp(fn->as.method.param_names[p], obj_name) == 0) {
+                    return fn->as.method.param_class_names ? fn->as.method.param_class_names[p] : NULL;
+                }
+            }
         } else if (fn->type == NODE_FUNCTION) {
             for (int p = 0; p < fn->as.function.param_count; p++) {
                 if (strcmp(fn->as.function.param_names[p], obj_name) == 0) {
-                    return fn->as.function.param_class_names[p];
+                    return fn->as.function.param_class_names ? fn->as.function.param_class_names[p] : NULL;
                 }
             }
         }

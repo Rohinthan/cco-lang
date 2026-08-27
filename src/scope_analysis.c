@@ -124,6 +124,11 @@ static bool is_stdlib_heap_fn(const char *name) {
 
 
 static void analyze_block(ScopeStack *stack, AstNode *block_node, bool is_loop) {
+    if (!block_node) return;
+    if (block_node->type != NODE_BLOCK) {
+        analyze_node(stack, block_node);
+        return;
+    }
     push_scope(stack, block_node, is_loop);
     Scope *s = current_scope(stack);
 
@@ -131,26 +136,28 @@ static void analyze_block(ScopeStack *stack, AstNode *block_node, bool is_loop) 
         AstNode *stmt = block_node->as.block.stmts[i];
 
         if (stmt->type == NODE_LET) {
-            analyze_node(stack, stmt->as.let.value);
-            bool is_alloc = (stmt->as.let.value->type == NODE_ALLOC && !stmt->as.let.value->as.alloc.is_map && stmt->as.let.value->as.alloc.elem_type != TY_CLASS) || (stmt->as.let.var_type == TY_STRING && !stmt->as.let.is_map);
-            if (!is_alloc && stmt->as.let.value->type == NODE_CALL) {
-                const char *callee = stmt->as.let.value->as.call.callee;
-                if (is_stdlib_heap_fn(callee)) {
-                    is_alloc = true;
-                } else {
-                    AstNode *fn = find_function(stack->program, callee);
-                    if (fn && fn->as.function.returns_heap_pointer) {
+            if (stmt->as.let.value) {
+                analyze_node(stack, stmt->as.let.value);
+                bool is_alloc = (stmt->as.let.value->type == NODE_ALLOC && !stmt->as.let.value->as.alloc.is_map && stmt->as.let.value->as.alloc.elem_type != TY_CLASS) || (stmt->as.let.var_type == TY_STRING && !stmt->as.let.is_map);
+                if (!is_alloc && stmt->as.let.value->type == NODE_CALL) {
+                    const char *callee = stmt->as.let.value->as.call.callee;
+                    if (is_stdlib_heap_fn(callee)) {
                         is_alloc = true;
+                    } else {
+                        AstNode *fn = find_function(stack->program, callee);
+                        if (fn && fn->as.function.returns_heap_pointer) {
+                            is_alloc = true;
+                        }
                     }
                 }
-            }
 
-            if (is_alloc) {
-                if (!(stmt->as.let.var_type == TY_STRING && stmt->as.let.is_array)) {
-                    stmt->is_heap_owner = true;
-                    bool is_str = (stmt->as.let.var_type == TY_STRING && !stmt->as.let.is_array);
-                    bool is_arr = !is_str;
-                    scope_add_owned(stack, s, stmt->as.let.name, is_arr);
+                if (is_alloc) {
+                    if (!(stmt->as.let.var_type == TY_STRING && stmt->as.let.is_array)) {
+                        stmt->is_heap_owner = true;
+                        bool is_str = (stmt->as.let.var_type == TY_STRING && !stmt->as.let.is_array);
+                        bool is_arr = !is_str;
+                        scope_add_owned(stack, s, stmt->as.let.name, is_arr);
+                    }
                 }
             }
         } else if (stmt->type == NODE_ASSIGN) {
