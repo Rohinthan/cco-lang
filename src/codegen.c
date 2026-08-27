@@ -2250,8 +2250,32 @@ static void gen_class_helpers(CodegenCtx *ctx, AstNode *program) {
         sb_append(&ctx->sb, "    if (p) {\n");
         for (int f = 0; f < cls->as.class_decl.field_count; f++) {
             AstNode *f_node = cls->as.class_decl.fields[f];
-            if (f_node->as.field.type == TY_CLASS && f_node->as.field.class_name) {
+            if (f_node->as.field.type == TY_CLASS && f_node->as.field.class_name && !f_node->as.field.is_array) {
                 sb_appendf(&ctx->sb, "        %s_free(p->%s);\n", f_node->as.field.class_name, f_node->as.field.name);
+            } else if (f_node->as.field.is_array) {
+                if (f_node->as.field.type == TY_CLASS && f_node->as.field.class_name) {
+                    sb_appendf(&ctx->sb, "        if (p->%s != NULL) {\n", f_node->as.field.name);
+                    sb_appendf(&ctx->sb, "            for (int __i = 0; __i < __cco_arr_len(p->%s); __i++) {\n", f_node->as.field.name);
+                    sb_appendf(&ctx->sb, "                if (p->%s[__i] != NULL) { %s_free(p->%s[__i]); }\n", f_node->as.field.name, f_node->as.field.class_name, f_node->as.field.name);
+                    sb_appendf(&ctx->sb, "            }\n");
+                    sb_appendf(&ctx->sb, "            __cco_free_arr(p->%s);\n", f_node->as.field.name);
+                    sb_appendf(&ctx->sb, "        }\n");
+                } else if (f_node->as.field.type == TY_STRING) {
+                    sb_appendf(&ctx->sb, "        if (p->%s != NULL) {\n", f_node->as.field.name);
+                    sb_appendf(&ctx->sb, "            for (int __i = 0; __i < __cco_arr_len(p->%s); __i++) {\n", f_node->as.field.name);
+                    sb_appendf(&ctx->sb, "                if (p->%s[__i] != NULL) { free(p->%s[__i]); }\n", f_node->as.field.name, f_node->as.field.name);
+                    sb_appendf(&ctx->sb, "            }\n");
+                    sb_appendf(&ctx->sb, "            __cco_free_arr(p->%s);\n", f_node->as.field.name);
+                    sb_appendf(&ctx->sb, "        }\n");
+                } else {
+                    sb_appendf(&ctx->sb, "        if (p->%s) __cco_free_arr(p->%s);\n", f_node->as.field.name, f_node->as.field.name);
+                }
+            } else if (f_node->as.field.is_map) {
+                if (f_node->as.field.type == TY_CLASS && f_node->as.field.class_name) {
+                    sb_appendf(&ctx->sb, "        if (p->%s) __cco_map_free(p->%s, (__cco_val_free_fn)%s_free);\n", f_node->as.field.name, f_node->as.field.name, f_node->as.field.class_name);
+                } else {
+                    sb_appendf(&ctx->sb, "        if (p->%s) __cco_map_free(p->%s, NULL);\n", f_node->as.field.name, f_node->as.field.name);
+                }
             } else if (f_node->is_heap_owner || f_node->as.field.type == TY_STRING) {
                 sb_appendf(&ctx->sb, "        if (p->%s) free(p->%s);\n", f_node->as.field.name, f_node->as.field.name);
             }
