@@ -15,6 +15,9 @@ typedef struct FieldInfo {
     char *name;
     Type type;
     char *class_name; // Non-NULL if type == TY_CLASS or TY_ENUM
+    bool is_array;
+    bool is_map;
+    Type key_type;
 } FieldInfo;
 
 typedef struct MethodInfo {
