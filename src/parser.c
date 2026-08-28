@@ -1632,6 +1632,8 @@ static AstNode *parse_function(Parser *p) {
     char **param_names = NULL;
     Type *param_types = NULL;
     bool *param_is_array = NULL;
+    bool *param_is_map = NULL;
+    Type *param_key_types = NULL;
     char **param_class_names = NULL;
     bool *param_is_borrowed = NULL;
     bool *param_is_impl_trait = NULL;
@@ -1658,6 +1660,8 @@ static AstNode *parse_function(Parser *p) {
                 char **new_names = (char **)arena_alloc_array(p->arena, param_cap, sizeof(char *));
                 Type *new_types = (Type *)arena_alloc_array(p->arena, param_cap, sizeof(Type));
                 bool *new_arr = (bool *)arena_alloc_array(p->arena, param_cap, sizeof(bool));
+                bool *new_map = (bool *)arena_alloc_array(p->arena, param_cap, sizeof(bool));
+                Type *new_ktypes = (Type *)arena_alloc_array(p->arena, param_cap, sizeof(Type));
                 char **new_cls = (char **)arena_alloc_array(p->arena, param_cap, sizeof(char *));
                 bool *new_bor = (bool *)arena_alloc_array(p->arena, param_cap, sizeof(bool));
                 bool *new_impl = (bool *)arena_alloc_array(p->arena, param_cap, sizeof(bool));
@@ -1668,6 +1672,8 @@ static AstNode *parse_function(Parser *p) {
                     memcpy(new_names, param_names, param_count * sizeof(char *));
                     memcpy(new_types, param_types, param_count * sizeof(Type));
                     if (param_is_array) memcpy(new_arr, param_is_array, param_count * sizeof(bool));
+                    if (param_is_map) memcpy(new_map, param_is_map, param_count * sizeof(bool));
+                    if (param_key_types) memcpy(new_ktypes, param_key_types, param_count * sizeof(Type));
                     memcpy(new_cls, param_class_names, param_count * sizeof(char *));
                     memcpy(new_bor, param_is_borrowed, param_count * sizeof(bool));
                     if (param_is_impl_trait) memcpy(new_impl, param_is_impl_trait, param_count * sizeof(bool));
@@ -1678,6 +1684,8 @@ static AstNode *parse_function(Parser *p) {
                 param_names = new_names;
                 param_types = new_types;
                 param_is_array = new_arr;
+                param_is_map = new_map;
+                param_key_types = new_ktypes;
                 param_class_names = new_cls;
                 param_is_borrowed = new_bor;
                 param_is_impl_trait = new_impl;
@@ -1688,6 +1696,8 @@ static AstNode *parse_function(Parser *p) {
             param_names[param_count] = arena_strdup(p->arena, p_name.lexeme);
             param_types[param_count] = p_type;
             param_is_array[param_count] = p_is_arr;
+            param_is_map[param_count] = p_is_map;
+            param_key_types[param_count] = p_key_t;
             param_class_names[param_count] = p_is_impl ? NULL : p_cls;
             param_is_borrowed[param_count] = p_borrowed;
             param_is_impl_trait[param_count] = p_is_impl;
@@ -1714,6 +1724,8 @@ static AstNode *parse_function(Parser *p) {
     node->as.function.param_names = param_names;
     node->as.function.param_types = param_types;
     node->as.function.param_is_array = param_is_array;
+    node->as.function.param_is_map = param_is_map;
+    node->as.function.param_key_types = param_key_types;
     node->as.function.param_class_names = param_class_names;
     node->as.function.param_is_borrowed = param_is_borrowed;
     node->as.function.param_is_impl_trait = param_is_impl_trait;
