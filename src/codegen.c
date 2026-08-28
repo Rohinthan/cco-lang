@@ -778,6 +778,22 @@ static Type get_map_key_type(CodegenCtx *ctx, AstNode *expr) {
             }
         }
     }
+    if (expr->type == NODE_MEMBER && ctx->program && ctx->program->type == NODE_PROGRAM) {
+        const char *obj_cls = get_expr_elem_class_name(ctx, expr->as.member.object);
+        if (obj_cls) {
+            for (int c = 0; c < ctx->program->as.program.class_count; c++) {
+                AstNode *cls = ctx->program->as.program.classes[c];
+                if (strcmp(cls->as.class_decl.name, obj_cls) == 0) {
+                    for (int f = 0; f < cls->as.class_decl.field_count; f++) {
+                        AstNode *fld = cls->as.class_decl.fields[f];
+                        if (strcmp(fld->as.field.name, expr->as.member.member_name) == 0) {
+                            return fld->as.field.key_type;
+                        }
+                    }
+                }
+            }
+        }
+    }
     if (expr->type == NODE_CALL && expr->as.call.callee && strcmp(expr->as.call.callee, "put") == 0) {
         return get_map_key_type(ctx, expr->as.call.args[0]);
     }
@@ -813,10 +829,66 @@ static Type get_map_val_type(CodegenCtx *ctx, AstNode *expr) {
             }
         }
     }
+    if (expr->type == NODE_MEMBER && ctx->program && ctx->program->type == NODE_PROGRAM) {
+        const char *obj_cls = get_expr_elem_class_name(ctx, expr->as.member.object);
+        if (obj_cls) {
+            for (int c = 0; c < ctx->program->as.program.class_count; c++) {
+                AstNode *cls = ctx->program->as.program.classes[c];
+                if (strcmp(cls->as.class_decl.name, obj_cls) == 0) {
+                    for (int f = 0; f < cls->as.class_decl.field_count; f++) {
+                        AstNode *fld = cls->as.class_decl.fields[f];
+                        if (strcmp(fld->as.field.name, expr->as.member.member_name) == 0) {
+                            return fld->as.field.type;
+                        }
+                    }
+                }
+            }
+        }
+    }
     if (expr->type == NODE_CALL && expr->as.call.callee && strcmp(expr->as.call.callee, "put") == 0) {
         return get_map_val_type(ctx, expr->as.call.args[0]);
     }
     return TY_INT;
+}
+
+static bool get_map_val_is_array(CodegenCtx *ctx, AstNode *expr) {
+    if (!expr) return false;
+    if (expr->type == NODE_ALLOC) {
+        return false;
+    }
+    if (expr->type == NODE_IDENT && ctx->current_function) {
+        const char *var_name = expr->as.ident.name;
+        AstNode *fn = ctx->current_function;
+        AstNode *body = (fn->type == NODE_FUNCTION) ? fn->as.function.body : (fn->type == NODE_METHOD ? fn->as.method.body : NULL);
+        if (body && body->type == NODE_BLOCK) {
+            for (int i = 0; i < body->as.block.count; i++) {
+                AstNode *stmt = body->as.block.stmts[i];
+                if (stmt->type == NODE_LET && strcmp(stmt->as.let.name, var_name) == 0) {
+                    return stmt->as.let.is_array;
+                }
+            }
+        }
+    }
+    if (expr->type == NODE_MEMBER && ctx->program && ctx->program->type == NODE_PROGRAM) {
+        const char *obj_cls = get_expr_elem_class_name(ctx, expr->as.member.object);
+        if (obj_cls) {
+            for (int c = 0; c < ctx->program->as.program.class_count; c++) {
+                AstNode *cls = ctx->program->as.program.classes[c];
+                if (strcmp(cls->as.class_decl.name, obj_cls) == 0) {
+                    for (int f = 0; f < cls->as.class_decl.field_count; f++) {
+                        AstNode *fld = cls->as.class_decl.fields[f];
+                        if (strcmp(fld->as.field.name, expr->as.member.member_name) == 0) {
+                            return fld->as.field.is_array;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if (expr->type == NODE_CALL && expr->as.call.callee && strcmp(expr->as.call.callee, "put") == 0) {
+        return get_map_val_is_array(ctx, expr->as.call.args[0]);
+    }
+    return false;
 }
 
 static const char *get_map_val_class_name(CodegenCtx *ctx, AstNode *expr) {
@@ -833,6 +905,22 @@ static const char *get_map_val_class_name(CodegenCtx *ctx, AstNode *expr) {
                 AstNode *stmt = body->as.block.stmts[i];
                 if (stmt->type == NODE_LET && strcmp(stmt->as.let.name, var_name) == 0) {
                     return stmt->as.let.class_name;
+                }
+            }
+        }
+    }
+    if (expr->type == NODE_MEMBER && ctx->program && ctx->program->type == NODE_PROGRAM) {
+        const char *obj_cls = get_expr_elem_class_name(ctx, expr->as.member.object);
+        if (obj_cls) {
+            for (int c = 0; c < ctx->program->as.program.class_count; c++) {
+                AstNode *cls = ctx->program->as.program.classes[c];
+                if (strcmp(cls->as.class_decl.name, obj_cls) == 0) {
+                    for (int f = 0; f < cls->as.class_decl.field_count; f++) {
+                        AstNode *fld = cls->as.class_decl.fields[f];
+                        if (strcmp(fld->as.field.name, expr->as.member.member_name) == 0) {
+                            return fld->as.field.class_name;
+                        }
+                    }
                 }
             }
         }
@@ -1262,7 +1350,8 @@ static void gen_expr(CodegenCtx *ctx, AstNode *expr) {
                     sb_append(&ctx->sb, ")");
                 }
                 sb_append(&ctx->sb, ", ");
-                if (v_cls && find_class(ctx->ct, v_cls) != NULL) {
+                bool val_is_arr = get_map_val_is_array(ctx, m_arg);
+                if (val_is_arr || (v_cls && find_class(ctx->ct, v_cls) != NULL)) {
                     sb_append(&ctx->sb, "(void *)(");
                     gen_expr(ctx, v_arg);
                     sb_append(&ctx->sb, ")");
@@ -1279,7 +1368,7 @@ static void gen_expr(CodegenCtx *ctx, AstNode *expr) {
                     }
                 }
                 sb_append(&ctx->sb, ", ");
-                if (v_cls && find_class(ctx->ct, v_cls) != NULL) {
+                if (!val_is_arr && v_cls && find_class(ctx->ct, v_cls) != NULL) {
                     sb_appendf(&ctx->sb, "(__cco_val_free_fn)%s_free)", v_cls);
                 } else {
                     sb_append(&ctx->sb, "NULL)");
@@ -1290,9 +1379,10 @@ static void gen_expr(CodegenCtx *ctx, AstNode *expr) {
                 Type kt = get_map_key_type(ctx, m_arg);
                 Type vt = get_map_val_type(ctx, m_arg);
                 const char *v_cls = get_map_val_class_name(ctx, m_arg);
-                const char *c_type = c_type_str_full(ctx, vt, v_cls, false, false);
+                bool val_is_arr = get_map_val_is_array(ctx, m_arg);
+                const char *c_type = val_is_arr ? c_type_str_decl(ctx, vt, v_cls, true, false) : c_type_str_full(ctx, vt, v_cls, false, false);
 
-                if (vt == TY_CLASS || vt == TY_STRING) {
+                if (val_is_arr || vt == TY_CLASS || vt == TY_STRING) {
                     sb_appendf(&ctx->sb, "(%s)__cco_map_get(", c_type);
                 } else {
                     sb_appendf(&ctx->sb, "(%s)(intptr_t)__cco_map_get(", c_type);
@@ -2250,6 +2340,20 @@ static void gen_enum_helpers(CodegenCtx *ctx, AstNode *program) {
     }
 }
 
+static bool has_map_array_field_for_class(AstNode *program, const char *class_name) {
+    if (!program || program->type != NODE_PROGRAM || !class_name) return false;
+    for (int c = 0; c < program->as.program.class_count; c++) {
+        AstNode *cls = program->as.program.classes[c];
+        for (int f = 0; f < cls->as.class_decl.field_count; f++) {
+            AstNode *fld = cls->as.class_decl.fields[f];
+            if (fld->as.field.is_map && fld->as.field.is_array && fld->as.field.class_name && strcmp(fld->as.field.class_name, class_name) == 0) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 static void gen_class_helpers(CodegenCtx *ctx, AstNode *program) {
     if (!program || program->type != NODE_PROGRAM) return;
 
@@ -2265,7 +2369,7 @@ static void gen_class_helpers(CodegenCtx *ctx, AstNode *program) {
         for (int f = 0; f < cls->as.class_decl.field_count; f++) {
             AstNode *f_node = cls->as.class_decl.fields[f];
             sb_appendf(&ctx->sb, "    %s %s;\n",
-                       c_type_str_full(ctx, f_node->as.field.type, f_node->as.field.class_name, false, f_node->is_heap_owner),
+                       c_type_str_decl_full(ctx, f_node->as.field.type, f_node->as.field.class_name, f_node->as.field.is_array, f_node->as.field.is_map, f_node->is_heap_owner),
                        f_node->as.field.name);
         }
         sb_append(&ctx->sb, "};\n\n");
@@ -2279,7 +2383,17 @@ static void gen_class_helpers(CodegenCtx *ctx, AstNode *program) {
         sb_append(&ctx->sb, "    if (p) {\n");
         for (int f = 0; f < cls->as.class_decl.field_count; f++) {
             AstNode *f_node = cls->as.class_decl.fields[f];
-            if (f_node->as.field.type == TY_CLASS && f_node->as.field.class_name && !f_node->as.field.is_array) {
+            if (f_node->as.field.is_map) {
+                if (f_node->as.field.is_array && f_node->as.field.type == TY_CLASS && f_node->as.field.class_name) {
+                    sb_appendf(&ctx->sb, "        if (p->%s) __cco_map_free(p->%s, (__cco_val_free_fn)__cco_free_arr_of_%s);\n", f_node->as.field.name, f_node->as.field.name, f_node->as.field.class_name);
+                } else if (f_node->as.field.type == TY_CLASS && f_node->as.field.class_name && !f_node->as.field.is_array) {
+                    sb_appendf(&ctx->sb, "        if (p->%s) __cco_map_free(p->%s, (__cco_val_free_fn)%s_free);\n", f_node->as.field.name, f_node->as.field.name, f_node->as.field.class_name);
+                } else if (f_node->as.field.is_array) {
+                    sb_appendf(&ctx->sb, "        if (p->%s) __cco_map_free(p->%s, (__cco_val_free_fn)__cco_free_arr);\n", f_node->as.field.name, f_node->as.field.name);
+                } else {
+                    sb_appendf(&ctx->sb, "        if (p->%s) __cco_map_free(p->%s, NULL);\n", f_node->as.field.name, f_node->as.field.name);
+                }
+            } else if (f_node->as.field.type == TY_CLASS && f_node->as.field.class_name && !f_node->as.field.is_array) {
                 sb_appendf(&ctx->sb, "        %s_free(p->%s);\n", f_node->as.field.class_name, f_node->as.field.name);
             } else if (f_node->as.field.is_array) {
                 if (f_node->as.field.type == TY_CLASS && f_node->as.field.class_name) {
@@ -2299,12 +2413,6 @@ static void gen_class_helpers(CodegenCtx *ctx, AstNode *program) {
                 } else {
                     sb_appendf(&ctx->sb, "        if (p->%s) __cco_free_arr(p->%s);\n", f_node->as.field.name, f_node->as.field.name);
                 }
-            } else if (f_node->as.field.is_map) {
-                if (f_node->as.field.type == TY_CLASS && f_node->as.field.class_name) {
-                    sb_appendf(&ctx->sb, "        if (p->%s) __cco_map_free(p->%s, (__cco_val_free_fn)%s_free);\n", f_node->as.field.name, f_node->as.field.name, f_node->as.field.class_name);
-                } else {
-                    sb_appendf(&ctx->sb, "        if (p->%s) __cco_map_free(p->%s, NULL);\n", f_node->as.field.name, f_node->as.field.name);
-                }
             } else if (f_node->is_heap_owner || f_node->as.field.type == TY_STRING) {
                 sb_appendf(&ctx->sb, "        if (p->%s) free(p->%s);\n", f_node->as.field.name, f_node->as.field.name);
             }
@@ -2312,6 +2420,18 @@ static void gen_class_helpers(CodegenCtx *ctx, AstNode *program) {
         sb_append(&ctx->sb, "        free(p);\n");
         sb_append(&ctx->sb, "    }\n");
         sb_append(&ctx->sb, "}\n\n");
+
+        if (has_map_array_field_for_class(program, cname)) {
+            sb_appendf(&ctx->sb, "static inline void __cco_free_arr_of_%s(void *arr) {\n", cname);
+            sb_append(&ctx->sb, "    if (arr) {\n");
+            sb_appendf(&ctx->sb, "        for (int __i = 0; __i < __cco_arr_len(arr); __i++) {\n");
+            sb_appendf(&ctx->sb, "            %s *__item = ((%s **)arr)[__i];\n", cname, cname);
+            sb_appendf(&ctx->sb, "            if (__item) %s_free(__item);\n", cname);
+            sb_append(&ctx->sb, "        }\n");
+            sb_append(&ctx->sb, "        __cco_free_arr(arr);\n");
+            sb_append(&ctx->sb, "    }\n");
+            sb_append(&ctx->sb, "}\n\n");
+        }
 
         sb_appendf(&ctx->sb, "static inline %s *%s_new(", cname, cname);
         if (cls->as.class_decl.field_count == 0) {
@@ -2321,7 +2441,7 @@ static void gen_class_helpers(CodegenCtx *ctx, AstNode *program) {
                 if (f > 0) sb_append(&ctx->sb, ", ");
                 AstNode *f_node = cls->as.class_decl.fields[f];
                 sb_appendf(&ctx->sb, "%s %s",
-                           c_type_str_full(ctx, f_node->as.field.type, f_node->as.field.class_name, false, f_node->is_heap_owner),
+                           c_type_str_decl_full(ctx, f_node->as.field.type, f_node->as.field.class_name, f_node->as.field.is_array, f_node->as.field.is_map, f_node->is_heap_owner),
                            f_node->as.field.name);
             }
         }
@@ -2351,8 +2471,9 @@ static void gen_method(CodegenCtx *ctx, const char *class_name, AstNode *m_node)
             if (i > 0) sb_append(&ctx->sb, ", ");
             bool is_bor = m_node->as.method.param_is_borrowed ? m_node->as.method.param_is_borrowed[i] : false;
             bool is_arr = m_node->as.method.param_is_array ? m_node->as.method.param_is_array[i] : false;
+            bool is_map = m_node->as.method.param_is_map ? m_node->as.method.param_is_map[i] : false;
             sb_appendf(&ctx->sb, "%s %s",
-                       is_arr ? c_type_str_decl(ctx, m_node->as.method.param_types[i], m_node->as.method.param_class_names[i], true, false) : c_type_str_full(ctx, m_node->as.method.param_types[i], m_node->as.method.param_class_names[i], is_bor, false),
+                       (is_arr || is_map) ? c_type_str_decl_full(ctx, m_node->as.method.param_types[i], m_node->as.method.param_class_names[i], is_arr, is_map, false) : c_type_str_full(ctx, m_node->as.method.param_types[i], m_node->as.method.param_class_names[i], is_bor, false),
                        m_node->as.method.param_names[i]);
         }
     }
@@ -2382,8 +2503,9 @@ static void gen_function(CodegenCtx *ctx, AstNode *fn) {
                 if (i > 0) sb_append(&ctx->sb, ", ");
                 bool is_bor = fn->as.function.param_is_borrowed ? fn->as.function.param_is_borrowed[i] : false;
                 bool is_arr = fn->as.function.param_is_array ? fn->as.function.param_is_array[i] : false;
+                bool is_map = fn->as.function.param_is_map ? fn->as.function.param_is_map[i] : false;
                 sb_appendf(&ctx->sb, "%s %s",
-                           is_arr ? c_type_str_decl(ctx, fn->as.function.param_types[i], fn->as.function.param_class_names[i], true, false) : c_type_str_full(ctx, fn->as.function.param_types[i], fn->as.function.param_class_names[i], is_bor, false),
+                           (is_arr || is_map) ? c_type_str_decl_full(ctx, fn->as.function.param_types[i], fn->as.function.param_class_names[i], is_arr, is_map, false) : c_type_str_full(ctx, fn->as.function.param_types[i], fn->as.function.param_class_names[i], is_bor, false),
                            fn->as.function.param_names[i]);
             }
         }
@@ -2440,6 +2562,18 @@ static void scan_node_usage(AstNode *node, bool *used_chunks) {
             break;
 
         case NODE_CLASS:
+            for (int f = 0; f < node->as.class_decl.field_count; f++) {
+                if (node->as.class_decl.fields[f]->as.field.is_map) {
+                    mark_chunk_used(used_chunks, "map_free");
+                    if (node->as.class_decl.fields[f]->as.field.is_array) {
+                        mark_chunk_used(used_chunks, "arr_len");
+                        mark_chunk_used(used_chunks, "free_arr");
+                    }
+                }
+                if (node->as.class_decl.fields[f]->as.field.is_array) {
+                    mark_chunk_used(used_chunks, "free_arr");
+                }
+            }
             for (int m = 0; m < node->as.class_decl.method_count; m++) {
                 scan_node_usage(node->as.class_decl.methods[m], used_chunks);
             }
@@ -2762,8 +2896,9 @@ char *generate_c_code(AstNode *program, AstArena *arena) {
                 if (p > 0) sb_append(&ctx.sb, ", ");
                 bool is_bor = fn->as.function.param_is_borrowed ? fn->as.function.param_is_borrowed[p] : false;
                 bool is_arr = fn->as.function.param_is_array ? fn->as.function.param_is_array[p] : false;
+                bool is_map = fn->as.function.param_is_map ? fn->as.function.param_is_map[p] : false;
                 sb_appendf(&ctx.sb, "%s %s",
-                           is_arr ? c_type_str_decl(&ctx, fn->as.function.param_types[p], fn->as.function.param_class_names[p], true, false) : c_type_str_full(&ctx, fn->as.function.param_types[p], fn->as.function.param_class_names[p], is_bor, false),
+                           (is_arr || is_map) ? c_type_str_decl_full(&ctx, fn->as.function.param_types[p], fn->as.function.param_class_names[p], is_arr, is_map, false) : c_type_str_full(&ctx, fn->as.function.param_types[p], fn->as.function.param_class_names[p], is_bor, false),
                            fn->as.function.param_names[p]);
             }
         }
