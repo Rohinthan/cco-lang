@@ -186,6 +186,8 @@ struct AstNode {
             char **param_names;
             Type *param_types;
             bool *param_is_array;
+            bool *param_is_map;
+            Type *param_key_types;
             char **param_class_names;
             bool *param_is_borrowed;
             int *param_lines;
@@ -211,6 +213,8 @@ struct AstNode {
             char **param_names;
             Type *param_types;
             bool *param_is_array;
+            bool *param_is_map;
+            Type *param_key_types;
             char **param_class_names;
             bool *param_is_borrowed;
             int *param_lines;
@@ -233,6 +237,8 @@ struct AstNode {
             char **param_names;
             Type *param_types;
             bool *param_is_array;
+            bool *param_is_map;
+            Type *param_key_types;
             char **param_class_names;
             bool *param_is_borrowed;
             bool *param_is_impl_trait;
