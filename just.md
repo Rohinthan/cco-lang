@@ -721,3 +721,102 @@ fn main() -> int {
 ```
 
 ---
+
+## 233. Live POSIX TCP Socket Web Server
+Live TCP server with socket binding, network streaming, and HTTP protocol routing.
+
+```cco
+// codebase/233_live_socket_tcp_server.cco
+fn handle_http_client(client_fd: int, req_id: int) -> void {
+    let raw_req = net_recv(client_fd, 4096);
+    let req_len = len(raw_req);
+
+    if (req_len == 0) {
+        net_close(client_fd);
+        return;
+    }
+
+    let m_get = substring(raw_req, 0, 3);
+    let is_get = equals(m_get, "GET");
+
+    let m_post = substring(raw_req, 0, 4);
+    let is_post = equals(m_post, "POST");
+
+    let offset = 4;
+    let method = "GET";
+    if (is_post) {
+        offset = 5;
+        method = "POST";
+    }
+
+    let path_end = offset;
+    while (path_end < req_len && char_at(raw_req, path_end) != ' ' && char_at(raw_req, path_end) != '\r' && char_at(raw_req, path_end) != '\n') {
+        path_end += 1;
+    }
+    let path = substring(raw_req, offset, path_end);
+
+    print(f"[TCP SERVER] Request #{req_id} -> {method} {path} ({req_len} wire bytes)");
+
+    let status_code = 200;
+    let status_text = "OK";
+    let content_type = "application/json";
+    let body = "";
+
+    if (equals(path, "/health")) {
+        body = "{\"status\": \"HEALTHY\", \"engine\": \"Cco-Native-Socket/1.0\"}";
+    } else if (equals(path, "/api/greet") && is_get) {
+        content_type = "text/plain";
+        body = "Hello from Cco Live TCP Socket Server!";
+    } else if (equals(path, "/api/stats") && is_get) {
+        body = "{\"active_connections\": 1, \"server\": \"ONLINE\"}";
+    } else if (equals(path, "/api/echo") && is_post) {
+        status_code = 201;
+        status_text = "Created";
+        body = "{\"message\": \"Echo received successfully via live TCP stream\"}";
+    } else {
+        status_code = 404;
+        status_text = "Not Found";
+        body = "{\"error\": \"Route not found on live socket server\"}";
+    }
+
+    let body_len = len(body);
+    let http_response = f"HTTP/1.1 {status_code} {status_text}\r\nContent-Type: {content_type}\r\nContent-Length: {body_len}\r\nConnection: close\r\n\r\n{body}";
+
+    let bytes_sent = net_send(client_fd, http_response);
+    print(f"[TCP SERVER] Transmitted {bytes_sent} wire bytes ({status_code} {status_text})");
+    net_close(client_fd);
+}
+
+fn main() -> int {
+    print("==========================================================");
+    print("      CCO LIVE POSIX TCP SOCKET WEB SERVER (:8088)        ");
+    print("==========================================================");
+
+    let port = 8088;
+    let server_fd = net_listen(port);
+
+    if (server_fd < 0) {
+        print(f"[ERROR] Failed to bind TCP socket to port {port}!");
+        return 1;
+    }
+
+    print(f"[TCP SERVER] Successfully bound and listening on 0.0.0.0:{port}");
+    print("[TCP SERVER] Ready to accept live client connections...\n");
+
+    let max_connections = 5;
+    for (let req_id = 1; req_id <= max_connections; req_id++) {
+        let client_fd = net_accept(server_fd);
+        if (client_fd >= 0) {
+            handle_http_client(client_fd, req_id);
+        }
+    }
+
+    print("\n[TCP SERVER] Completed transaction batch. Shutting down server socket.");
+    net_close(server_fd);
+    print("Live TCP server cleanly shut down with 0 resource leaks!");
+
+    return 0;
+}
+```
+
+---
