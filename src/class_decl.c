@@ -28,6 +28,9 @@ ClassTable *build_class_table(AstNode *program, AstArena *arena) {
                 cdef->fields[f].name = arena_strdup(arena, f_node->as.field.name);
                 cdef->fields[f].type = f_node->as.field.type;
                 cdef->fields[f].class_name = f_node->as.field.class_name ? arena_strdup(arena, f_node->as.field.class_name) : NULL;
+                cdef->fields[f].is_array = f_node->as.field.is_array;
+                cdef->fields[f].is_map = f_node->as.field.is_map;
+                cdef->fields[f].key_type = f_node->as.field.key_type;
             }
         } else {
             cdef->fields = NULL;
