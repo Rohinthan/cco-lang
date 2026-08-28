@@ -793,6 +793,89 @@ static const PreludeChunk PRELUDE_CHUNKS[] = {
         "    return strdup(buf);\n"
         "}\n\n",
         NULL
+    },
+    {
+        "net_listen",
+        "static inline int __cco_net_listen(int port) {\n"
+        "    int server_fd = socket(AF_INET, SOCK_STREAM, 0);\n"
+        "    if (server_fd < 0) return -1;\n"
+        "    int opt = 1;\n"
+        "    setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));\n"
+        "    struct sockaddr_in address;\n"
+        "    memset(&address, 0, sizeof(address));\n"
+        "    address.sin_family = AF_INET;\n"
+        "    address.sin_addr.s_addr = INADDR_ANY;\n"
+        "    address.sin_port = htons((uint16_t)port);\n"
+        "    if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0) {\n"
+        "        close(server_fd);\n"
+        "        return -1;\n"
+        "    }\n"
+        "    if (listen(server_fd, 128) < 0) {\n"
+        "        close(server_fd);\n"
+        "        return -1;\n"
+        "    }\n"
+        "    return server_fd;\n"
+        "}\n\n",
+        NULL
+    },
+    {
+        "net_accept",
+        "static inline int __cco_net_accept(int server_fd) {\n"
+        "    struct sockaddr_in client_addr;\n"
+        "    socklen_t client_len = sizeof(client_addr);\n"
+        "    return accept(server_fd, (struct sockaddr *)&client_addr, &client_len);\n"
+        "}\n\n",
+        NULL
+    },
+    {
+        "net_recv",
+        "static inline char *__cco_net_recv(int client_fd, int max_len) {\n"
+        "    if (max_len <= 0) max_len = 4096;\n"
+        "    char *buf = (char *)malloc((size_t)max_len + 1);\n"
+        "    if (!buf) return strdup(\"\");\n"
+        "    ssize_t n = recv(client_fd, buf, (size_t)max_len, 0);\n"
+        "    if (n <= 0) {\n"
+        "        free(buf);\n"
+        "        return strdup(\"\");\n"
+        "    }\n"
+        "    buf[n] = '\\0';\n"
+        "    return buf;\n"
+        "}\n\n",
+        NULL
+    },
+    {
+        "net_send",
+        "static inline int __cco_net_send(int client_fd, const char *data) {\n"
+        "    if (!data) return 0;\n"
+        "    size_t len = strlen(data);\n"
+        "    ssize_t total = 0;\n"
+        "    while (total < (ssize_t)len) {\n"
+        "        ssize_t sent = send(client_fd, data + total, len - (size_t)total, 0);\n"
+        "        if (sent <= 0) break;\n"
+        "        total += sent;\n"
+        "    }\n"
+        "    return (int)total;\n"
+        "}\n\n",
+        NULL
+    },
+    {
+        "net_close",
+        "static inline void __cco_net_close(int fd) {\n"
+        "    if (fd >= 0) close(fd);\n"
+        "}\n\n",
+        NULL
+    },
+    {
+        "sleep_ms",
+        "static inline void __cco_sleep_ms(int ms) {\n"
+        "    if (ms > 0) {\n"
+        "        struct timespec ts;\n"
+        "        ts.tv_sec = ms / 1000;\n"
+        "        ts.tv_nsec = (ms % 1000) * 1000000L;\n"
+        "        nanosleep(&ts, NULL);\n"
+        "    }\n"
+        "}\n\n",
+        NULL
     }
 };
 
