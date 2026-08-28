@@ -117,6 +117,7 @@ static bool is_stdlib_heap_fn(const char *name) {
            strcmp(name, "substring") == 0 ||
            strcmp(name, "read_file") == 0 ||
            strcmp(name, "read_line") == 0 ||
+           strcmp(name, "net_recv") == 0 ||
            strcmp(name, "program_name") == 0 ||
            strcmp(name, "args") == 0 ||
            strcmp(name, "keys") == 0;
