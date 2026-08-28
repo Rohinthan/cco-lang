@@ -2056,8 +2056,12 @@ static void infer_ast_expr_type(AstArena *arena, AstNode *program, AstNode *fn, 
     }
     if (expr->type == NODE_CALL) {
         const char *callee = expr->as.call.callee;
-        if (strcmp(callee, "concat") == 0 || strcmp(callee, "substring") == 0 || strcmp(callee, "read_file") == 0 || strcmp(callee, "read_line") == 0 || strcmp(callee, "program_name") == 0) {
+        if (strcmp(callee, "concat") == 0 || strcmp(callee, "substring") == 0 || strcmp(callee, "read_file") == 0 || strcmp(callee, "read_line") == 0 || strcmp(callee, "program_name") == 0 || strcmp(callee, "net_recv") == 0) {
             *out_type = TY_STRING;
+            return;
+        }
+        if (strcmp(callee, "net_close") == 0 || strcmp(callee, "sleep_ms") == 0 || strcmp(callee, "random_seed") == 0) {
+            *out_type = TY_VOID;
             return;
         }
         if (strcmp(callee, "args") == 0) {
@@ -2077,7 +2081,7 @@ static void infer_ast_expr_type(AstArena *arena, AstNode *program, AstNode *fn, 
             *out_type = TY_CHAR;
             return;
         }
-        if (strcmp(callee, "to_int") == 0 || strcmp(callee, "len") == 0 || strcmp(callee, "abs_int") == 0 || strcmp(callee, "min_int") == 0 || strcmp(callee, "max_int") == 0 || strcmp(callee, "arg_count") == 0 || strcmp(callee, "random_int") == 0) {
+        if (strcmp(callee, "to_int") == 0 || strcmp(callee, "len") == 0 || strcmp(callee, "abs_int") == 0 || strcmp(callee, "min_int") == 0 || strcmp(callee, "max_int") == 0 || strcmp(callee, "arg_count") == 0 || strcmp(callee, "random_int") == 0 || strcmp(callee, "net_listen") == 0 || strcmp(callee, "net_accept") == 0 || strcmp(callee, "net_send") == 0) {
             *out_type = TY_INT;
             return;
         }
