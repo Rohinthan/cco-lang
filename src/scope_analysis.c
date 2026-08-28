@@ -697,12 +697,22 @@ static void add_free_release_to_node_map(OwnScopeStack *stack, AstNode *node, co
     node->releases_count++;
 }
 
+static char *get_expr_class_type(OwnScopeStack *stack, AstNode *expr);
+
 static bool is_expr_array_scope(OwnScopeStack *stack, AstNode *expr) {
     if (!expr) return false;
     if (expr->type == NODE_ALLOC && !expr->as.alloc.is_map) return true;
     if (expr->type == NODE_IDENT) {
         OwnVar *v = find_own_var(stack, expr->as.ident.name, NULL, NULL);
         if (v) return v->is_array;
+    }
+    if (expr->type == NODE_MEMBER) {
+        char *obj_cls = get_expr_class_type(stack, expr->as.member.object);
+        if (obj_cls) {
+            ClassDef *cd = find_class(stack->ct, obj_cls);
+            FieldInfo *fi = find_field(cd, expr->as.member.member_name);
+            if (fi) return fi->is_array;
+        }
     }
     if (expr->type == NODE_CALL) {
         const char *callee = expr->as.call.callee;
@@ -727,6 +737,30 @@ static bool is_expr_map_scope(OwnScopeStack *stack, AstNode *expr) {
     if (expr->type == NODE_IDENT) {
         OwnVar *v = find_own_var(stack, expr->as.ident.name, NULL, NULL);
         if (v) return v->is_map;
+        if (stack->current_function) {
+            AstNode *fn = stack->current_function;
+            if (fn->type == NODE_FUNCTION && fn->as.function.param_is_map) {
+                for (int p = 0; p < fn->as.function.param_count; p++) {
+                    if (strcmp(fn->as.function.param_names[p], expr->as.ident.name) == 0) {
+                        return fn->as.function.param_is_map[p];
+                    }
+                }
+            } else if (fn->type == NODE_METHOD && fn->as.method.param_is_map) {
+                for (int p = 0; p < fn->as.method.param_count; p++) {
+                    if (strcmp(fn->as.method.param_names[p], expr->as.ident.name) == 0) {
+                        return fn->as.method.param_is_map[p];
+                    }
+                }
+            }
+        }
+    }
+    if (expr->type == NODE_MEMBER) {
+        char *obj_cls = get_expr_class_type(stack, expr->as.member.object);
+        if (obj_cls) {
+            ClassDef *cd = find_class(stack->ct, obj_cls);
+            FieldInfo *fi = find_field(cd, expr->as.member.member_name);
+            if (fi) return fi->is_map;
+        }
     }
     if (expr->type == NODE_CALL) {
         const char *callee = expr->as.call.callee;
@@ -1027,7 +1061,7 @@ static void analyze_own_block(OwnScopeStack *stack, AstNode *block_node, bool is
             if (obj_cls) {
                 ClassDef *cd = find_class(stack->ct, obj_cls);
                 FieldInfo *fi = find_field(cd, stmt->as.member_assign.member_name);
-                if (fi && fi->type == TY_CLASS) {
+                if (fi && fi->type == TY_CLASS && !fi->is_array && !fi->is_map) {
                     stmt->as.member_assign.field_class_name = arena_strdup(stack->arena, fi->class_name);
                     stmt->as.member_assign.release_old = true;
 
@@ -1219,6 +1253,7 @@ static void analyze_own_node(OwnScopeStack *stack, AstNode *node) {
             if (elem_cls) {
                 own_scope_add_var_full(stack, s, node->as.for_each.loop_var_name, elem_cls, node->line, node->col, true, true, false, -1);
             }
+            unmark_moved(stack, node->as.for_each.loop_var_name);
             if (node->as.for_each.body) {
                 if (node->as.for_each.body->type == NODE_BLOCK) {
                     analyze_own_block(stack, node->as.for_each.body, false, false);
@@ -1299,7 +1334,7 @@ static void analyze_own_node(OwnScopeStack *stack, AstNode *node) {
                     if (val_arg->type == NODE_IDENT) {
                         const char *val_name = val_arg->as.ident.name;
                         OwnVar *val_var = find_own_var(stack, val_name, NULL, NULL);
-                        if (val_var && val_var->class_name && !val_var->is_array && !val_var->is_map) {
+                        if (val_var && (val_var->class_name || val_var->is_array || val_var->is_map)) {
                             check_use_var(stack, val_name, val_arg->line, val_arg->col);
                             mark_moved(stack, val_name, val_arg->line, val_arg->col, NULL, false);
                         }
@@ -1368,7 +1403,7 @@ static void analyze_own_node(OwnScopeStack *stack, AstNode *node) {
                     OwnVar *arg_var = find_own_var(stack, arg_name, NULL, NULL);
                     if (arg_var) {
                         check_use_var(stack, arg_name, arg->line, arg->col);
-                        bool is_bor = (fn && i < fn->as.function.param_count && fn->as.function.param_is_borrowed) ? fn->as.function.param_is_borrowed[i] : false;
+                        bool is_bor = ((fn && i < fn->as.function.param_count && fn->as.function.param_is_borrowed && fn->as.function.param_is_borrowed[i]) || arg_var->is_map);
                         if (!is_bor) {
                             mark_moved(stack, arg_name, arg->line, arg->col, NULL, false);
                         }
@@ -1478,6 +1513,22 @@ static void analyze_own_node(OwnScopeStack *stack, AstNode *node) {
                             print_formatted_error(short_msg, primary, "index out of bounds", NULL, NULL, NULL, NULL);
                             exit(1);
                         }
+                    }
+                }
+            }
+            break;
+        }
+
+        case NODE_NEW: {
+            for (int k = 0; k < node->as.new_expr.field_count; k++) {
+                AstNode *val = node->as.new_expr.field_values[k];
+                analyze_own_node(stack, val);
+                if (val && val->type == NODE_IDENT) {
+                    const char *arg_name = val->as.ident.name;
+                    OwnVar *arg_var = find_own_var(stack, arg_name, NULL, NULL);
+                    if (arg_var && !arg_var->is_borrowed_param) {
+                        check_use_var(stack, arg_name, val->line, val->col);
+                        mark_moved(stack, arg_name, val->line, val->col, NULL, false);
                     }
                 }
             }
