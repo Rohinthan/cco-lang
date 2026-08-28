@@ -553,12 +553,12 @@ static Type infer_expr_type(AstNode *program, AstNode *fn, AstNode *expr) {
         if (strcmp(name, "push") == 0 && expr->as.call.arg_count > 0) {
             return infer_expr_type(program, fn, expr->as.call.args[0]);
         }
-        if (strcmp(name, "len") == 0 || strcmp(name, "abs_int") == 0 || strcmp(name, "min_int") == 0 || strcmp(name, "max_int") == 0 || strcmp(name, "arg_count") == 0 || strcmp(name, "to_int") == 0 || strcmp(name, "random_int") == 0) return TY_INT;
+        if (strcmp(name, "len") == 0 || strcmp(name, "abs_int") == 0 || strcmp(name, "min_int") == 0 || strcmp(name, "max_int") == 0 || strcmp(name, "arg_count") == 0 || strcmp(name, "to_int") == 0 || strcmp(name, "random_int") == 0 || strcmp(name, "net_listen") == 0 || strcmp(name, "net_accept") == 0 || strcmp(name, "net_send") == 0) return TY_INT;
         if (strcmp(name, "sqrt") == 0 || strcmp(name, "pow") == 0 || strcmp(name, "abs_float") == 0 || strcmp(name, "floor") == 0 || strcmp(name, "ceil") == 0 || strcmp(name, "min_float") == 0 || strcmp(name, "max_float") == 0 || strcmp(name, "to_float") == 0) return TY_FLOAT;
-        if (strcmp(name, "concat") == 0 || strcmp(name, "substring") == 0 || strcmp(name, "read_file") == 0 || strcmp(name, "program_name") == 0 || strcmp(name, "args") == 0 || strcmp(name, "read_line") == 0) return TY_STRING;
+        if (strcmp(name, "concat") == 0 || strcmp(name, "substring") == 0 || strcmp(name, "read_file") == 0 || strcmp(name, "program_name") == 0 || strcmp(name, "args") == 0 || strcmp(name, "read_line") == 0 || strcmp(name, "net_recv") == 0) return TY_STRING;
         if (strcmp(name, "equals") == 0 || strcmp(name, "write_file") == 0 || strcmp(name, "is_int") == 0 || strcmp(name, "is_float") == 0) return TY_BOOL;
         if (strcmp(name, "char_at") == 0) return TY_CHAR;
-        if (strcmp(name, "random_seed") == 0) return TY_VOID;
+        if (strcmp(name, "random_seed") == 0 || strcmp(name, "net_close") == 0 || strcmp(name, "sleep_ms") == 0) return TY_VOID;
 
         if (program && program->type == NODE_PROGRAM) {
             for (int f = 0; f < program->as.program.count; f++) {
@@ -1514,6 +1514,34 @@ static void gen_expr(CodegenCtx *ctx, AstNode *expr) {
                 sb_append(&ctx->sb, ")");
             } else if (strcmp(callee, "read_line") == 0) {
                 sb_append(&ctx->sb, "__cco_read_line()");
+            } else if (strcmp(callee, "net_listen") == 0) {
+                sb_append(&ctx->sb, "__cco_net_listen(");
+                gen_expr(ctx, expr->as.call.args[0]);
+                sb_append(&ctx->sb, ")");
+            } else if (strcmp(callee, "net_accept") == 0) {
+                sb_append(&ctx->sb, "__cco_net_accept(");
+                gen_expr(ctx, expr->as.call.args[0]);
+                sb_append(&ctx->sb, ")");
+            } else if (strcmp(callee, "net_recv") == 0) {
+                sb_append(&ctx->sb, "__cco_net_recv(");
+                gen_expr(ctx, expr->as.call.args[0]);
+                sb_append(&ctx->sb, ", ");
+                gen_expr(ctx, expr->as.call.args[1]);
+                sb_append(&ctx->sb, ")");
+            } else if (strcmp(callee, "net_send") == 0) {
+                sb_append(&ctx->sb, "__cco_net_send(");
+                gen_expr(ctx, expr->as.call.args[0]);
+                sb_append(&ctx->sb, ", ");
+                gen_expr(ctx, expr->as.call.args[1]);
+                sb_append(&ctx->sb, ")");
+            } else if (strcmp(callee, "net_close") == 0) {
+                sb_append(&ctx->sb, "__cco_net_close(");
+                gen_expr(ctx, expr->as.call.args[0]);
+                sb_append(&ctx->sb, ")");
+            } else if (strcmp(callee, "sleep_ms") == 0) {
+                sb_append(&ctx->sb, "__cco_sleep_ms(");
+                gen_expr(ctx, expr->as.call.args[0]);
+                sb_append(&ctx->sb, ")");
             } else {
                 sb_appendf(&ctx->sb, "%s(", callee);
                 for (int i = 0; i < expr->as.call.arg_count; i++) {
@@ -1581,6 +1609,7 @@ static inline bool is_heap_string_returning_call(const char *name) {
             strcmp(name, "substring") == 0 ||
             strcmp(name, "read_file") == 0 ||
             strcmp(name, "read_line") == 0 ||
+            strcmp(name, "net_recv") == 0 ||
             strcmp(name, "program_name") == 0);
 }
 
@@ -2586,6 +2615,24 @@ static void scan_node_usage(AstNode *node, bool *used_chunks) {
                 else if (strcmp(callee, "read_line") == 0) {
                     mark_chunk_used(used_chunks, "read_line");
                 }
+                else if (strcmp(callee, "net_listen") == 0) {
+                    mark_chunk_used(used_chunks, "net_listen");
+                }
+                else if (strcmp(callee, "net_accept") == 0) {
+                    mark_chunk_used(used_chunks, "net_accept");
+                }
+                else if (strcmp(callee, "net_recv") == 0) {
+                    mark_chunk_used(used_chunks, "net_recv");
+                }
+                else if (strcmp(callee, "net_send") == 0) {
+                    mark_chunk_used(used_chunks, "net_send");
+                }
+                else if (strcmp(callee, "net_close") == 0) {
+                    mark_chunk_used(used_chunks, "net_close");
+                }
+                else if (strcmp(callee, "sleep_ms") == 0) {
+                    mark_chunk_used(used_chunks, "sleep_ms");
+                }
             }
             for (int i = 0; i < node->as.call.arg_count; i++) {
                 scan_node_usage(node->as.call.args[i], used_chunks);
@@ -2668,7 +2715,13 @@ char *generate_c_code(AstNode *program, AstArena *arena) {
     sb_append(&ctx.sb, "#include <string.h>\n");
     sb_append(&ctx.sb, "#include <math.h>\n");
     sb_append(&ctx.sb, "#include <time.h>\n");
-    sb_append(&ctx.sb, "#include <errno.h>\n\n");
+    sb_append(&ctx.sb, "#include <errno.h>\n");
+    sb_append(&ctx.sb, "#include <unistd.h>\n");
+    sb_append(&ctx.sb, "#include <sys/types.h>\n");
+    sb_append(&ctx.sb, "#include <sys/socket.h>\n");
+    sb_append(&ctx.sb, "#include <netinet/in.h>\n");
+    sb_append(&ctx.sb, "#include <arpa/inet.h>\n");
+    sb_append(&ctx.sb, "#include <fcntl.h>\n\n");
     sb_append(&ctx.sb, "static int __cco_argc;\n");
     sb_append(&ctx.sb, "static char **__cco_argv;\n\n");
 
