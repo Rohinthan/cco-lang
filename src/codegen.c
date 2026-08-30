@@ -2847,6 +2847,8 @@ char *generate_c_code(AstNode *program, AstArena *arena) {
     sb_append(&ctx.sb, "#include <stdlib.h>\n");
     sb_append(&ctx.sb, "#include <stdbool.h>\n");
     sb_append(&ctx.sb, "#include <string.h>\n");
+    sb_append(&ctx.sb, "#include <strings.h>\n");
+    sb_append(&ctx.sb, "#include <signal.h>\n");
     sb_append(&ctx.sb, "#include <math.h>\n");
     sb_append(&ctx.sb, "#include <time.h>\n");
     sb_append(&ctx.sb, "#include <errno.h>\n");
