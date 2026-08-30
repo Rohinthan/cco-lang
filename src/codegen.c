@@ -1300,8 +1300,9 @@ static void gen_expr(CodegenCtx *ctx, AstNode *expr) {
         case NODE_UNARY: {
             if (strcmp(expr->as.unary.op, "&") == 0) {
                 Type ot = infer_expr_type(ctx->program, ctx->current_function, expr->as.unary.operand);
+                bool is_arr = infer_expr_is_array(ctx->program, ctx->current_function, expr->as.unary.operand);
                 const char *ocls = get_expr_elem_class_name(ctx, expr->as.unary.operand);
-                if (ot == TY_CLASS && ocls && !is_struct_name(ctx, ocls)) {
+                if (is_arr || (ot == TY_CLASS && ocls && !is_struct_name(ctx, ocls))) {
                     gen_expr(ctx, expr->as.unary.operand);
                     break;
                 }
