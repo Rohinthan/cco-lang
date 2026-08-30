@@ -1,0 +1,56 @@
+fn has_substring(haystack: string, needle: string) -> bool {
+    let h_len: int = len(haystack);
+    let n_len: int = len(needle);
+    if (n_len > h_len) { return false; }
+    
+    let i: int = 0;
+    while (i <= h_len - n_len) {
+        let sub: string = substring(haystack, i, i + n_len);
+        if (equals(sub, needle)) {
+            return true;
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
+fn handle_request(req: string) -> string {
+    if (has_substring(req, "GET /health")) {
+        let body: string = "{\"status\": \"ok\", \"service\": \"cco-backend\"}";
+        let headers: string = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n";
+        return concat(headers, body);
+    }
+    
+    if (has_substring(req, "GET /api/user")) {
+        let body: string = "{\"id\": 42, \"username\": \"roh_dev\", \"role\": \"admin\"}";
+        let headers: string = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n";
+        return concat(headers, body);
+    }
+
+    let not_found_body: string = "{\"error\": \"Route not found\"}";
+    let not_found_headers: string = "HTTP/1.1 404 Not Found\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n";
+    return concat(not_found_headers, not_found_body);
+}
+
+fn main() -> int {
+    let server_fd: int = net_listen(8080);
+    print("REST API Server running on http://localhost:8080 ...");
+
+    let requests_handled: int = 0;
+    while (requests_handled < 10) {
+        let client_fd: int = net_accept(server_fd);
+        if (client_fd >= 0) {
+            let req_data: string = net_recv(client_fd, 1024);
+            let response: string = handle_request(req_data);
+            
+            net_send(client_fd, response);
+            net_close(client_fd);
+            requests_handled = requests_handled + 1;
+            print(f"Handled request #{requests_handled}");
+        }
+    }
+
+    net_close(server_fd);
+    print("Server gracefully shutdown after 10 requests.");
+    return 0;
+}
