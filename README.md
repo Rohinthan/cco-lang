@@ -485,12 +485,64 @@ make test
 
 ---
 
+## 🌐 Native POSIX Networking (v20.0)
+
+Cco includes native, hardened POSIX networking functions in its standard library prelude:
+
+- **Functions**:
+  - `net_listen(port: int) -> int`: Creates an `AF_INET` TCP stream socket, sets `SO_REUSEADDR`, binds to `0.0.0.0:port`, and listens with a 128-connection backlog.
+  - `net_accept(server_fd: int) -> int`: Accepts an incoming TCP connection, returning a connected `client_fd` (or `-1` on error).
+  - `net_recv(client_fd: int, max_bytes: int) -> string`: Reads wire packets directly into a heap-allocated, RAII-managed Cco `string`. Features dynamic buffer expansion (from 4KB up to 1MB) and HTTP framing detection (`\r\n\r\n` delimiter and `Content-Length` tracking).
+  - `net_send(client_fd: int, data: string) -> int`: Transmits response bytes over the wire. Loops until the entire buffer is accepted, handles `EINTR`, and uses `MSG_NOSIGNAL` to prevent process crashes if clients disconnect mid-transfer.
+  - `net_close(fd: int) -> void`: Closes socket descriptors.
+  - `sleep_ms(ms: int) -> void`: Millisecond thread sleep via POSIX `nanosleep`.
+
+### Minimal HTTP Server Example
+```cco
+fn handle_client(client_fd: int) -> void {
+    let req = net_recv(client_fd, 0);
+    if (len(req) == 0) {
+        net_close(client_fd);
+        return;
+    }
+
+    let body = "{\"status\": \"OK\", \"message\": \"Hello from Cco!\"}\n";
+    let body_len = len(body);
+    let resp = f"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {body_len}\r\nConnection: close\r\n\r\n{body}";
+    
+    net_send(client_fd, resp);
+    net_close(client_fd);
+}
+
+fn main() -> int {
+    let server_fd = net_listen(8080);
+    if (server_fd < 0) return 1;
+
+    print("Server listening on http://127.0.0.1:8080");
+    while (true) {
+        let client_fd = net_accept(server_fd);
+        if (client_fd >= 0) {
+            handle_client(client_fd);
+        }
+    }
+    net_close(server_fd);
+    return 0;
+}
+```
+
+### Concurrency Model & Design Constraints
+- **Sequential Connection Handling**: The Cco socket runtime currently operates **sequentially on a single thread** (one connection is accepted, processed, and closed before the next connection is accepted).
+- **Current Limitation**: A hanging or slow client connection blocks subsequent clients. Asynchronous event multiplexing (`epoll`/`kqueue`) and multi-threading will be introduced in a future concurrency module.
+
+---
+
 ## 🌐 Strict C11 Portability & Multi-Compiler Conformance
 
 Cco-generated C output is strictly conformant **standard ISO C11** code (`-std=c11 -pedantic-errors`).
 
 - **No Compiler Extensions in Generated Output**: Non-standard GNU extensions (such as `__typeof__`) have been eliminated from generated output in favor of explicit, statically-known type emission.
 - **Strict Standard C11 I/O**: The stdin reader `read_line()` is implemented using standard ISO C11 `fgetc()` with dynamic heap buffer reallocation (`malloc`/`realloc`) rather than POSIX-only `getline()`, ensuring generated C code compiles and runs seamlessly across Windows/MSVC, Linux, macOS, and BSD without POSIX dependencies.
+- **Networking Portability Note**: While core Cco constructs are strictly portable ISO C11, native networking functions (`net_listen`, `net_accept`, `net_recv`, `net_send`, `net_close`) bind directly to POSIX socket headers (`<sys/socket.h>`, `<netinet/in.h>`, `<arpa/inet.h>`, `<unistd.h>`) and require a POSIX environment (Linux, macOS, FreeBSD, WSL). Native Windows/MSVC requires Winsock2 (`ws2_32.lib`, `WSAStartup`), which is not directly supported without a POSIX layer.
 - **Multi-Compiler Conformance**: Generated C output compiles cleanly under `gcc`, `clang`, `tcc`, and MSVC without requiring GNU-specific or compiler-specific extensions.
 - **Strict Pedantic Compliance**: All build and test pipelines compile generated output with `-Wall -Wextra -Werror -pedantic-errors -std=c11`.
 - **Compiler Binary Platform Note**: While Cco-generated C code is strictly portable standard C11, the Cco compiler executable itself currently relies on POSIX APIs (`realpath()`) for canonical module resolution and requires a POSIX environment (Linux/macOS/WSL) to run.
