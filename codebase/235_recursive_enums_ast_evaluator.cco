@@ -1,0 +1,65 @@
+// Test 2: Recursive Enums & Pattern-Matching AST Evaluator
+
+enum Expr {
+    Num { val: int },
+    Add { left: Expr, right: Expr },
+    Mul { left: Expr, right: Expr },
+    Var { name: string },
+}
+
+fn eval(e: &Expr, env: map[string]int) -> int {
+    match e {
+        Expr.Num { val } => {
+            return val;
+        }
+        Expr.Var { name } => {
+            if (has(env, name)) {
+                return get(env, name);
+            }
+            return 0;
+        }
+        Expr.Add { left, right } => {
+            let l_val: int = eval(left, env);
+            let r_val: int = eval(right, env);
+            return l_val + r_val;
+        }
+        Expr.Mul { left, right } => {
+            let l_val: int = eval(left, env);
+            let r_val: int = eval(right, env);
+            return l_val * r_val;
+        }
+    }
+}
+
+fn main() -> int {
+    print("==========================================================");
+    print("  TEST 2: RECURSIVE ENUMS & PATTERN-MATCHING AST EVAL     ");
+    print("==========================================================");
+
+    let env: map[string]int = map_new(string, int);
+    env = put(env, "x", 10);
+    env = put(env, "y", 20);
+
+    // Creates recursive heap-allocated Expr nodes: (x + 5) * (y + 2)
+    let e1: Expr = Expr.Num { val: 5 };
+    let e2: Expr = Expr.Var { name: "x" };
+    let add_node: Expr = Expr.Add { left: e2, right: e1 };
+
+    let e3: Expr = Expr.Num { val: 2 };
+    let e4: Expr = Expr.Var { name: "y" };
+    let add_node2: Expr = Expr.Add { left: e4, right: e3 };
+
+    let tree: Expr = Expr.Mul { left: add_node, right: add_node2 };
+
+    let result: int = eval(&tree, env);
+    print(f"Evaluated (x + 5) * (y + 2) with x=10, y=20");
+    print(f"Result: {result}"); // Expected: (10 + 5) * (20 + 2) = 15 * 22 = 330
+
+    if (result == 330) {
+        print("AST Evaluation Test Passed (Expected 330)!");
+    } else {
+        print("FAILED: Calculation mismatch");
+    }
+
+    return 0;
+}
