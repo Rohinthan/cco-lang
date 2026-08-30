@@ -1,0 +1,80 @@
+// Test server that explicitly calls net_recv(client_fd, 512) with a small initial buffer
+
+fn handle_http_client(client_fd: int, req_id: int) -> void {
+    // Explicit small initial capacity of 512 bytes
+    let raw_req = net_recv(client_fd, 512);
+    let req_len = len(raw_req);
+
+    if (req_len == 0) {
+        net_close(client_fd);
+        return;
+    }
+
+    // Determine HTTP Method
+    let m_get = "";
+    if (req_len >= 4) {
+        m_get = substring(raw_req, 0, 4);
+    }
+    let is_get = equals(m_get, "GET ");
+
+    let m_post = "";
+    if (req_len >= 5) {
+        m_post = substring(raw_req, 0, 5);
+    }
+    let is_post = equals(m_post, "POST ");
+
+    let offset = 0;
+    let method = "";
+    if (is_get) {
+        offset = 4;
+        method = "GET";
+    } else if (is_post) {
+        offset = 5;
+        method = "POST";
+    } else {
+        let err_resp = "HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\nContent-Length: 15\r\nConnection: close\r\n\r\n400 Bad Request\n";
+        net_send(client_fd, err_resp);
+        net_close(client_fd);
+        return;
+    }
+
+    let path_end = offset;
+    while (path_end < req_len && char_at(raw_req, path_end) != ' ' && char_at(raw_req, path_end) != '\r' && char_at(raw_req, path_end) != '\n') {
+        path_end += 1;
+    }
+    let path = substring(raw_req, offset, path_end);
+
+    print(f"[FIXED-SERVER #{req_id}] {method} {path} -> received {req_len} total wire bytes");
+
+    let body = f"Received {req_len} bytes successfully!\n";
+    let body_len = len(body);
+    let resp = f"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {body_len}\r\nConnection: close\r\n\r\n{body}";
+    net_send(client_fd, resp);
+    net_close(client_fd);
+}
+
+fn main() -> int {
+    let args_list: string[] = args();
+    let port = 8096;
+    let max_connections = 3;
+
+    if (len(args_list) >= 2) {
+        port = to_int(args_list[0]);
+        max_connections = to_int(args_list[1]);
+    }
+
+    let server_fd = net_listen(port);
+    if (server_fd < 0) {
+        return 1;
+    }
+
+    for (let req_id = 1; req_id <= max_connections; req_id++) {
+        let client_fd = net_accept(server_fd);
+        if (client_fd >= 0) {
+            handle_http_client(client_fd, req_id);
+        }
+    }
+
+    net_close(server_fd);
+    return 0;
+}
