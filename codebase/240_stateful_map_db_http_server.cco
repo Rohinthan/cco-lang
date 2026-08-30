@@ -54,51 +54,59 @@ fn main() -> int {
     db = put(db, "framework", "cco-lang");
 
     let requests: int = 0;
-    while (requests < 10) {
+    while (requests < 20) {
         let client_fd: int = net_accept(server_fd);
         if (client_fd >= 0) {
             let req: string = net_recv(client_fd, 2048);
-            let response: string = "";
+            if (len(req) > 0) {
+                let response: string = "";
 
-            if (has_substring(req, "GET /db/all")) {
-                let k_list: string[] = keys(db);
-                let body: string = "{\"stored_keys\": [";
-                let first: bool = true;
-                for k in k_list {
-                    if (!first) { body = concat(body, ", "); }
-                    let val: string = get(db, k);
-                    body = concat(body, f"\"{k}\": \"{val}\"");
-                    first = false;
-                }
-                body = concat(body, "]}");
-                let headers: string = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n";
-                response = concat(headers, body);
-            } else if (has_substring(req, "POST /db/set")) {
-                let body_str: string = extract_body(req);
-                let kv: string[] = parse_kv_pair(body_str);
-                
-                if (len(kv) == 2) {
-                    let k: string = concat(kv[0], "");
-                    let v: string = concat(kv[1], "");
-                    let res_body: string = f"{{\"status\": \"created\", \"key\": \"{k}\", \"value\": \"{v}\"}}";
-                    db = put(db, k, v);
-                    let headers: string = "HTTP/1.1 201 Created\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n";
-                    response = concat(headers, res_body);
+                if (has_substring(req, "GET / ") || has_substring(req, "GET / HTTP")) {
+                    let body: string = "{\"service\": \"Cco Stateful DB\", \"routes\": [\"/\", \"/db/all\", \"POST /db/set\"]}\n";
+                    let headers: string = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n";
+                    response = concat(headers, body);
+                } else if (has_substring(req, "GET /db/all")) {
+                    let k_list: string[] = keys(db);
+                    let body: string = "{\"stored_keys\": [";
+                    let first: bool = true;
+                    for k in k_list {
+                        if (!first) { body = concat(body, ", "); }
+                        let val: string = get(db, k);
+                        body = concat(body, f"\"{k}\": \"{val}\"");
+                        first = false;
+                    }
+                    body = concat(body, "]}\n");
+                    let headers: string = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n";
+                    response = concat(headers, body);
+                } else if (has_substring(req, "POST /db/set")) {
+                    let body_str: string = extract_body(req);
+                    let kv: string[] = parse_kv_pair(body_str);
+                    
+                    if (len(kv) == 2) {
+                        let k: string = concat(kv[0], "");
+                        let v: string = concat(kv[1], "");
+                        let res_body: string = f"{{\"status\": \"created\", \"key\": \"{k}\", \"value\": \"{v}\"}}\n";
+                        db = put(db, k, v);
+                        let headers: string = "HTTP/1.1 201 Created\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n";
+                        response = concat(headers, res_body);
+                    } else {
+                        let headers: string = "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n";
+                        response = concat(headers, "{\"error\": \"Send payload as key=value\"}\n");
+                    }
                 } else {
-                    let headers: string = "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n";
-                    response = concat(headers, "{\"error\": \"Send payload as key=value\"}");
+                    let headers: string = "HTTP/1.1 404 Not Found\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n";
+                    response = concat(headers, "{\"error\": \"Route not found\", \"valid_routes\": [\"/\", \"/db/all\", \"POST /db/set\"]}\n");
                 }
-            } else {
-                let headers: string = "HTTP/1.1 404 Not Found\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n";
-                response = concat(headers, "{\"error\": \"Route not found\"}");
-            }
 
-            net_send(client_fd, response);
+                net_send(client_fd, response);
+                requests = requests + 1;
+                print(f"Handled DB request #{requests}");
+            }
             net_close(client_fd);
-            requests = requests + 1;
         }
     }
 
     net_close(server_fd);
+    print("DB Server gracefully shutdown after 20 requests.");
     return 0;
 }
