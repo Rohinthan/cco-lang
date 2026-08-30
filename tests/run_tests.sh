@@ -170,10 +170,34 @@ for item in tests/programs/*; do
     PASSED=$((PASSED + 1))
 done
 
+echo "=================================================="
+echo "  Cco NATIVE POSIX NETWORKING & FD LEAK SUITE     "
+echo "=================================================="
+mkdir -p build/network
+./cco tests/network/test_server.cco -o build/network/test_server.c
+gcc -Wall -Wextra -Werror -pedantic-errors -std=c11 build/network/test_server.c -o build/network/test_server -lm
+
+NET_PASSED=0
+NET_FAILED=0
+for net_test in tests/network/*.sh; do
+    tname=$(basename "$net_test" .sh)
+    echo -n "Running ${tname}... "
+    if bash "$net_test" > /dev/null 2>&1; then
+        echo "PASSED (0 Leaks + 0 FD Leaks)"
+        NET_PASSED=$((NET_PASSED + 1))
+    else
+        echo "FAILED"
+        bash "$net_test"
+        NET_FAILED=$((NET_FAILED + 1))
+    fi
+done
+
 echo "--------------------------------------------------"
-echo "Summary: ${PASSED} Passed, ${FAILED} Failed"
+echo "Network Suite: ${NET_PASSED} Passed, ${NET_FAILED} Failed"
+echo "=================================================="
+echo "Total Suite Summary: $((PASSED + NET_PASSED)) Passed, $((FAILED + NET_FAILED)) Failed"
 echo "=================================================="
 
-if [ "$FAILED" -ne 0 ]; then
+if [ "$FAILED" -ne 0 ] || [ "$NET_FAILED" -ne 0 ]; then
     exit 1
 fi
