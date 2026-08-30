@@ -25,7 +25,7 @@ Before this hardening pass, Cco included basic POSIX socket functions in `src/st
 
 ### A. Robust Streaming Loop & HTTP Framing in `net_recv`
 TCP delivers an unstructured byte stream. To ensure reliable communication:
-1. **Dynamic Buffer Allocation**: If `max_bytes <= 0`, an initial dynamic buffer (4096 bytes) is allocated and exponentially resized (up to a 1MB safety ceiling).
+1. **Dynamic Buffer Allocation & Initial Capacity Hint**: If `max_bytes <= 0`, an initial buffer (4096 bytes) is allocated. If an explicit size is provided (e.g. `net_recv(client_fd, 512)` or `net_recv(client_fd, 4096)`), it is treated as an **initial buffer capacity hint**; `net_recv` will **automatically and dynamically expand past this initial size** via `realloc` (up to a 1MB safety limit) to accommodate the complete HTTP header and body payload. Passing a small explicit size will never silently truncate incoming requests.
 2. **Framing Detection (`\r\n\r\n`)**: `net_recv` accumulates wire packets in a loop until the standard HTTP header delimiter `\r\n\r\n` is detected.
 3. **Content-Length Tracking**: If a `Content-Length: <N>` header is present, `net_recv` continues reading until the header plus the entire declared body payload is received (or until EOF / socket error).
 4. **Signal & Error Resilience**: Non-fatal signals (`EINTR`) are automatically retried without dropping bytes.
