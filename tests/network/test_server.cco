@@ -1,0 +1,127 @@
+// Hardened Cco Test HTTP Server for Network Test Suite
+
+fn handle_http_client(client_fd: int, req_id: int) -> void {
+    let raw_req = net_recv(client_fd, 0);
+    let req_len = len(raw_req);
+
+    if (req_len == 0) {
+        // Client disconnected immediately with 0 bytes
+        net_close(client_fd);
+        return;
+    }
+
+    // Check for oversized request (> 65536 bytes)
+    if (req_len > 65536) {
+        let err_resp = "HTTP/1.1 413 Payload Too Large\r\nContent-Type: text/plain\r\nContent-Length: 22\r\nConnection: close\r\n\r\n413 Payload Too Large\n";
+        net_send(client_fd, err_resp);
+        net_close(client_fd);
+        return;
+    }
+
+    // Validate minimum HTTP request length
+    if (req_len < 4) {
+        let err_resp = "HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\nContent-Length: 15\r\nConnection: close\r\n\r\n400 Bad Request\n";
+        net_send(client_fd, err_resp);
+        net_close(client_fd);
+        return;
+    }
+
+    // Determine HTTP Method
+    let m_get = "";
+    if (req_len >= 4) {
+        m_get = substring(raw_req, 0, 4);
+    }
+    let is_get = equals(m_get, "GET ");
+
+    let m_post = "";
+    if (req_len >= 5) {
+        m_post = substring(raw_req, 0, 5);
+    }
+    let is_post = equals(m_post, "POST ");
+
+    let offset = 0;
+    let method = "";
+
+    if (is_get) {
+        offset = 4;
+        method = "GET";
+    } else if (is_post) {
+        offset = 5;
+        method = "POST";
+    } else {
+        let err_resp = "HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\nContent-Length: 26\r\nConnection: close\r\n\r\n400 Bad Request (No Method)\n";
+        net_send(client_fd, err_resp);
+        net_close(client_fd);
+        return;
+    }
+
+    // Extract Path
+    let path_end = offset;
+    while (path_end < req_len && char_at(raw_req, path_end) != ' ' && char_at(raw_req, path_end) != '\r' && char_at(raw_req, path_end) != '\n') {
+        path_end += 1;
+    }
+    if (path_end == offset) {
+        let err_resp = "HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\nContent-Length: 24\r\nConnection: close\r\n\r\n400 Bad Request (No Path)\n";
+        net_send(client_fd, err_resp);
+        net_close(client_fd);
+        return;
+    }
+
+    let path = substring(raw_req, offset, path_end);
+    print(f"[REQ #{req_id}] {method} {path} ({req_len} wire bytes)");
+
+    // Route Dispatcher
+    let status_code = 200;
+    let status_text = "OK";
+    let content_type = "application/json";
+    let body = "";
+
+    if (equals(path, "/health") && is_get) {
+        body = "{\"status\": \"HEALTHY\", \"engine\": \"Cco-Native-Socket/1.0\"}\n";
+    } else if (equals(path, "/api/greet") && is_get) {
+        content_type = "text/plain";
+        body = "Hello from Cco Live TCP Socket Server!\n";
+    } else if (equals(path, "/api/stats") && is_get) {
+        body = "{\"active_connections\": 1, \"server\": \"ONLINE\"}\n";
+    } else if (equals(path, "/api/echo") && is_post) {
+        status_code = 201;
+        status_text = "Created";
+        body = "{\"message\": \"Echo received successfully via live TCP stream\"}\n";
+    } else {
+        status_code = 404;
+        status_text = "Not Found";
+        body = "{\"error\": \"Route not found on live socket server\"}\n";
+    }
+
+    let body_len = len(body);
+    let http_response = f"HTTP/1.1 {status_code} {status_text}\r\nContent-Type: {content_type}\r\nContent-Length: {body_len}\r\nConnection: close\r\n\r\n{body}";
+
+    net_send(client_fd, http_response);
+    net_close(client_fd);
+}
+
+fn main() -> int {
+    let args_list: string[] = args();
+    let port = 8090;
+    let max_connections = 5;
+
+    if (len(args_list) >= 2) {
+        port = to_int(args_list[0]);
+        max_connections = to_int(args_list[1]);
+    }
+
+    let server_fd = net_listen(port);
+    if (server_fd < 0) {
+        return 1;
+    }
+
+    for (let req_id = 1; req_id <= max_connections; req_id++) {
+        let client_fd = net_accept(server_fd);
+        if (client_fd >= 0) {
+            handle_http_client(client_fd, req_id);
+        }
+    }
+
+    net_close(server_fd);
+    return 0;
+}
