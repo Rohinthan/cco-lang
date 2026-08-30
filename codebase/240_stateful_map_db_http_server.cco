@@ -1,0 +1,104 @@
+fn has_substring(haystack: string, needle: string) -> bool {
+    let h_len: int = len(haystack);
+    let n_len: int = len(needle);
+    if (n_len > h_len) { return false; }
+    
+    let i: int = 0;
+    while (i <= h_len - n_len) {
+        let sub: string = substring(haystack, i, i + n_len);
+        if (equals(sub, needle)) {
+            return true;
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
+fn extract_body(req: string) -> string {
+    let h_len: int = len(req);
+    let i: int = 0;
+    while (i <= h_len - 4) {
+        let sub: string = substring(req, i, i + 4);
+        if (equals(sub, "\r\n\r\n")) {
+            return substring(req, i + 4, h_len);
+        }
+        i = i + 1;
+    }
+    let empty: string = "";
+    return empty;
+}
+
+fn parse_kv_pair(body: string) -> string[] {
+    let res: string[] = list_new(string);
+    let b_len: int = len(body);
+    let i: int = 0;
+    while (i < b_len) {
+        let c: char = char_at(body, i);
+        if (c == '=') {
+            let k: string = substring(body, 0, i);
+            let v: string = substring(body, i + 1, b_len);
+            res = push(res, k);
+            res = push(res, v);
+            return res;
+        }
+        i = i + 1;
+    }
+    return res;
+}
+
+fn main() -> int {
+    let server_fd: int = net_listen(8082);
+    print("Stateful DB API running on http://localhost:8082 ...");
+
+    let db: map[string]string = map_new(string, string);
+    db = put(db, "framework", "cco-lang");
+
+    let requests: int = 0;
+    while (requests < 10) {
+        let client_fd: int = net_accept(server_fd);
+        if (client_fd >= 0) {
+            let req: string = net_recv(client_fd, 2048);
+            let response: string = "";
+
+            if (has_substring(req, "GET /db/all")) {
+                let k_list: string[] = keys(db);
+                let body: string = "{\"stored_keys\": [";
+                let first: bool = true;
+                for k in k_list {
+                    if (!first) { body = concat(body, ", "); }
+                    let val: string = get(db, k);
+                    body = concat(body, f"\"{k}\": \"{val}\"");
+                    first = false;
+                }
+                body = concat(body, "]}");
+                let headers: string = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n";
+                response = concat(headers, body);
+            } else if (has_substring(req, "POST /db/set")) {
+                let body_str: string = extract_body(req);
+                let kv: string[] = parse_kv_pair(body_str);
+                
+                if (len(kv) == 2) {
+                    let k: string = concat(kv[0], "");
+                    let v: string = concat(kv[1], "");
+                    let res_body: string = f"{{\"status\": \"created\", \"key\": \"{k}\", \"value\": \"{v}\"}}";
+                    db = put(db, k, v);
+                    let headers: string = "HTTP/1.1 201 Created\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n";
+                    response = concat(headers, res_body);
+                } else {
+                    let headers: string = "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n";
+                    response = concat(headers, "{\"error\": \"Send payload as key=value\"}");
+                }
+            } else {
+                let headers: string = "HTTP/1.1 404 Not Found\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n";
+                response = concat(headers, "{\"error\": \"Route not found\"}");
+            }
+
+            net_send(client_fd, response);
+            net_close(client_fd);
+            requests = requests + 1;
+        }
+    }
+
+    net_close(server_fd);
+    return 0;
+}
