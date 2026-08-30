@@ -668,6 +668,50 @@ static Type infer_expr_type(AstNode *program, AstNode *fn, AstNode *expr) {
     return TY_INT;
 }
 
+static bool find_ident_is_array_in_node(AstNode *program, AstNode *node, const char *var_name) {
+    if (!node) return false;
+    if (node->type == NODE_BLOCK) {
+        for (int i = 0; i < node->as.block.count; i++) {
+            if (find_ident_is_array_in_node(program, node->as.block.stmts[i], var_name)) {
+                return true;
+            }
+        }
+        return false;
+    }
+    if (node->type == NODE_LET) {
+        if (strcmp(node->as.let.name, var_name) == 0) {
+            return node->as.let.is_array;
+        }
+        return false;
+    }
+    if (node->type == NODE_IF) {
+        if (find_ident_is_array_in_node(program, node->as.if_stmt.then_b, var_name)) return true;
+        if (node->as.if_stmt.else_b) {
+            return find_ident_is_array_in_node(program, node->as.if_stmt.else_b, var_name);
+        }
+        return false;
+    }
+    if (node->type == NODE_WHILE) {
+        return find_ident_is_array_in_node(program, node->as.while_stmt.body, var_name);
+    }
+    if (node->type == NODE_FOR) {
+        if (find_ident_is_array_in_node(program, node->as.for_stmt.init, var_name)) return true;
+        return find_ident_is_array_in_node(program, node->as.for_stmt.body, var_name);
+    }
+    if (node->type == NODE_FOR_EACH) {
+        return find_ident_is_array_in_node(program, node->as.for_each.body, var_name);
+    }
+    if (node->type == NODE_MATCH) {
+        for (int a = 0; a < node->as.match_stmt.arm_count; a++) {
+            if (find_ident_is_array_in_node(program, node->as.match_stmt.arms[a]->as.match_arm.body, var_name)) {
+                return true;
+            }
+        }
+        return false;
+    }
+    return false;
+}
+
 static bool infer_expr_is_array(AstNode *program, AstNode *fn, AstNode *expr) {
     if (!expr) return false;
     if (expr->type == NODE_ALLOC) return true;
@@ -688,14 +732,7 @@ static bool infer_expr_is_array(AstNode *program, AstNode *fn, AstNode *expr) {
             }
         }
         AstNode *body = (fn->type == NODE_FUNCTION) ? fn->as.function.body : fn->as.method.body;
-        if (body && body->type == NODE_BLOCK) {
-            for (int i = 0; i < body->as.block.count; i++) {
-                AstNode *stmt = body->as.block.stmts[i];
-                if (stmt->type == NODE_LET && strcmp(stmt->as.let.name, var_name) == 0) {
-                    return stmt->as.let.is_array;
-                }
-            }
-        }
+        return find_ident_is_array_in_node(program, body, var_name);
     }
     if (expr->type == NODE_CALL) {
         const char *name = expr->as.call.callee;
