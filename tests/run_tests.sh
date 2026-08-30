@@ -176,6 +176,8 @@ echo "=================================================="
 mkdir -p build/network
 ./cco tests/network/test_server.cco -o build/network/test_server.c
 gcc -Wall -Wextra -Werror -pedantic-errors -std=c11 build/network/test_server.c -o build/network/test_server -lm
+./cco tests/network/test_server_fixed_size.cco -o build/network/test_server_fixed_size.c
+gcc -Wall -Wextra -Werror -pedantic-errors -std=c11 build/network/test_server_fixed_size.c -o build/network/test_server_fixed_size -lm
 
 NET_PASSED=0
 NET_FAILED=0
