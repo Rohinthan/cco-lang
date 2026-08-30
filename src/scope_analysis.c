@@ -139,8 +139,9 @@ static void analyze_block(ScopeStack *stack, AstNode *block_node, bool is_loop) 
         if (stmt->type == NODE_LET) {
             if (stmt->as.let.value) {
                 analyze_node(stack, stmt->as.let.value);
-                bool is_alloc = (stmt->as.let.value->type == NODE_ALLOC && !stmt->as.let.value->as.alloc.is_map && stmt->as.let.value->as.alloc.elem_type != TY_CLASS) || (stmt->as.let.var_type == TY_STRING && !stmt->as.let.is_map);
-                if (!is_alloc && stmt->as.let.value->type == NODE_CALL) {
+                bool is_get = (stmt->as.let.value->type == NODE_CALL && stmt->as.let.value->as.call.callee && strcmp(stmt->as.let.value->as.call.callee, "get") == 0);
+                bool is_alloc = !is_get && ((stmt->as.let.value->type == NODE_ALLOC && !stmt->as.let.value->as.alloc.is_map && stmt->as.let.value->as.alloc.elem_type != TY_CLASS) || (stmt->as.let.var_type == TY_STRING && !stmt->as.let.is_map));
+                if (!is_alloc && !is_get && stmt->as.let.value->type == NODE_CALL) {
                     const char *callee = stmt->as.let.value->as.call.callee;
                     if (is_stdlib_heap_fn(callee)) {
                         is_alloc = true;
@@ -186,6 +187,35 @@ static void analyze_block(ScopeStack *stack, AstNode *block_node, bool is_loop) 
                     int lhs_owned_idx = find_owned_in_stack(stack, stmt->as.assign.name, &lhs_scope_idx);
                     if (lhs_scope_idx != -1 && lhs_scope_idx < rhs_scope_idx) {
                         stack->scopes[lhs_scope_idx].transferred[lhs_owned_idx] = false;
+                    }
+                }
+            } else if (stmt->as.assign.value->type == NODE_CALL) {
+                const char *callee = stmt->as.assign.value->as.call.callee;
+                if (callee && strcmp(callee, "push") == 0 && stmt->as.assign.value->as.call.arg_count == 2) {
+                    AstNode *val_arg = stmt->as.assign.value->as.call.args[1];
+                    if (val_arg && val_arg->type == NODE_IDENT) {
+                        int v_scope_idx = -1;
+                        int v_owned_idx = find_owned_in_stack(stack, val_arg->as.ident.name, &v_scope_idx);
+                        if (v_owned_idx != -1) {
+                            stack->scopes[v_scope_idx].transferred[v_owned_idx] = true;
+                        }
+                    }
+                } else if (callee && strcmp(callee, "put") == 0 && stmt->as.assign.value->as.call.arg_count == 3) {
+                    AstNode *k_arg = stmt->as.assign.value->as.call.args[1];
+                    AstNode *v_arg = stmt->as.assign.value->as.call.args[2];
+                    if (k_arg && k_arg->type == NODE_IDENT) {
+                        int k_scope_idx = -1;
+                        int k_owned_idx = find_owned_in_stack(stack, k_arg->as.ident.name, &k_scope_idx);
+                        if (k_owned_idx != -1) {
+                            stack->scopes[k_scope_idx].transferred[k_owned_idx] = true;
+                        }
+                    }
+                    if (v_arg && v_arg->type == NODE_IDENT) {
+                        int v_scope_idx = -1;
+                        int v_owned_idx = find_owned_in_stack(stack, v_arg->as.ident.name, &v_scope_idx);
+                        if (v_owned_idx != -1) {
+                            stack->scopes[v_scope_idx].transferred[v_owned_idx] = true;
+                        }
                     }
                 }
             }
