@@ -829,15 +829,15 @@ static const PreludeChunk PRELUDE_CHUNKS[] = {
     },
     {
         "net_recv",
-        "static inline char *__cco_net_recv(int client_fd, int max_len) {\n"
+        "static inline char *__cco_net_recv(int client_fd, int initial_capacity) {\n"
         "    if (client_fd < 0) return strdup(\"\");\n"
-        "    size_t cap = (max_len > 0) ? (size_t)max_len : 4096;\n"
+        "    size_t cap = (initial_capacity > 0) ? (size_t)initial_capacity : 4096;\n"
         "    size_t len = 0;\n"
         "    char *buf = (char *)malloc(cap + 1);\n"
         "    if (!buf) return strdup(\"\");\n"
         "    while (1) {\n"
         "        if (len >= cap) {\n"
-        "            if (max_len > 0 || cap >= 1048576) break;\n"
+        "            if (cap >= 1048576) break;\n"
         "            size_t new_cap = cap * 2;\n"
         "            if (new_cap > 1048576) new_cap = 1048576;\n"
         "            char *new_buf = (char *)realloc(buf, new_cap + 1);\n"
@@ -875,7 +875,6 @@ static const PreludeChunk PRELUDE_CHUNKS[] = {
         "                }\n"
         "                break;\n"
         "            }\n"
-        "            if (max_len > 0 && len >= (size_t)max_len) break;\n"
         "        } else if (n == 0) {\n"
         "            break;\n"
         "        } else {\n"
