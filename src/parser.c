@@ -2081,7 +2081,7 @@ static void infer_ast_expr_type(AstArena *arena, AstNode *program, AstNode *fn, 
             *out_is_array = true;
             return;
         }
-        if (strcmp(callee, "sqrt") == 0 || strcmp(callee, "sin") == 0 || strcmp(callee, "cos") == 0 || strcmp(callee, "tan") == 0 || strcmp(callee, "pow") == 0 || strcmp(callee, "abs_float") == 0 || strcmp(callee, "floor") == 0 || strcmp(callee, "ceil") == 0 || strcmp(callee, "min_float") == 0 || strcmp(callee, "max_float") == 0 || strcmp(callee, "to_float") == 0) {
+        if (strcmp(callee, "sqrt") == 0 || strcmp(callee, "exp") == 0 || strcmp(callee, "log") == 0 || strcmp(callee, "sin") == 0 || strcmp(callee, "cos") == 0 || strcmp(callee, "tan") == 0 || strcmp(callee, "pow") == 0 || strcmp(callee, "abs_float") == 0 || strcmp(callee, "floor") == 0 || strcmp(callee, "ceil") == 0 || strcmp(callee, "min_float") == 0 || strcmp(callee, "max_float") == 0 || strcmp(callee, "to_float") == 0) {
             *out_type = TY_FLOAT;
             return;
         }

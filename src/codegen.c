@@ -554,7 +554,7 @@ static Type infer_expr_type(AstNode *program, AstNode *fn, AstNode *expr) {
             return infer_expr_type(program, fn, expr->as.call.args[0]);
         }
         if (strcmp(name, "len") == 0 || strcmp(name, "abs_int") == 0 || strcmp(name, "min_int") == 0 || strcmp(name, "max_int") == 0 || strcmp(name, "arg_count") == 0 || strcmp(name, "to_int") == 0 || strcmp(name, "random_int") == 0 || strcmp(name, "net_listen") == 0 || strcmp(name, "net_accept") == 0 || strcmp(name, "net_send") == 0) return TY_INT;
-        if (strcmp(name, "sqrt") == 0 || strcmp(name, "pow") == 0 || strcmp(name, "abs_float") == 0 || strcmp(name, "floor") == 0 || strcmp(name, "ceil") == 0 || strcmp(name, "min_float") == 0 || strcmp(name, "max_float") == 0 || strcmp(name, "to_float") == 0) return TY_FLOAT;
+        if (strcmp(name, "sqrt") == 0 || strcmp(name, "exp") == 0 || strcmp(name, "log") == 0 || strcmp(name, "sin") == 0 || strcmp(name, "cos") == 0 || strcmp(name, "tan") == 0 || strcmp(name, "pow") == 0 || strcmp(name, "abs_float") == 0 || strcmp(name, "floor") == 0 || strcmp(name, "ceil") == 0 || strcmp(name, "min_float") == 0 || strcmp(name, "max_float") == 0 || strcmp(name, "to_float") == 0) return TY_FLOAT;
         if (strcmp(name, "concat") == 0 || strcmp(name, "substring") == 0 || strcmp(name, "read_file") == 0 || strcmp(name, "program_name") == 0 || strcmp(name, "args") == 0 || strcmp(name, "read_line") == 0 || strcmp(name, "net_recv") == 0) return TY_STRING;
         if (strcmp(name, "equals") == 0 || strcmp(name, "write_file") == 0 || strcmp(name, "is_int") == 0 || strcmp(name, "is_float") == 0) return TY_BOOL;
         if (strcmp(name, "char_at") == 0) return TY_CHAR;
@@ -1557,6 +1557,26 @@ static void gen_expr(CodegenCtx *ctx, AstNode *expr) {
                 gen_expr(ctx, expr->as.call.args[0]);
                 sb_append(&ctx->sb, ", ");
                 gen_expr(ctx, expr->as.call.args[1]);
+                sb_append(&ctx->sb, "))");
+            } else if (strcmp(callee, "exp") == 0) {
+                sb_append(&ctx->sb, "((float)exp(");
+                gen_expr(ctx, expr->as.call.args[0]);
+                sb_append(&ctx->sb, "))");
+            } else if (strcmp(callee, "log") == 0) {
+                sb_append(&ctx->sb, "((float)log(");
+                gen_expr(ctx, expr->as.call.args[0]);
+                sb_append(&ctx->sb, "))");
+            } else if (strcmp(callee, "sin") == 0) {
+                sb_append(&ctx->sb, "((float)sin(");
+                gen_expr(ctx, expr->as.call.args[0]);
+                sb_append(&ctx->sb, "))");
+            } else if (strcmp(callee, "cos") == 0) {
+                sb_append(&ctx->sb, "((float)cos(");
+                gen_expr(ctx, expr->as.call.args[0]);
+                sb_append(&ctx->sb, "))");
+            } else if (strcmp(callee, "tan") == 0) {
+                sb_append(&ctx->sb, "((float)tan(");
+                gen_expr(ctx, expr->as.call.args[0]);
                 sb_append(&ctx->sb, "))");
             } else if (strcmp(callee, "abs_int") == 0) {
                 sb_append(&ctx->sb, "__cco_abs_int(");
