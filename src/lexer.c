@@ -106,6 +106,26 @@ TokenArray lex_source(const char *source) {
             continue;
         }
 
+        // Skip block comments /* ... */
+        if (c == '/' && source[pos + 1] == '*') {
+            pos += 2;
+            col += 2;
+            while (source[pos] != '\0' && !(source[pos] == '*' && source[pos + 1] == '/')) {
+                if (source[pos] == '\n') {
+                    line++;
+                    col = 1;
+                } else {
+                    col++;
+                }
+                pos++;
+            }
+            if (source[pos] != '\0') {
+                pos += 2;
+                col += 2;
+            }
+            continue;
+        }
+
         // Strings
         if (c == '"') {
             int start_col = col;
