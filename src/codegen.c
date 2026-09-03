@@ -571,6 +571,17 @@ static Type infer_expr_type(AstNode *program, AstNode *fn, AstNode *expr) {
     if (expr->type == NODE_ALLOC) {
         return expr->as.alloc.elem_type;
     }
+    if (expr->type == NODE_INDEX) {
+        if (expr->as.index.array_expr) {
+            return infer_expr_type(program, fn, expr->as.index.array_expr);
+        } else if (expr->as.index.array_name) {
+            AstNode dummy;
+            memset(&dummy, 0, sizeof(dummy));
+            dummy.type = NODE_IDENT;
+            dummy.as.ident.name = expr->as.index.array_name;
+            return infer_expr_type(program, fn, &dummy);
+        }
+    }
     if (expr->type == NODE_CALL) {
         const char *name = expr->as.call.callee;
         if (strcmp(name, "pop") == 0 && expr->as.call.arg_count > 0) {
