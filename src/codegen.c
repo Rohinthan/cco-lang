@@ -138,8 +138,30 @@ static const char *c_type_str_decl(CodegenCtx *ctx, Type t, const char *class_na
     return c_type_str_decl_full(ctx, t, class_name, is_array, false, is_heap_owner);
 }
 
+static const char *get_expr_class_name(AstNode *program, AstNode *fn, AstNode *expr);
+static const char *find_ident_class_in_node(AstNode *program, AstNode *node, const char *var_name);
+
 static bool is_expr_pointer(CodegenCtx *ctx, AstNode *expr) {
     if (!expr) return true;
+
+    if (expr->type == NODE_INDEX) {
+        const char *cname = get_expr_class_name(ctx->program, ctx->current_function, expr);
+        if (cname && is_struct_name(ctx, cname)) {
+            return false;
+        }
+        return true;
+    }
+
+    if (expr->type == NODE_MEMBER) {
+        const char *cname = expr->as.member.field_class_name;
+        if (!cname) {
+            cname = get_expr_class_name(ctx->program, ctx->current_function, expr);
+        }
+        if (cname && is_struct_name(ctx, cname)) {
+            return false;
+        }
+        return true;
+    }
 
     if (expr->type == NODE_IDENT) {
         const char *name = expr->as.ident.name;
@@ -169,16 +191,9 @@ static bool is_expr_pointer(CodegenCtx *ctx, AstNode *expr) {
             }
 
             AstNode *body = (fn->type == NODE_FUNCTION) ? fn->as.function.body : fn->as.method.body;
-            if (body && body->type == NODE_BLOCK) {
-                for (int i = 0; i < body->as.block.count; i++) {
-                    AstNode *stmt = body->as.block.stmts[i];
-                    if (stmt->type == NODE_LET && strcmp(stmt->as.let.name, name) == 0) {
-                        const char *cname = stmt->as.let.class_name;
-                        if (cname && is_struct_name(ctx, cname)) {
-                            return false;
-                        }
-                    }
-                }
+            const char *found_cname = find_ident_class_in_node(ctx->program, body, name);
+            if (found_cname && is_struct_name(ctx, found_cname)) {
+                return false;
             }
         }
     }
@@ -493,6 +508,17 @@ static Type find_ident_type_in_node(AstNode *program, AstNode *node, const char 
 
 static const char *get_expr_class_name(AstNode *program, AstNode *fn, AstNode *expr) {
     if (!expr) return NULL;
+    if (expr->type == NODE_INDEX) {
+        if (expr->as.index.array_expr) {
+            return get_expr_class_name(program, fn, expr->as.index.array_expr);
+        } else if (expr->as.index.array_name) {
+            AstNode dummy;
+            memset(&dummy, 0, sizeof(dummy));
+            dummy.type = NODE_IDENT;
+            dummy.as.ident.name = expr->as.index.array_name;
+            return get_expr_class_name(program, fn, &dummy);
+        }
+    }
     if (expr->type == NODE_IDENT && fn) {
         const char *obj_name = expr->as.ident.name;
         if (fn->type == NODE_METHOD) {
