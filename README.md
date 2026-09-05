@@ -1,19 +1,138 @@
-# Cco Compiler: A C-like Language with Type Inference for `let`, Compound Assignment, Comparison & Arithmetic Operator Overloading for Structs, Interfaces via Monomorphization, F-Strings, Self-Hosted Lexer, Tagged Unions, Pattern Matching, Hash Maps, Growable Arrays & Selective Prelude Emission (v19.0)
+# Cco (C--) Programming Language & Compiler
 
-**Cco (C--)** is a lightweight, systems programming language with explicit C-like syntax, **Type Inference for `let` (`let x = 10;`, `let p = Point { ... }`)**, **Compound Assignment (`+=`, `-=`, `*=`, `/=`, `%=`, `++`, `--`)**, **Operator Overloading for Structs (`operator+`, `operator-`, `operator==`, `operator<`, etc.)**, **Interfaces with Compile-Time Monomorphization (`interface`, `impl`, `impl Trait`)**, **Python-style F-String Interpolation (`f"Hello {name}"`)**, **Interactive I/O & Numeric Parsing (`read_line`, `is_int`, `to_int`, `random_int`)**, **Command-Line Arguments (`args()`, `arg_count()`, `program_name()`)**, **a self-hosted lexer (`selfhost/lexer.cco`)**, **scope-exit auto-free for raw allocations**, **compile-time single ownership with move semantics**, **Tagged Unions (`enum`) and Pattern Matching (`match`)**, **Hash Maps (`map[K]V`)**, **Growable Arrays (`list_new`, `push`, `pop`, `len`)**, and **Selective Prelude Emission**. It transpiles Cco source code (`.cco`) into portable, standard C11 source code (`.c`), which is compiled to native machine binaries using `gcc` or `clang`.
+A statically-typed systems programming language and source-to-source compiler that transpiles Cco source code (`.cco`) into portable standard ISO C11 (`.c`), compiled to native machine binaries using `gcc` or `clang`.
 
-> **Write it like Python's concise syntax (`let x = 0; total += i; i++;`) with clean Rust-style interfaces via zero-cost compile-time monomorphization and C++-style operator overloading on value structs. Compile it and it runs like C with zero runtime vtables, zero GC pauses, clean inspectable generated C via selective prelude emission, stack-allocated value structs, Rust-like compile-time ownership safety across multi-file programs, exhaustive pattern matching, and GCC/Rust-style diagnostic error messages.**
+### Key References & Repositories
 
-📖 **New to Cco? Check out the [Cco Beginner's Guide & Tutorial (`docs/LEARN.md`)](docs/LEARN.md) for a step-by-step walkthrough of 10 complete, real programs!**
+- **Companion Code & Algorithm Repository**: [**Rohinthan/cco-examples**](https://github.com/Rohinthan/cco-examples) — 240+ complete Cco programs and 65 AI/ML algorithms verified with zero Valgrind memory leaks.
+- **Beginner's Guide & Tutorial**: [`docs/LEARN.md`](docs/LEARN.md) — Step-by-step introduction across 10 complete programs.
+- **Mathematical Correctness Report**: [`docs/ML_ALGORITHM_CORRECTNESS_VERIFICATION.md`](docs/ML_ALGORITHM_CORRECTNESS_VERIFICATION.md) — Independent Python/NumPy/scikit-learn verification report for all 65 algorithms.
+- **Networking Architecture & Audit**: [`docs/NETWORKING_AUDIT.md`](docs/NETWORKING_AUDIT.md) — POSIX socket runtime specification and connection lifecycle analysis.
 
 ---
 
-## ⚡ Type Inference & Compound Assignment (v19.0)
+## 1. Quick Start & Execution Guide
 
-Cco v19.0 bridges the gap between Cco's static typing safety and Python's visual conciseness by adding **optional type inference for `let`** and **compound assignment statements**:
+### Prerequisites
+- Linux (Ubuntu 20.04+) or POSIX environment (macOS, FreeBSD, WSL)
+- `gcc` (v9+) or `clang`
+- `make`
+- `valgrind` (optional, for memory verification)
 
-### 1. Type Inference for `let`
-Type annotations on `let` are now completely **optional**. When omitted, the compiler infers the exact static type from the initializing expression:
+### Building the Compiler
+
+Build the Cco compiler from source:
+```bash
+git clone https://github.com/Rohinthan/cco-lang.git
+cd cco-lang
+make cco
+```
+
+The compiled binary is generated at `./cco`.
+
+---
+
+### Executing Programs with `./cco <file.cco> --run`
+
+To compile and execute a Cco program in a single step, use the `--run` flag:
+
+```bash
+./cco examples/01_hello_world.cco --run
+```
+
+#### Why Use the `--run` Flag?
+
+Cco is a source-to-source compiler targeting standard ISO C11 rather than an interpreter or bytecode virtual machine. Under standard operation, `./cco input.cco -o output.c` only emits an intermediate C source file.
+
+The `--run` flag automates the entire compile-and-execute pipeline into a single command:
+1. **Source Transpilation**: Parses `.cco` source code, performs module imports, validates trait monomorphization, tracks ownership/borrow scopes, and generates standard ISO C11 code at `build/output.c`.
+2. **Background Native Compilation**: Invokes the C compiler directly with optimization and strict conformance flags:
+   ```bash
+   gcc -O3 -Wall -Wextra -std=c11 build/output.c -o build/cco_out -lm
+   ```
+3. **Immediate Execution**: Runs the resulting machine binary (`./build/cco_out`), directs program output to stdout/stderr, and forwards the exit status code.
+
+This flag provides a rapid script-like iteration cycle during development and testing without requiring manual multi-step C compiler invocations.
+
+---
+
+### Standalone Native Compilation (Production Workflow)
+
+For production deployment and standalone distribution where the Cco compiler is not present on the target host:
+
+```bash
+# Step 1: Transpile Cco source to standard ISO C11
+./cco examples/01_hello_world.cco -o build/hello.c
+
+# Step 2: Compile to a standalone native binary
+gcc -O3 -Wall -Wextra -Werror -pedantic-errors -std=c11 build/hello.c -o bin/hello -lm
+
+# Step 3: Run standalone binary directly
+./bin/hello
+```
+
+---
+
+### Running the Test Suite
+
+Run the full unit test suite, self-hosting verification, and integration tests under Valgrind:
+
+```bash
+make test
+```
+
+---
+
+## 2. Companion Repository: `cco-examples`
+
+The companion repository [**Rohinthan/cco-examples**](https://github.com/Rohinthan/cco-examples) hosts the comprehensive test and application corpus for the Cco language:
+
+```
+cco-examples/
+├── codebase/                    # 240+ programs covering the complete language surface
+│   ├── 01_hello.cco ... 100_while_break.cco
+│   ├── 101_while_continue.cco ... 180_struct_alignment_optimized.cco
+│   ├── 181_enum_level_match.cco ... 220_cpp_strings_and_formatting.cco
+│   ├── 221_cpp_intro_procedural_vs_oop.cco ... 233_live_socket_tcp_server.cco
+│   ├── 234_scope_exit_control_flow_gauntlet.cco ... 240_stateful_map_db_http_server.cco
+│   └── 241_linear_regression_variants.cco
+│
+├── algorithms/                  # 65 Machine Learning & Scientific Computing Implementations
+│   ├── 01_linear_regression.cco ... 13_xgboost_lightgbm.cco
+│   ├── 14_kmeans.cco ... 24_logistic_multinomial.cco
+│   ├── 25_mlp.cco ... 38_mixture_of_experts.cco
+│   ├── 39_a_star_search.cco ... 46_stochastic_gradient_descent.cco
+│   └── 47_isolation_forest.cco ... 65_ivf_pq_vector_index.cco
+│
+└── tests/correctness/           # Mathematical correctness test suites vs Python references
+```
+
+### Algorithm Verification Summary
+
+All 65 algorithms in `cco-examples` compile under strict ISO C11 flags (`-Wall -Wextra -Werror -pedantic-errors -std=c11 -lm`) and execute with **0 memory leaks (0 bytes leaked)** under Valgrind.
+
+Coverage breakdown against independent Python 3.12 (NumPy, scikit-learn, SciPy) references:
+- **Tier 1 (18 algorithms / 27.7%)**: Full end-to-end mathematical verification against reference outputs ($< 10^{-5}$ tolerance).
+- **Tier 2 (14 algorithms / 21.5%)**: Core mathematical subroutines verified against NumPy/analytical references.
+- **Tier 3 (33 algorithms / 50.8%)**: Empirical domain convergence, policy stability, and leak-free verification.
+
+---
+
+## 3. Core Architectural Principles
+
+1. **Native C Speed**: Source-to-source transpilation to flat ISO C11 source. No interpreter loop, no bytecode dispatch, and no runtime garbage collector overhead.
+2. **Deterministic Memory Safety**: Compile-time single ownership with move semantics, borrowed references (`&T`), and automated scope-exit deallocation cascades.
+3. **Value Types and Collections**: Stack-allocated lightweight structs (`struct`), heap-allocated classes (`class`), open-addressing hash maps (`map[K]V`), and growable dynamic arrays (`Token[]`).
+4. **Compile-Time Polymorphism**: Interface monomorphization generating specialized C functions with zero runtime vtable overhead.
+5. **Selective Prelude Emission**: Generates only the runtime helper functions (`__cco_*`) required by the specific AST nodes present in the source file.
+
+---
+
+## 4. Language Features
+
+### Type Inference for `let`
+Type annotations on `let` statements are optional. The compiler infers the static type directly from the initializer:
+
 ```cco
 let x = 10;                           // inferred: int
 let name = "hello";                   // inferred: string
@@ -23,9 +142,14 @@ let p = Point { x: 1, y: 2 };         // inferred: Point
 let arr = alloc(int, 5);              // inferred: int[]
 let m = map_new(string, int);         // inferred: map[string]int
 ```
-*Note*: Explicit type annotations (`let x: int = 10;`) remain 100% valid and are still recommended where explicit documentation aids clarity.
 
-### 2. Compound Assignment & Increment / Decrement
+Explicit type annotations (`let x: int = 10;`) remain supported.
+
+---
+
+### Compound Assignment and Increment / Decrement
+Supports in-place modification for scalar types, strings, and structs:
+
 ```cco
 total += i;      // desugars to: total = total + i;
 total -= i;      // desugars to: total = total - i;
@@ -33,29 +157,16 @@ total *= 2;      // desugars to: total = total * 2;
 total /= 2;      // desugars to: total = total / 2;
 total %= 3;      // desugars to: total = total % 3;
 
-msg += " world"; // for strings: msg = concat(msg, " world"); (auto-frees old string)
-p += q;          // for structs: p = p + q; (resolves via operator+)
+msg += " world"; // for strings: msg = concat(msg, " world"); (frees previous string buffer)
+p += q;          // for structs: resolves via operator+
 
-i++;             // desugars to: i = i + 1; (statement-only)
-i--;             // desugars to: i = i - 1; (statement-only)
+i++;             // desugars to: i = i + 1; (statement only)
+i--;             // desugars to: i = i - 1; (statement only)
 ```
 
-### Before and After Comparison
-
+Example comparison:
 ```cco
-// BEFORE (v18.0)
-fn main() -> int {
-    let total: int = 0;
-    let i: int = 0;
-    while (i < 10) {
-        total = total + i;
-        i = i + 1;
-    }
-    print(total);
-    return 0;
-}
-
-// AFTER (v19.0)
+// Idiomatic Cco v19.0
 fn main() -> int {
     let total = 0;
     for (let i = 0; i < 10; i++) {
@@ -68,17 +179,14 @@ fn main() -> int {
 
 ---
 
-## ➕ Operator Overloading for Structs (v16.0 & v18.0)
+### Operator Overloading for Structs
+Supports compile-time operator overloading on value-type structs across 10 operators:
+- **Binary Arithmetic**: `+`, `-`, `*`, `/`
+- **Equality Comparison**: `==`, `!=`
+- **Ordering Comparison**: `<`, `>`, `<=`, `>=`
+- **Unary Negation**: `-`
 
-Cco supports clean, compile-time operator overloading for value-type structs across **10 operators**:
-
-- **Syntax**: Top-level function declarations using `fn operator<op>(...)`:
-  - **Binary Arithmetic**: `+`, `-`, `*`, `/` (2 parameters of the same struct type)
-  - **Equality Comparison**: `==`, `!=` (2 parameters of the same struct type, returning `bool`)
-  - **Ordering Comparison (v18.0)**: `<`, `>`, `<=`, `>=` (2 parameters of the same struct type, returning `bool`)
-  - **Unary Negation**: `-` (1 parameter of the struct type)
-- **Call-Site Desugaring**: Expressions like `p + q`, `-p`, or `p < q` automatically desugar to plain C function calls (e.g. `__cco_operator_add_Vec2(p, q)`, `__cco_operator_lt_Vec2(p, q)`).
-- **Deliberate Struct-Only Restriction**: Operator overloading is restricted to `struct` types (value types) only. Classes require move/borrow semantics and heap allocation lifecycles inside operator functions, which is deferred to preserve simplicity and zero memory leaks.
+Operator overloads are restricted to stack-allocated `struct` value types. Classes rely on move/borrow semantics to avoid unintended heap allocations.
 
 ```cco
 struct Vec2 {
@@ -107,191 +215,241 @@ fn operator<(a: Vec2, b: Vec2) -> bool {
 }
 
 fn main() -> int {
-    let p: Vec2 = Vec2 { x: 1.0, y: 2.0 };
-    let q: Vec2 = Vec2 { x: 3.0, y: 4.0 };
-    let sum: Vec2 = p + q;
-    let neg: Vec2 = -p;
+    let p = Vec2 { x: 1.0, y: 2.0 };
+    let q = Vec2 { x: 3.0, y: 4.0 };
+    let sum = p + q;
+    let neg = -p;
     print(sum.x);   // 4
     print(neg.x);   // -1
     print(p == p);  // true
-    print(p < q);   // true (5.0 < 25.0)
+    print(p < q);   // true
     return 0;
 }
 ```
 
 ---
 
-## 🧵 Python-Style F-String Interpolation (v15.0)
+### Interfaces via Compile-Time Monomorphization
+Interfaces define contracts implemented by classes. Generic functions accepting `&impl Interface` are monomorphized at compile time, generating specialized C functions per concrete type with zero runtime dispatch:
 
-Cco v15.0 introduces native string interpolation with full recursive expression parsing:
+```cco
+interface Printable {
+    fn describe(self) -> void;
+}
 
-- **Syntax**: Prefix string literals with `f`, e.g. `f"Hello {name}, score: {score + 10}"`.
-- **Automatic Type Conversion**: Expressions of type `int`, `float`, `bool`, and `char` inside `{...}` are automatically converted to strings via prelude helpers (`__cco_int_to_str`, `__cco_float_to_str`, `__cco_bool_to_str`, `__cco_char_to_str`).
-- **Arbitrary Expressions**: Supports nested function calls, arithmetic, and method calls inside `{...}` (e.g. `f"Square of {a} is {square(a)}"`).
-- **Escaped Braces**: Double braces `{{` and `}}` render literal `{` and `}` without interpolation.
-- **Zero-Leak Ownership**: Desugars to balanced `__cco_concat_free()` chains that automatically free temporary intermediate string allocations.
+class Point {
+    x: int;
+    y: int;
+
+    fn describe(self) -> void {
+        print(f"Point({self.x}, {self.y})");
+    }
+}
+
+class Circle {
+    radius: int;
+
+    fn describe(self) -> void {
+        print(f"Circle(r={self.radius})");
+    }
+}
+
+impl Printable for Point;
+impl Printable for Circle;
+
+// Monomorphized at compile-time: generates announce_Point and announce_Circle in C
+fn announce(item: &impl Printable) -> void {
+    item.describe();
+}
+
+fn main() -> int {
+    let p = Point { x: 10, y: 25 };
+    let c = Circle { radius: 50 };
+
+    announce(p);
+    announce(c);
+
+    return 0;
+}
+```
+
+---
+
+### Python-Style F-String Interpolation
+Supports string interpolation with expression evaluation and automatic type conversions:
 
 ```cco
 fn main() -> int {
-    let name: string = "Alice";
-    let score: float = 98.5;
-    let rank: int = 1;
+    let name = "Alice";
+    let score = 98.5;
+    let rank = 1;
     print(f"Player {name} achieved rank #{rank} with score {score}!");
     return 0;
 }
 ```
 
----
-
-## ⚡ Self-Hosted Lexer Proof-of-Concept (v12.0)
-
-Cco v12.0 completes the self-hosting roadmap with a full **self-hosted lexer written in Cco itself** (`selfhost/lexer.cco`):
-
-- **Written in Pure Cco**: Implements lexical analysis for the full Cco syntax using features built across v1–v11 (`TokenKind` tagged union, `Token` class, `map[string]bool` keywords table, growable `Token[]` arrays, and string operations).
-- **Byte-Identical Ground-Truth Parity**: Validated against the C reference compiler (`./cco --dump-tokens`) with **100% pass rate across all 83 `.cco` files** in the codebase via `tests/compare_lexers.sh`.
-- **Honest Scope Boundary**: Demonstrates that Cco is expressive enough to implement its own compiler frontend components. Parser, scope analysis, and C code generator remain hand-written in C.
+- Expressions of type `int`, `float`, `bool`, and `char` are converted automatically via standard helpers.
+- Double braces `{{` and `}}` escape interpolation and render literal braces.
+- Intermediate temporary allocations are freed automatically with zero memory leaks.
 
 ---
 
-## 🏷️ Tagged Unions / Enums & Pattern Matching (v11.0)
+### Tagged Unions / Enums & Pattern Matching
+Native tagged unions (`enum`) supporting unit and payload variants, evaluated via compile-time checked `match` statements:
 
-Cco v11.0 introduces native heap-allocated tagged unions (`enum`) and compile-time checked pattern matching (`match`):
+```cco
+enum Expr {
+    Num { value: int },
+    Add { left: Expr, right: Expr },
+    Mul { left: Expr, right: Expr },
+    Eof,
+}
 
-- **Enum Declaration**: Define tagged unions supporting both unit and payload variants:
-  ```cco
-  enum Expr {
-      Num { value: int },
-      Add { left: Expr, right: Expr },
-      Mul { left: Expr, right: Expr },
-      Eof,
-  }
-  ```
-- **Variant Instantiation**: Constructed via `<Enum>.<Variant> { field: value }` or `<Enum>.<Variant>` for unit variants:
-  ```cco
-  let tree: Expr = Expr.Add {
-      left: Expr.Num { value: 10 },
-      right: Expr.Num { value: 20 },
-  };
-  ```
-- **Pattern Matching (`match`)**: Desugars to C tag switches with field binding:
-  ```cco
-  fn eval(e: &Expr) -> int {
-      match e {
-          Expr.Num { value } => {
-              return value;
-          }
-          Expr.Add { left, right } => {
-              return eval(left) + eval(right);
-          }
-          Expr.Mul { left, right } => {
-              return eval(left) * eval(right);
-          }
-          Expr.Eof => {
-              return 0;
-          }
-      }
-  }
-  ```
-- **Borrow-Only Semantics in `match`**: The match scrutinee is borrowed (`&Enum`), and bound pattern variables are borrowed references to the variant's inner fields, ensuring no premature frees at arm exits.
-- **Compile-Time Exhaustiveness Checking**: Matching without a wildcard `_ => { ... }` arm requires all declared variants to be covered. Missing variants produce friendly compiler diagnostics listing the unhandled cases.
-- **Duplicate Arm Detection**: Redundant variant patterns are rejected at compile time with a secondary note pointing to the first handled location.
-- **Strict Field Binding**: Bound variable names in pattern arms must match declared field names. Renaming (`left: l`) produces clear compile-time error diagnostics.
-- **Automated Free Cascade**: Nested and recursive tagged union trees (like ASTs) are cleanly freed recursively at scope exit with zero Valgrind leaks.
+fn eval(e: &Expr) -> int {
+    match e {
+        Expr.Num { value } => {
+            return value;
+        }
+        Expr.Add { left, right } => {
+            return eval(left) + eval(right);
+        }
+        Expr.Mul { left, right } => {
+            return eval(left) * eval(right);
+        }
+        Expr.Eof => {
+            return 0;
+        }
+    }
+}
+
+fn main() -> int {
+    let tree = Expr.Add {
+        left: Expr.Num { value: 10 },
+        right: Expr.Num { value: 20 },
+    };
+    print(eval(&tree)); // 30
+    return 0;
+}
+```
+
+- **Compile-Time Exhaustiveness**: Matching without a wildcard (`_ => { ... }`) requires all declared variants to be covered.
+- **Borrow-Only Semantics**: Scrutinee is borrowed (`&Enum`), binding borrowed references to internal fields to avoid premature frees.
+- **Automatic Free Cascade**: Recursive structures (such as AST trees) are deallocated recursively at scope exit.
 
 ---
 
-## 🗺️ Self-Hosting Roadmap
+### Lightweight Structs (Value Types)
+Stack-allocated value types with primitive-only fields:
 
-1. **v9.0**: Growable Dynamic Arrays (`list_new`, `push`, `pop`, `len`) — *Completed*
-2. **v10.0**: Hash Maps (`map[K]V`, `map_new`, `put`, `get`, `has`, `remove`, `keys`, `len`) — *Completed*
-3. **v11.0**: Tagged Unions / Pattern Matching (`enum`, `match`) — *Completed*
-4. **v12.0**: Self-Hosted Lexer Proof-of-Concept (`selfhost/lexer.cco`) — *Completed*
-   - *Future Work*: Parser, Scope Analysis, and Code Generation self-hosting remain hand-written in C.
+```cco
+struct Point2D {
+    x: int;
+    y: int;
+}
 
----
+fn offset(p: &Point2D, dx: int, dy: int) -> void {
+    p.x += dx;
+    p.y += dy;
+}
+```
 
-## 🏛️ The Three Pillars of Cco
-
-1. **RUNS LIKE C**  
-   Cco is a source-to-source transpiler, not an interpreter and not a VM. Every `.cco` file becomes real, flat C11 source, compiled by `gcc` to a native binary. There is no runtime interpreter loop, no bytecode dispatch, no runtime reference counter, no VM overhead. A Cco program's speed ceiling is C's speed ceiling, full stop.
-
-2. **HAS OBJECTS, VALUE STRUCTS & COLLECTIONS LIKE C++**  
-   Cco provides heap `class` instances, stack-allocated `struct` value types, fields, methods, `obj.method(args)` call syntax, and **Arrays of Objects** (`Point[] = alloc(Point, 3)`). Under the hood it translates to C pointers and C structs—no vtables, no multiple inheritance, no operator overloading, no templates, no name-mangling maze.
-
-3. **WRITTEN LIKE IT'S EASY**  
-   No manual `malloc`/`free`. No header files to keep in sync with `.c` files. Memory is managed automatically via scope-exit auto-free, **single ownership release cascades**, **zero-allocation stack structs**, **Selective Prelude Emission**, and a **Resolve-Then-Merge multi-file import system** (`import "file.cco";`)—both deterministic, zero runtime overhead, zero GC pause.
+- Structs are copied by value on assignment.
+- Fields are restricted to primitive types (`int`, `float`, `char`, `bool`), eliminating ownership overhead.
+- Passed by reference via `&Struct` for in-place mutation without heap allocation.
 
 ---
 
-## ✂️ Selective Prelude Emission (v8.0)
+### Arrays of Objects & For-Each Iteration
+Collections of heap-allocated class instances managed under single-ownership:
 
-Cco v8.0 optimizes generated C code readability and cleanliness:
+```cco
+let pts: Point[] = alloc(Point, 3);
+pts[0] = Point { x: 1, y: 2 };
+pts[1] = Point { x: 3, y: 4 };
 
-- **Usage-Based Helper Emission**: Only stdlib helper functions (`__cco_*`) actually used or structurally required by a program are written to generated `.c` files.
-- **Transitive Dependency Resolution**: Automatically computes transitive dependencies (e.g. `__cco_bounds_check` transitively includes `__cco_arr_len`).
-- **Deterministic Fixed Ordering**: Emits required prelude chunks in a fixed, stable order for diffable compiler output.
-- **Clean Generated C**: Programs that don't use string or file I/O stdlib helpers generate zero unused helper boilerplate.
+for p in pts {
+    p.describe();
+}
+```
 
----
-
-## 🏗️ Lightweight Structs (Value Types) (v7.0)
-
-
-Cco v7.0 introduces lightweight value-type structs (`struct Point2D { x: int; y: int; }`):
-
-- **Value Type Semantics**: Structs live on the stack and get copied by value on assignment (`let q: Point2D = p;`).
-- **Primitive-Only Fields**: Struct fields must be primitive types (`int`, `float`, `char`, `bool`). Structs cannot contain heap objects or strings, ensuring zero ownership tracking or `free()` calls are needed.
-- **No Methods or Heap Allocations**: Structs are plain data containers without methods or heap constructors (`Point2D { x: 1, y: 2 }` desugars to C compound literals `(Point2D){ .x = 1, .y = 2 }`).
-- **In-Place Borrowed Mutation**: Structs can be passed by reference using `&Struct` (`fn scale(v: &Vec2, factor: float)`) for zero-copy in-place mutation.
+- Moving an element out of an array is rejected at compile time to prevent dangling slots.
+- At scope exit, all non-NULL objects are deallocated via their class destructor before the array buffer is freed.
 
 ---
 
-## 📁 Minimal Module/Import System (v6.0)
+### Hash Maps and Growable Arrays
+Standard dynamic collection types with automatic cleanup:
 
-Cco v6.0 introduces multi-file program support via a Resolve-Then-Merge AST architecture:
+```cco
+// Growable array
+let items = list_new(int);
+push(items, 10);
+push(items, 20);
+let val = pop(items); // 20
+let count = len(items); // 1
 
-- **Import Syntax**: `import "shapes.cco";` statements must appear at the top of a file before any function or class declarations.
-- **Resolve-Then-Merge AST**: Files are parsed independently into separate ASTs, then recursively merged into a single combined program AST before scope analysis or code generation runs.
-- **Automatic De-duplication**: Diamond imports (`A -> B, C; B -> D; C -> D`) parse and merge `D` exactly once based on canonical absolute file path resolution.
-- **Flat Global Namespace**: Functions and classes across imported files live in one global namespace without mandatory visibility modifiers or qualified names.
-- **Diagnostic Error Reporting**: Compile-time detection of circular imports (`A <-> B`) and duplicate symbol definitions with clear two-location error messages.
-
----
-
-## 📦 Arrays of Objects & For-Each (v5.0)
-
-Cco v5.0 extends single-ownership to collections of class instances:
-
-- **Allocation**: `let pts: Point[] = alloc(Point, n);` zero-initializes `n` element slots.
-- **Ownership**: An array of objects owns every element inside it.
-- **Borrow-Only Indexing**: Elements can be accessed, mutated, or passed as borrowed references (`pts[i].x`, `pts[i].sum()`, `&pts[i]`). Moving an element out of an array (`let p: Point = pts[0];`) is rejected at compile time with a clear diagnostic message.
-- **For-Each Loops**: `for p in pts { p.sum(); }` iterates over elements, yielding borrowed element references while skipping `NULL` slots.
-- **Automated Free Cascade**: At scope exit, any non-NULL elements in the array are automatically freed via their class destructor, followed by freeing the array buffer.
+// Open-addressing hash map
+let m = map_new(string, int);
+m = put(m, "alpha", 1);
+m = put(m, "beta", 2);
+let score = get(m, "alpha"); // 1
+let has_key = has(m, "beta"); // true
+```
 
 ---
 
-## 📚 Standard Library API Reference (Part A)
+### Module and Import System
+Multi-file support through a Resolve-Then-Merge AST pipeline:
 
-Cco includes a built-in Standard Library available in every file without manual imports or headers.
+```cco
+import "shapes.cco";
+
+fn main() -> int {
+    let c = Circle { radius: 10 };
+    return 0;
+}
+```
+
+- Diamond imports (`A -> B, C; B -> D; C -> D`) are deduplicated based on canonical file path resolution.
+- Circular imports (`A <-> B`) are detected and rejected at compile time with diagnostic traces.
+
+---
+
+### Selective Prelude Emission
+Only runtime helpers (`__cco_*`) required by the program are emitted into the generated `.c` file:
+- Transitive dependencies are tracked (e.g., bounds check includes array length query).
+- Fixed emission ordering produces deterministic and diffable compiler output.
+- Programs that do not use strings, arrays, or maps contain zero runtime boilerplate.
+
+---
+
+### Self-Hosted Lexer Proof-of-Concept
+A self-hosted lexer written entirely in Cco (`selfhost/lexer.cco`) implements lexical analysis for full Cco syntax:
+- Built with language constructs including tagged unions, hash maps, growable arrays, and classes.
+- Verified byte-for-byte against the C reference lexer across all test cases via `tests/compare_lexers.sh`.
+
+---
+
+## 5. Standard Library API Reference
 
 ### 1. String Functions
 | Function | Signature | Description | Heap Ownership |
 | :--- | :--- | :--- | :--- |
-| `len` | `len(s: string) -> int` | Returns character count of string `s` | - |
-| `concat` | `concat(a: string, b: string) -> string` | Returns a fresh heap-allocated string containing `a + b` | Caller owns return string |
-| `equals` | `equals(a: string, b: string) -> bool` | Returns `true` if string `a` equals string `b` | - |
-| `char_at` | `char_at(s: string, i: int) -> char` | Returns character at 0-indexed position `i` (with bounds check) | - |
-| `substring` | `substring(s: string, start: int, end: int) -> string` | Returns a fresh heap-allocated substring from `start` to `end` | Caller owns return string |
+| `len` | `len(s: string) -> int` | Character count of string | Borrowed |
+| `concat` | `concat(a: string, b: string) -> string` | Concatenates two strings | Caller owns return string |
+| `equals` | `equals(a: string, b: string) -> bool` | Checks string equality | Borrowed |
+| `char_at` | `char_at(s: string, i: int) -> char` | Character at index `i` with bounds check | Borrowed |
+| `substring` | `substring(s: string, start: int, end: int) -> string` | Substring slice | Caller owns return string |
 
 ### 2. Math Functions
 | Function | Signature | Description |
 | :--- | :--- | :--- |
-| `sqrt` | `sqrt(x: float) -> float` | Square root of `x` |
-| `pow` | `pow(base: float, exp: float) -> float` | `base` raised to `exp` power |
-| `abs_int` | `abs_int(x: int) -> int` | Absolute value of integer `x` |
-| `abs_float` | `abs_float(x: float) -> float` | Absolute value of float `x` |
-| `floor` | `floor(x: float) -> float` | Floor of float `x` |
-| `ceil` | `ceil(x: float) -> float` | Ceiling of float `x` |
+| `sqrt` | `sqrt(x: float) -> float` | Square root |
+| `pow` | `pow(base: float, exp: float) -> float` | Power function |
+| `abs_int` | `abs_int(x: int) -> int` | Absolute value of integer |
+| `abs_float` | `abs_float(x: float) -> float` | Absolute value of float |
+| `floor` | `floor(x: float) -> float` | Floor of float |
+| `ceil` | `ceil(x: float) -> float` | Ceiling of float |
 | `min_int` | `min_int(a: int, b: int) -> int` | Minimum of two integers |
 | `max_int` | `max_int(a: int, b: int) -> int` | Maximum of two integers |
 | `min_float` | `min_float(a: float, b: float) -> float` | Minimum of two floats |
@@ -300,204 +458,38 @@ Cco includes a built-in Standard Library available in every file without manual 
 ### 3. File I/O Functions
 | Function | Signature | Description | Heap Ownership |
 | :--- | :--- | :--- | :--- |
-| `read_file` | `read_file(path: string) -> string` | Reads entire file at `path` into a fresh heap-allocated string | Caller owns return string |
-| `write_file` | `write_file(path: string, content: string) -> bool` | Writes `content` to file at `path`, returning `true` on success | - |
+| `read_file` | `read_file(path: string) -> string` | Reads entire file into string | Caller owns return string |
+| `write_file` | `write_file(path: string, content: string) -> bool` | Writes string to file path | Borrowed |
 
-### 4. Command-Line Argument Functions (v13.0)
+### 4. Command-Line Arguments
 | Function | Signature | Description | Heap Ownership |
 | :--- | :--- | :--- | :--- |
-| `args` | `args() -> string[]` | Returns all arguments after program name as a fresh owned array | Caller owns returned string array & strings |
-| `arg_count` | `arg_count() -> int` | Returns argument count `len(args())` without array allocation | - |
-| `program_name` | `program_name() -> string` | Returns program invocation name (`argv[0]`) as fresh owned string | Caller owns return string |
+| `args` | `args() -> string[]` | Returns arguments after program name | Caller owns array & strings |
+| `arg_count` | `arg_count() -> int` | Returns argument count | Value |
+| `program_name` | `program_name() -> string` | Returns program invocation path (`argv[0]`) | Caller owns return string |
 
-### 5. Input, Number Parsing, and Random Numbers (v14.0)
+### 5. Input, Numeric Parsing, and Random Numbers
 | Function | Signature | Description | Heap Ownership |
 | :--- | :--- | :--- | :--- |
-| `read_line` | `read_line() -> string` | Reads one line from stdin (stripping trailing `\n`), returns `""` on EOF | Caller owns return string |
-| `to_int` | `to_int(s: string) -> int` | Parses string as integer; fatal runtime error if invalid | - |
-| `to_float` | `to_float(s: string) -> float` | Parses string as float; fatal runtime error if invalid | - |
-| `is_int` | `is_int(s: string) -> bool` | Returns `true` if `s` is a valid integer without runtime error risk | - |
-| `is_float` | `is_float(s: string) -> bool` | Returns `true` if `s` is a valid float without runtime error risk | - |
-| `random_int` | `random_int(min: int, max: int) -> int` | Returns unbiased random integer in `[min, max]` inclusive | - |
-| `random_seed` | `random_seed(seed: int) -> void` | Seeds random generator for deterministic reproducible execution | - |
+| `read_line` | `read_line() -> string` | Reads one line from stdin (stripping `
+`) | Caller owns return string |
+| `to_int` | `to_int(s: string) -> int` | Parses integer (runtime exit on failure) | Value |
+| `to_float` | `to_float(s: string) -> float` | Parses float (runtime exit on failure) | Value |
+| `is_int` | `is_int(s: string) -> bool` | Validates integer format | Value |
+| `is_float` | `is_float(s: string) -> bool` | Validates float format | Value |
+| `random_int` | `random_int(min: int, max: int) -> int` | Unbiased random integer in `[min, max]` | Value |
+| `random_seed` | `random_seed(seed: int) -> void` | Seeds random generator | Value |
 
----
+### 6. Native POSIX Networking
+POSIX socket functions for TCP network services:
+- `net_listen(port: int) -> int`: Creates an `AF_INET` TCP stream socket, sets `SO_REUSEADDR`, binds to `0.0.0.0:port`, and listens with a 128-connection backlog.
+- `net_accept(server_fd: int) -> int`: Accepts an incoming TCP connection, returning a connected `client_fd` (or `-1` on error).
+- `net_recv(client_fd: int, max_bytes: int) -> string`: Reads bytes into an RAII-managed string with HTTP framing detection.
+- `net_send(client_fd: int, data: string) -> int`: Transmits response bytes over the wire with `MSG_NOSIGNAL`.
+- `net_close(fd: int) -> void`: Closes socket file descriptors.
+- `sleep_ms(ms: int) -> void`: Millisecond sleep via `nanosleep`.
 
-## 🎯 Diagnostic Error Message Polish (Part B)
-
-Cco features GCC/Rust-style two-location diagnostic error reporting with verbatim source line snippets, line number padding, carets pointing at exact spans, and explanatory notes.
-
-### Example: Duplicate Symbol Definition Error Across Files (v6.0)
-```
-error: duplicate definition of 'Helper'
-  --> tests/programs/32_import_duplicate_symbol_ERROR/b.cco:1:1
-    |
-  1 | class Helper {
-    | ^ duplicate definition
-    |
-note: first defined here:
-  --> tests/programs/32_import_duplicate_symbol_ERROR/a.cco:1:1
-    |
-  1 | class Helper {
-    | ^ first defined here
-    |
-```
-
-### Example: Circular Import Error (v6.0)
-```
-error: circular import detected
-  tests/programs/31_import_circular_ERROR/a.cco imports b.cco (line 1)
-  b.cco imports a.cco (line 1)
-```
-
----
-
-## 🎨 Example Program Gallery (Part C)
-
-A comprehensive suite of example programs is available in [`examples/`](examples/):
-
-- [`examples/01_hello_world.cco`](examples/01_hello_world.cco): Basic syntax, primitive types, and printing
-- [`examples/02_fibonacci.cco`](examples/02_fibonacci.cco): Iterative & recursive Fibonacci sequence
-- [`examples/03_point_distance.cco`](examples/03_point_distance.cco): Object-oriented Point class with math stdlib (`sqrt`, `pow`)
-- [`examples/04_string_builder.cco`](examples/04_string_builder.cco): String manipulation (`concat`, `len`, `substring`, `equals`)
-- [`examples/05_array_sum.cco`](examples/05_array_sum.cco): Dynamic array allocation (`alloc`) and iteration
-- [`examples/06_word_count.cco`](examples/06_word_count.cco): File I/O (`read_file`) and word counting
-- [`examples/07_ownership_demo.cco`](examples/07_ownership_demo.cco): Ownership transfer (moves) vs borrowed references (`&Class`)
-- [`examples/08_stack_data_structure.cco`](examples/08_stack_data_structure.cco): OOP Stack data structure with dynamic array buffer
-- [`examples/09_object_array_todo.cco`](examples/09_object_array_todo.cco): Arrays of Objects (`Task[]`) and `for-each` loop iteration
-- [`examples/10_import_demo/`](examples/10_import_demo/): Multi-file import system (`import "shapes.cco";`)
-- [`examples/11_struct_vec2.cco`](examples/11_struct_vec2.cco): Lightweight Structs (`struct`), value copies, and in-place borrowed mutation (`&Struct`)
-- [`examples/12_cli_args.cco`](examples/12_cli_args.cco): Command-Line Arguments (`program_name()`, `arg_count()`, `args()`)
-- [`examples/13_number_guess.cco`](examples/13_number_guess.cco): Interactive Number Guessing Game (`read_line()`, `is_int()`, `to_int()`, `random_seed()`, `random_int()`)
-- [`examples/word_frequency.cco`](examples/word_frequency.cco): Hash Maps (`map[string]int`), `put`, `get`, `has`, `keys`, `len`, and `for-each` iteration
-
-See [`examples/README.md`](examples/README.md) for detailed descriptions and execution instructions.
-
----
-
-## 🛠️ Build and Testing Instructions
-
-### Requirements
-- Linux (Ubuntu 20.04+)
-- `gcc` (v9+) or `clang`
-- `make`
-- `valgrind`
-
-### Quick Start
-```bash
-# Clone and build the Cco compiler executable
-make cco
-
-# Run full Unit and Integration Test Suite under Valgrind
-make test
-```
-
----
-
-## 🧪 Test Suite Matrix (v14.0)
-
-| Test Case | Description | Result | Valgrind Leak Status |
-| :--- | :--- | :---: | :---: |
-| `test_lexer` | Unit tests for tokenizer, keywords (`class`, `struct`, `map`, `map_new`, `self`, `in`, `import`) & `&` borrow token | **PASS** | 0 Bytes Leaked |
-| `test_parser` | Unit tests for AST node construction, `map[K]V` parsing & enforcement | **PASS** | 0 Bytes Leaked |
-| `test_scope` | Unit tests for ownership pass, move tracking, free injection | **PASS** | 0 Bytes Leaked |
-| `test_map_runtime` | Unit tests for open-addressing map runtime, tombstones, class value cleanup & rehash | **PASS** | 0 Bytes Leaked |
-| `01_hello` | Basic printing, strings, arithmetic operations | **PASS** | 0 Bytes Leaked |
-| `02_alloc_basic` | Basic array allocation, indexing, & block exit free | **PASS** | 0 Bytes Leaked |
-| `03_early_return` | Early return inside nested loop with heap alloc | **PASS** | 0 Bytes Leaked |
-| `04_loop_alloc` | Allocation inside loop body (freed every iteration) | **PASS** | 0 Bytes Leaked |
-| `05_ownership_transfer` | Function returning allocated pointer to caller scope | **PASS** | 0 Bytes Leaked |
-| `06_nested_scopes` | Allocations in conditional `if`/`else` branches | **PASS** | 0 Bytes Leaked |
-| `07_break_continue` | `break` and `continue` statements inside loops | **PASS** | 0 Bytes Leaked |
-| `08_reassign_alloc` | Reassigning managed variable to new allocation | **PASS** | 0 Bytes Leaked |
-| `09_basic_class` | Basic class creation and method call | **PASS** | 0 Bytes Leaked |
-| `10_method_call` | Method calls with object parameters | **PASS** | 0 Bytes Leaked |
-| `11_aliasing_refcount` | Object assignment move semantics & single cleanup free | **PASS** | 0 Bytes Leaked |
-| `12_reassign_object` | Reassigning object variables with automatic cleanup of old object | **PASS** | 0 Bytes Leaked |
-| `13_object_early_return` | Object lifetime inside loops with early returns | **PASS** | 0 Bytes Leaked |
-| `14_basic_move` | Single ownership move and clean deallocation | **PASS** | 0 Bytes Leaked |
-| `15_borrowed_param` | Borrowed parameter (`&Point`) without ownership transfer | **PASS** | 0 Bytes Leaked |
-| `16_use_after_move_ERROR` | Formatted Rust-style rejection of use-after-move | **PASS** | Compile Error (As Expected) |
-| `17_double_move_ERROR` | Formatted Rust-style rejection of double-move | **PASS** | Compile Error (As Expected) |
-| `18_conditional_move_ERROR` | Formatted Rust-style rejection of conditional move | **PASS** | Compile Error (As Expected) |
-| `19_move_via_return` | Returning owned objects and moving between scopes | **PASS** | 0 Bytes Leaked |
-| `20_return_borrowed_ERROR` | Formatted Rust-style rejection of returning borrowed parameter | **PASS** | Compile Error (As Expected) |
-| `21_stdlib_string` | Standard Library String operations (`concat`, `len`, `equals`, `substring`) | **PASS** | 0 Bytes Leaked |
-| `22_stdlib_math` | Standard Library Math operations (`sqrt`, `pow`, `abs`, `min`, `max`) | **PASS** | 0 Bytes Leaked |
-| `23_stdlib_file_io` | Standard Library File I/O operations (`read_file`, `write_file`) | **PASS** | 0 Bytes Leaked |
-| `24_object_array_basic` | Object array allocation (`Point[]`), indexing, and scope-exit free cascade | **PASS** | 0 Bytes Leaked |
-| `25_object_array_foreach` | For-each loop iteration over object arrays (`for p in pts`) | **PASS** | 0 Bytes Leaked |
-| `26_object_array_free_cascade` | Null-checked release cascade skipping empty array slots | **PASS** | 0 Bytes Leaked |
-| `27_object_array_move_out_ERROR` | Rejecting move-out of array element (`let p = pts[0]`) | **PASS** | Compile Error (As Expected) |
-| `28_object_array_bounds_ERROR` | Rejecting constant index out-of-bounds (`pts[10]`) | **PASS** | Compile Error (As Expected) |
-| `29_import_basic` | Basic multi-file import (`import "shapes.cco";`) | **PASS** | 0 Bytes Leaked |
-| `30_import_diamond` | Diamond import resolution & AST de-duplication | **PASS** | 0 Bytes Leaked |
-| `31_import_circular_ERROR` | Circular import cycle detection & full chain error report | **PASS** | Compile Error (As Expected) |
-| `32_import_duplicate_symbol_ERROR` | Duplicate class/function definition rejection across files | **PASS** | Compile Error (As Expected) |
-| `33_struct_basic` | Basic struct declaration, construction, and field printing | **PASS** | 0 Bytes Leaked |
-| `34_struct_copy_semantics` | Struct value copy on assignment (`let q = p; q.x = 99; print(p.x)`) | **PASS** | 0 Bytes Leaked |
-| `35_struct_borrowed_param` | In-place struct mutation via borrowed reference (`&Vec2`) | **PASS** | 0 Bytes Leaked |
-| `36_struct_nonprimitive_field_ERROR` | Rejecting non-primitive field in struct with clear note | **PASS** | Compile Error (As Expected) |
-| `37_struct_class_name_collision_ERROR` | Rejecting class and struct name collision with two-location error | **PASS** | Compile Error (As Expected) |
-| `38_prelude_minimal` | Program using zero stdlib functions; asserts prelude section contains 0 `__cco_` helpers | **PASS** | 0 Bytes Leaked |
-| `39_prelude_partial` | Program using `concat()` only; asserts generated C contains `__cco_concat` but no unused helpers | **PASS** | 0 Bytes Leaked |
-| `40_prelude_transitive` | Array indexing; asserts transitive emission of `__cco_bounds_check` AND `__cco_arr_len` | **PASS** | 0 Bytes Leaked |
-| `41_growable_push_primitive` | `list_new(int)` creation, repeated `push()`, `len()` dynamic count | **PASS** | 0 Bytes Leaked |
-| `42_growable_pop_primitive` | `pop()` elements from primitive array, length decrement, returned value verification | **PASS** | 0 Bytes Leaked |
-| `43_growable_push_pop_class` | Growable object array, `push()` ownership transfer, `pop()` sole ownership move out | **PASS** | 0 Bytes Leaked |
-| `44_growable_realloc_stress` | 25 element pushes triggering 3+ buffer reallocations with 0 memory leaks | **PASS** | 0 Bytes Leaked |
-| `45_pop_empty_RUNTIME_ERROR` | Runtime error when `pop()` called on empty array (`capacity == 0` or `length == 0`) | **PASS** | Runtime Error (As Expected) |
-| `46_map_basic_primitive` | `map[int]int` creation, `put()`, `get()`, reassign value, scope-exit cleanup | **PASS** | 0 Bytes Leaked |
-| `47_map_string_key` | `map[string]int` creation, string key cloning, `get()` retrieval | **PASS** | 0 Bytes Leaked |
-| `48_map_class_value_ownership` | `map[string]Point`, object value moves in `put()`, overwrite cleanup, borrowed `get()` | **PASS** | 0 Bytes Leaked |
-| `49_map_remove_and_tombstones` | `remove()` with tombstone tagging, caller object move-out, `has()` verification | **PASS** | 0 Bytes Leaked |
-| `50_map_keys_and_len` | `keys(m)` extraction to `int[]`, `len(m)` query, and `for-each` loop iteration | **PASS** | 0 Bytes Leaked |
-| `51_map_rehash_stress` | 100 entries insertion triggering dynamic rehashing from capacity 8 to 128+ with 0 leaks | **PASS** | 0 Bytes Leaked |
-| `52_map_invalid_key_type_ERROR` | Rejecting invalid key type (`map[float]int`) with formatted diagnostic error | **PASS** | Compile Error (As Expected) |
-| `53_map_put_reassignment_check_ERROR` | Rejecting unassigned `put(m, k, v)` call at compile time | **PASS** | Compile Error (As Expected) |
-| `54_enum_unit_variants` | Unit variants (`enum Color { Red, Green, Blue }`), pattern match, and fieldless tags | **PASS** | 0 Bytes Leaked |
-| `55_enum_payload_variants` | Payload variants (`enum Shape { Circle { radius: int } }`), data extraction, match branches | **PASS** | 0 Bytes Leaked |
-| `56_enum_recursive_eval` | Recursive tagged union trees (`Expr.Add`, `Expr.Mul`), evaluation, automated recursive cleanup | **PASS** | 0 Bytes Leaked |
-| `57_enum_ownership_move` | Ownership transfer (moves) of enum instances across variables and functions | **PASS** | 0 Bytes Leaked |
-| `58_enum_borrowed_match` | Borrow-only match scrutinee (`match &token`), borrowed field binding, zero premature frees | **PASS** | 0 Bytes Leaked |
-| `59_enum_nonexhaustive_ERROR` | Rejecting non-exhaustive match statements at compile time with missing variant list | **PASS** | Compile Error (As Expected) |
-| `60_enum_duplicate_arm_ERROR` | Rejecting duplicate match arms at compile time with two-location note | **PASS** | Compile Error (As Expected) |
-| `61_enum_field_rename_ERROR` | Rejecting field name renaming in match patterns with diagnostic error | **PASS** | Compile Error (As Expected) |
-| `62_argv_basic` | CLI argument processing with sidecar `.args`, `args()`, `arg_count()` | **PASS** | 0 Bytes Leaked |
-| `63_argv_empty` | Zero CLI arguments invocation, empty `args()` string array, `arg_count() == 0` | **PASS** | 0 Bytes Leaked |
-| `64_program_name` | Program invocation path retrieval via `program_name()` (`argv[0]`) | **PASS** | 0 Bytes Leaked |
-| `65_read_line_basic` | Standard input line reading with sidecar `.stdin`, newline stripping, EOF handling | **PASS** | 0 Bytes Leaked |
-| `66_to_int_valid` | Valid integer and float numeric parsing via `to_int()` and `to_float()` | **PASS** | 0 Bytes Leaked |
-| `67_to_int_invalid_RUNTIME_ERROR` | Catching invalid numeric string in `to_int()` with formatted runtime error | **PASS** | Runtime Error (As Expected) |
-| `68_is_int_is_float_guard` | Safe parse-guarding pattern (`is_int()`, `is_float()`) avoiding runtime fatal crashes | **PASS** | 0 Bytes Leaked |
-| `69_random_seeded_deterministic` | Deterministic random sequence verification via `random_seed()` & `random_int()` | **PASS** | 0 Bytes Leaked |
-| `70_fstring_basic` | Single integer variable interpolation inside f-string (`f"x = {x}"`) | **PASS** | 0 Bytes Leaked |
-| `71_fstring_multiple_exprs` | Multiple interpolations across mixed primitive types (`int`, `float`, `string`, `bool`) | **PASS** | 0 Bytes Leaked |
-| `72_fstring_escaped_braces` | Escaped brace literals `{{` and `}}` rendering literal `{` and `}` without interpolation | **PASS** | 0 Bytes Leaked |
-| `73_fstring_nested_expr` | Complex nested arithmetic and function calls inside `{...}` (`f"{a + b * 2}"`, `f"{greet(\"Bob\")}"`) | **PASS** | 0 Bytes Leaked |
-| `74_fstring_unbalanced_ERROR` | Rejecting unbalanced or unterminated f-strings at compile time with diagnostic caret | **PASS** | Compile Error (As Expected) |
-| `75_operator_overload_add` | Basic binary struct operator overloading (`operator+`) | **PASS** | 0 Bytes Leaked |
-| `76_operator_overload_multiple` | Multiple struct operators (`+`, `-`, `*`, `==`, `!=`) on single struct type | **PASS** | 0 Bytes Leaked |
-| `77_operator_overload_missing_ERROR` | Rejecting missing struct operator definition at compile time | **PASS** | Compile Error (As Expected) |
-| `78_operator_overload_unary_neg` | Unary negation operator overloading (`operator-(a)`) distinguished by arity | **PASS** | 0 Bytes Leaked |
-| `79_operator_overload_class_ERROR` | Rejecting operator overloading for class types (struct-only in v16) | **PASS** | Compile Error (As Expected) |
-| `compare_lexers` (v12) | Self-hosted lexer diff harness across all 104 `.cco` files in corpus (100% byte-identical) | **PASS** | 0 Bytes Leaked |
-
----
-
-## 🌐 Native POSIX Networking (v20.0)
-
-Cco includes native, hardened POSIX networking functions in its standard library prelude:
-
-- **Functions**:
-  - `net_listen(port: int) -> int`: Creates an `AF_INET` TCP stream socket, sets `SO_REUSEADDR`, binds to `0.0.0.0:port`, and listens with a 128-connection backlog.
-  - `net_accept(server_fd: int) -> int`: Accepts an incoming TCP connection, returning a connected `client_fd` (or `-1` on error).
-  - `net_recv(client_fd: int, max_bytes: int) -> string`: Reads wire packets directly into a heap-allocated, RAII-managed Cco `string`. Features dynamic buffer expansion (from 4KB up to 1MB) and HTTP framing detection (`\r\n\r\n` delimiter and `Content-Length` tracking).
-  - `net_send(client_fd: int, data: string) -> int`: Transmits response bytes over the wire. Loops until the entire buffer is accepted, handles `EINTR`, and uses `MSG_NOSIGNAL` to prevent process crashes if clients disconnect mid-transfer.
-  - `net_close(fd: int) -> void`: Closes socket descriptors.
-  - `sleep_ms(ms: int) -> void`: Millisecond thread sleep via POSIX `nanosleep`.
-
-### Minimal HTTP Server Example
+#### Minimal HTTP Server Example
 ```cco
 fn handle_client(client_fd: int) -> void {
     let req = net_recv(client_fd, 0);
@@ -506,9 +498,15 @@ fn handle_client(client_fd: int) -> void {
         return;
     }
 
-    let body = "{\"status\": \"OK\", \"message\": \"Hello from Cco!\"}\n";
+    let body = "{"status": "OK", "message": "Hello from Cco!"}
+";
     let body_len = len(body);
-    let resp = f"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {body_len}\r\nConnection: close\r\n\r\n{body}";
+    let resp = f"HTTP/1.1 200 OK
+Content-Type: application/json
+Content-Length: {body_len}
+Connection: close
+
+{body}";
     
     net_send(client_fd, resp);
     net_close(client_fd);
@@ -530,27 +528,159 @@ fn main() -> int {
 }
 ```
 
-### Concurrency Model & Design Constraints
-- **Sequential Connection Handling**: The Cco socket runtime currently operates **sequentially on a single thread** (one connection is accepted, processed, and closed before the next connection is accepted).
-- **Current Limitation**: A hanging or slow client connection blocks subsequent clients. Asynchronous event multiplexing (`epoll`/`kqueue`) and multi-threading will be introduced in a future concurrency module.
+*Note: Sockets currently operate sequentially on a single thread. Connections must complete before subsequent clients are processed.*
 
 ---
 
-## 🌐 Strict C11 Portability & Multi-Compiler Conformance
+## 6. Diagnostic Error Reporting
 
-Cco-generated C output is strictly conformant **standard ISO C11** code (`-std=c11 -pedantic-errors`).
+Cco provides compiler diagnostics indicating error spans, source lines, and contextual notes:
 
-- **No Compiler Extensions in Generated Output**: Non-standard GNU extensions (such as `__typeof__`) have been eliminated from generated output in favor of explicit, statically-known type emission.
-- **Strict Standard C11 I/O**: The stdin reader `read_line()` is implemented using standard ISO C11 `fgetc()` with dynamic heap buffer reallocation (`malloc`/`realloc`) rather than POSIX-only `getline()`, ensuring generated C code compiles and runs seamlessly across Windows/MSVC, Linux, macOS, and BSD without POSIX dependencies.
-- **Networking Portability Note**: While core Cco constructs are strictly portable ISO C11, native networking functions (`net_listen`, `net_accept`, `net_recv`, `net_send`, `net_close`) bind directly to POSIX socket headers (`<sys/socket.h>`, `<netinet/in.h>`, `<arpa/inet.h>`, `<unistd.h>`) and require a POSIX environment (Linux, macOS, FreeBSD, WSL). Native Windows/MSVC requires Winsock2 (`ws2_32.lib`, `WSAStartup`), which is not directly supported without a POSIX layer.
-- **Multi-Compiler Conformance**: Generated C output compiles cleanly under `gcc`, `clang`, `tcc`, and MSVC without requiring GNU-specific or compiler-specific extensions.
-- **Strict Pedantic Compliance**: All build and test pipelines compile generated output with `-Wall -Wextra -Werror -pedantic-errors -std=c11`.
-- **Compiler Binary Platform Note**: While Cco-generated C code is strictly portable standard C11, the Cco compiler executable itself currently relies on POSIX APIs (`realpath()`) for canonical module resolution and requires a POSIX environment (Linux/macOS/WSL) to run.
+```
+error: duplicate definition of 'Helper'
+  --> tests/programs/32_import_duplicate_symbol_ERROR/b.cco:1:1
+    |
+  1 | class Helper {
+    | ^ duplicate definition
+    |
+note: first defined here:
+  --> tests/programs/32_import_duplicate_symbol_ERROR/a.cco:1:1
+    |
+  1 | class Helper {
+    | ^ first defined here
+    |
+```
 
 ---
 
-## 📄 License
-MIT License. Developed for the Cco Source-to-Source Transpiler Sprint.
+## 7. Example Programs Gallery
 
+Available in [`examples/`](examples/):
 
+- [`examples/01_hello_world.cco`](examples/01_hello_world.cco): Basic syntax and types
+- [`examples/02_fibonacci.cco`](examples/02_fibonacci.cco): Iterative and recursive Fibonacci
+- [`examples/03_point_distance.cco`](examples/03_point_distance.cco): Classes, methods, and standard math
+- [`examples/04_string_builder.cco`](examples/04_string_builder.cco): String operations
+- [`examples/05_array_sum.cco`](examples/05_array_sum.cco): Dynamic array allocation and loops
+- [`examples/06_word_count.cco`](examples/06_word_count.cco): File I/O and token counting
+- [`examples/07_ownership_demo.cco`](examples/07_ownership_demo.cco): Ownership moves vs borrowed references
+- [`examples/08_stack_data_structure.cco`](examples/08_stack_data_structure.cco): Dynamic stack data structure
+- [`examples/09_object_array_todo.cco`](examples/09_object_array_todo.cco): Arrays of objects and for-each iteration
+- [`examples/10_import_demo/`](examples/10_import_demo/): Multi-file imports
+- [`examples/11_struct_vec2.cco`](examples/11_struct_vec2.cco): Structs, value copies, and borrowed mutations
+- [`examples/12_cli_args.cco`](examples/12_cli_args.cco): Command-line argument parsing
+- [`examples/13_number_guess.cco`](examples/13_number_guess.cco): Interactive stdin game
+- [`examples/word_frequency.cco`](examples/word_frequency.cco): Hash maps and key iteration
+- [`examples/printable_interface.cco`](examples/printable_interface.cco): Interfaces and monomorphization
+- [`examples/vec2_operators.cco`](examples/vec2_operators.cco): Struct operator overloading
 
+---
+
+## 8. Test Suite Matrix
+
+All test cases are verified using `valgrind --leak-check=full --error-exitcode=1`:
+
+| Test Case | Description | Result | Valgrind Leak Status |
+| :--- | :--- | :---: | :---: |
+| `test_lexer` | Tokenizer, keywords (`class`, `struct`, `map`, `self`, `import`) & `&` borrow | PASS | 0 Bytes Leaked |
+| `test_parser` | AST node construction, `map[K]V` parsing & enforcement | PASS | 0 Bytes Leaked |
+| `test_scope` | Ownership analysis, move tracking, deallocation injection | PASS | 0 Bytes Leaked |
+| `test_map_runtime` | Open-addressing map runtime, tombstones, class cleanup & rehash | PASS | 0 Bytes Leaked |
+| `01_hello` | Basic printing, strings, arithmetic operations | PASS | 0 Bytes Leaked |
+| `02_alloc_basic` | Basic array allocation, indexing, & block exit free | PASS | 0 Bytes Leaked |
+| `03_early_return` | Early return inside nested loop with heap allocation | PASS | 0 Bytes Leaked |
+| `04_loop_alloc` | Allocation inside loop body (freed every iteration) | PASS | 0 Bytes Leaked |
+| `05_ownership_transfer` | Function returning allocated pointer to caller scope | PASS | 0 Bytes Leaked |
+| `06_nested_scopes` | Allocations in conditional `if`/`else` branches | PASS | 0 Bytes Leaked |
+| `07_break_continue` | `break` and `continue` statements inside loops | PASS | 0 Bytes Leaked |
+| `08_reassign_alloc` | Reassigning managed variable to new allocation | PASS | 0 Bytes Leaked |
+| `09_basic_class` | Basic class creation and method call | PASS | 0 Bytes Leaked |
+| `10_method_call` | Method calls with object parameters | PASS | 0 Bytes Leaked |
+| `11_aliasing_refcount` | Object assignment move semantics & single cleanup free | PASS | 0 Bytes Leaked |
+| `12_reassign_object` | Reassigning object variables with automatic cleanup of old object | PASS | 0 Bytes Leaked |
+| `13_object_early_return` | Object lifetime inside loops with early returns | PASS | 0 Bytes Leaked |
+| `14_basic_move` | Single ownership move and clean deallocation | PASS | 0 Bytes Leaked |
+| `15_borrowed_param` | Borrowed parameter (`&Point`) without ownership transfer | PASS | 0 Bytes Leaked |
+| `16_use_after_move_ERROR` | Diagnostic rejection of use-after-move | PASS | Compile Error (Expected) |
+| `17_double_move_ERROR` | Diagnostic rejection of double-move | PASS | Compile Error (Expected) |
+| `18_conditional_move_ERROR` | Diagnostic rejection of conditional move | PASS | Compile Error (Expected) |
+| `19_move_via_return` | Returning owned objects and moving between scopes | PASS | 0 Bytes Leaked |
+| `20_return_borrowed_ERROR` | Diagnostic rejection of returning borrowed parameter | PASS | Compile Error (Expected) |
+| `21_stdlib_string` | String operations (`concat`, `len`, `equals`, `substring`) | PASS | 0 Bytes Leaked |
+| `22_stdlib_math` | Math operations (`sqrt`, `pow`, `abs`, `min`, `max`) | PASS | 0 Bytes Leaked |
+| `23_stdlib_file_io` | File I/O operations (`read_file`, `write_file`) | PASS | 0 Bytes Leaked |
+| `24_object_array_basic` | Object array allocation (`Point[]`), indexing, and scope-exit cleanup | PASS | 0 Bytes Leaked |
+| `25_object_array_foreach` | For-each loop iteration over object arrays (`for p in pts`) | PASS | 0 Bytes Leaked |
+| `26_object_array_free_cascade` | Null-checked release cascade skipping empty array slots | PASS | 0 Bytes Leaked |
+| `27_object_array_move_out_ERROR` | Rejecting move-out of array element (`let p = pts[0]`) | PASS | Compile Error (Expected) |
+| `28_object_array_bounds_ERROR` | Rejecting constant index out-of-bounds | PASS | Compile Error (Expected) |
+| `29_import_basic` | Multi-file import (`import "shapes.cco";`) | PASS | 0 Bytes Leaked |
+| `30_import_diamond` | Diamond import resolution & AST deduplication | PASS | 0 Bytes Leaked |
+| `31_import_circular_ERROR` | Circular import cycle detection | PASS | Compile Error (Expected) |
+| `32_import_duplicate_symbol_ERROR` | Duplicate class/function definition rejection across files | PASS | Compile Error (Expected) |
+| `33_struct_basic` | Struct declaration, construction, and field access | PASS | 0 Bytes Leaked |
+| `34_struct_copy_semantics` | Struct value copy on assignment | PASS | 0 Bytes Leaked |
+| `35_struct_borrowed_param` | In-place struct mutation via borrowed reference (`&Vec2`) | PASS | 0 Bytes Leaked |
+| `36_struct_nonprimitive_field_ERROR` | Rejecting non-primitive field in struct | PASS | Compile Error (Expected) |
+| `37_struct_class_name_collision_ERROR` | Rejecting class and struct name collision | PASS | Compile Error (Expected) |
+| `38_prelude_minimal` | Program with zero stdlib calls emits zero `__cco_` helpers | PASS | 0 Bytes Leaked |
+| `39_prelude_partial` | Program with `concat()` emits `__cco_concat` with no unused helpers | PASS | 0 Bytes Leaked |
+| `40_prelude_transitive` | Array indexing transitively emits bounds check and array length | PASS | 0 Bytes Leaked |
+| `41_growable_push_primitive` | `list_new(int)`, repeated `push()`, `len()` dynamic count | PASS | 0 Bytes Leaked |
+| `42_growable_pop_primitive` | `pop()` from primitive array, length decrement, returned value | PASS | 0 Bytes Leaked |
+| `43_growable_push_pop_class` | Growable object array, `push()` transfer, `pop()` sole ownership move | PASS | 0 Bytes Leaked |
+| `44_growable_realloc_stress` | Buffer reallocations under stress with zero leaks | PASS | 0 Bytes Leaked |
+| `45_pop_empty_RUNTIME_ERROR` | Runtime error when `pop()` called on empty array | PASS | Runtime Error (Expected) |
+| `46_map_basic_primitive` | `map[int]int` creation, `put()`, `get()`, scope-exit cleanup | PASS | 0 Bytes Leaked |
+| `47_map_string_key` | `map[string]int` creation, string key cloning, `get()` retrieval | PASS | 0 Bytes Leaked |
+| `48_map_class_value_ownership` | `map[string]Point`, object moves in `put()`, overwrite cleanup | PASS | 0 Bytes Leaked |
+| `49_map_remove_and_tombstones` | `remove()` with tombstone tagging, caller move-out, `has()` | PASS | 0 Bytes Leaked |
+| `50_map_keys_and_len` | `keys(m)` extraction to `int[]`, `len(m)` query, and iteration | PASS | 0 Bytes Leaked |
+| `51_map_rehash_stress` | Dynamic rehashing from capacity 8 to 128+ with 0 leaks | PASS | 0 Bytes Leaked |
+| `52_map_invalid_key_type_ERROR` | Rejecting invalid key type (`map[float]int`) | PASS | Compile Error (Expected) |
+| `53_map_put_reassignment_check_ERROR` | Rejecting unassigned `put(m, k, v)` call | PASS | Compile Error (Expected) |
+| `54_enum_unit_variants` | Unit variants (`enum Color { Red, Green, Blue }`), match | PASS | 0 Bytes Leaked |
+| `55_enum_payload_variants` | Payload variants (`enum Shape { Circle { radius: int } }`) | PASS | 0 Bytes Leaked |
+| `56_enum_recursive_eval` | Recursive tagged union trees (`Expr.Add`, `Expr.Mul`), evaluation | PASS | 0 Bytes Leaked |
+| `57_enum_ownership_move` | Ownership transfer of enum instances | PASS | 0 Bytes Leaked |
+| `58_enum_borrowed_match` | Borrow-only match scrutinee (`match &token`), field binding | PASS | 0 Bytes Leaked |
+| `59_enum_nonexhaustive_ERROR` | Rejecting non-exhaustive match statements | PASS | Compile Error (Expected) |
+| `60_enum_duplicate_arm_ERROR` | Rejecting duplicate match arms | PASS | Compile Error (Expected) |
+| `61_enum_field_rename_ERROR` | Rejecting field name renaming in match patterns | PASS | Compile Error (Expected) |
+| `62_argv_basic` | CLI arguments via `args()`, `arg_count()` | PASS | 0 Bytes Leaked |
+| `63_argv_empty` | Zero CLI arguments invocation | PASS | 0 Bytes Leaked |
+| `64_program_name` | Program path retrieval via `program_name()` | PASS | 0 Bytes Leaked |
+| `65_read_line_basic` | Standard input line reading, newline stripping, EOF handling | PASS | 0 Bytes Leaked |
+| `66_to_int_valid` | Numeric parsing via `to_int()` and `to_float()` | PASS | 0 Bytes Leaked |
+| `67_to_int_invalid_RUNTIME_ERROR` | Catching invalid numeric string in `to_int()` | PASS | Runtime Error (Expected) |
+| `68_is_int_is_float_guard` | Safe parse-guarding pattern (`is_int()`, `is_float()`) | PASS | 0 Bytes Leaked |
+| `69_random_seeded_deterministic` | Deterministic random sequence via `random_seed()` & `random_int()` | PASS | 0 Bytes Leaked |
+| `70_fstring_basic` | Single integer variable interpolation (`f"x = {x}"`) | PASS | 0 Bytes Leaked |
+| `71_fstring_multiple_exprs` | Multiple interpolations across primitive types | PASS | 0 Bytes Leaked |
+| `72_fstring_escaped_braces` | Escaped brace literals `{{` and `}}` | PASS | 0 Bytes Leaked |
+| `73_fstring_nested_expr` | Nested arithmetic and function calls inside `{...}` | PASS | 0 Bytes Leaked |
+| `74_fstring_unbalanced_ERROR` | Rejecting unbalanced or unterminated f-strings | PASS | Compile Error (Expected) |
+| `75_operator_overload_add` | Binary struct operator overloading (`operator+`) | PASS | 0 Bytes Leaked |
+| `76_operator_overload_multiple` | Multiple struct operators (`+`, `-`, `*`, `==`, `!=`) | PASS | 0 Bytes Leaked |
+| `77_operator_overload_missing_ERROR` | Rejecting missing struct operator definition | PASS | Compile Error (Expected) |
+| `78_operator_overload_unary_neg` | Unary negation operator overloading (`operator-(a)`) | PASS | 0 Bytes Leaked |
+| `79_operator_overload_class_ERROR` | Rejecting operator overloading for class types | PASS | Compile Error (Expected) |
+| `compare_lexers` | Self-hosted lexer diff harness across codebase (100% byte-identical) | PASS | 0 Bytes Leaked |
+
+---
+
+## 9. Strict C11 Portability and Conformance
+
+Cco-generated C output strictly conforms to **standard ISO C11** (`-std=c11 -pedantic-errors`):
+
+- **Zero Non-Standard Compiler Extensions**: Compiler-specific extensions (such as GNU `__typeof__`) are not present in generated output.
+- **Strict Standard C11 I/O**: `read_line()` is implemented using standard ISO C11 `fgetc()` with dynamic heap buffer reallocation (`malloc`/`realloc`) rather than POSIX-only `getline()`, ensuring generated C code compiles cleanly across Windows/MSVC, Linux, macOS, and BSD without POSIX dependencies.
+- **Networking Portability**: Core Cco constructs are strictly portable ISO C11. Native networking functions (`net_listen`, `net_accept`, `net_recv`, `net_send`, `net_close`) bind to POSIX socket headers (`<sys/socket.h>`, `<netinet/in.h>`, `<arpa/inet.h>`, `<unistd.h>`) and require a POSIX environment.
+- **Multi-Compiler Conformance**: Generated C code compiles without warnings or errors under `gcc`, `clang`, `tcc`, and MSVC.
+- **Compiler Platform Requirements**: While generated C code is strictly portable standard C11, the Cco compiler executable itself relies on POSIX `realpath()` for canonical module resolution and requires a POSIX environment to run.
+
+---
+
+## 10. License
+
+MIT License. Developed for the Cco Source-to-Source Transpiler Project.
