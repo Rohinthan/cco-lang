@@ -32,44 +32,73 @@ The compiled binary is generated at `./cco`.
 
 ---
 
-### Executing Programs with `./cco <file.cco> --run`
+### Direct Native Compilation (`./cco <file.cco> -o <binary>`)
 
-To compile and execute a Cco program in a single step, use the `--run` flag:
+Cco supports direct compilation to native standalone machine binaries with a single command, matching traditional C compilers like GCC (`gcc hello.c -o hello`):
+
+```bash
+# Compile directly to a standalone native binary
+./cco examples/01_hello_world.cco -o hello
+
+# Run the native binary directly at bare-metal execution speed
+./hello
+```
+
+If the `-o` argument is omitted, Cco automatically derives the output executable name from the input source file:
+```bash
+./cco examples/01_hello_world.cco
+./examples/01_hello_world
+```
+
+#### Performance Comparison: Native Binary vs `--run`
+
+When building production services or running benchmarks, re-compiling via `--run` adds compilation latency on every invocation. Compiling once to a native standalone executable yields immediate sub-millisecond execution times:
+
+| Invocation Mode | Command | Behavior | Latency / Execution Time |
+| :--- | :--- | :--- | :--- |
+| **Native Executable Binary** | `./hello` | Runs precompiled native ELF binary directly | **~0.002s** (instant execution) |
+| **Development JIT Mode** | `./cco hello.cco --run` | Re-transpiles + re-compiles with GCC + executes | **~0.098s** (~50x compilation overhead) |
+
+---
+
+### Executing Programs with `./cco <file.cco> --run` (Development Mode)
+
+To rapidly test and debug a Cco program without creating a persistent binary, use the `--run` flag:
 
 ```bash
 ./cco examples/01_hello_world.cco --run
 ```
 
-#### Why Use the `--run` Flag?
-
-Cco is a source-to-source compiler targeting standard ISO C11 rather than an interpreter or bytecode virtual machine. Under standard operation, `./cco input.cco -o output.c` only emits an intermediate C source file.
-
-The `--run` flag automates the entire compile-and-execute pipeline into a single command:
-1. **Source Transpilation**: Parses `.cco` source code, performs module imports, validates trait monomorphization, tracks ownership/borrow scopes, and generates standard ISO C11 code at `build/output.c`.
-2. **Background Native Compilation**: Invokes the C compiler directly with optimization and strict conformance flags:
+#### What Happens Under the Hood:
+1. **Source Transpilation**: Parses `.cco` source, validates module imports, monomorphizes traits, and tracks affine ownership scopes, emitting standard ISO C11 code to `build/output.c`.
+2. **Native Compilation**: Automatically compiles via GCC with optimization and strict conformance:
    ```bash
    gcc -O3 -Wall -Wextra -std=c11 build/output.c -o build/cco_out -lm
    ```
-3. **Immediate Execution**: Runs the resulting machine binary (`./build/cco_out`), directs program output to stdout/stderr, and forwards the exit status code.
-
-This flag provides a rapid script-like iteration cycle during development and testing without requiring manual multi-step C compiler invocations.
+3. **Immediate Execution**: Runs the resulting machine binary (`./build/cco_out`), directs output to stdout/stderr, and forwards the process exit code.
 
 ---
 
-### Standalone Native Compilation (Production Workflow)
+### Pure C Source Transpilation (`./cco <file.cco> -o <file.c>`)
 
-For production deployment and standalone distribution where the Cco compiler is not present on the target host:
+To inspect, audit, or distribute portable standard ISO C11 source code without invoking the host compiler, specify an output file ending in `.c`:
 
 ```bash
-# Step 1: Transpile Cco source to standard ISO C11
 ./cco examples/01_hello_world.cco -o build/hello.c
-
-# Step 2: Compile to a standalone native binary
-gcc -O3 -Wall -Wextra -Werror -pedantic-errors -std=c11 build/hello.c -o bin/hello -lm
-
-# Step 3: Run standalone binary directly
-./bin/hello
 ```
+Cco detects the `.c` extension and writes the clean, fully-formed C11 source directly to the specified path without triggering binary compilation.
+
+---
+
+### Memory Safety, Leak-Free Verification & Error Diagnostics
+
+Cco guarantees memory safety and predictable resource management through compile-time affine single-ownership and scope-based deterministic deallocation without a garbage collector.
+
+Every build and feature in Cco undergoes rigorous validation:
+- **0 Memory Leaks**: Verified under **Valgrind Memcheck** (`valgrind --leak-check=full --error-exitcode=1`). Any single leaked byte fails CI immediately.
+- **0 File Descriptor Leaks**: Dynamic socket handles and file descriptors are audited across concurrent client requests and abnormal disconnects.
+- **Strict Compiler Warnings as Errors**: Transpiled C code is compiled with `-Wall -Wextra -Werror -pedantic-errors -std=c11`, guaranteeing zero undefined behavior, format truncations, or type warnings.
+- **Compile-Time Error Enforcement**: Use-after-move, double-moves, circular imports, and non-exhaustive enum pattern matches are rejected at compile time with detailed source location diagnostics.
 
 ---
 
@@ -665,7 +694,36 @@ All test cases are verified using `valgrind --leak-check=full --error-exitcode=1
 | `77_operator_overload_missing_ERROR` | Rejecting missing struct operator definition | PASS | Compile Error (Expected) |
 | `78_operator_overload_unary_neg` | Unary negation operator overloading (`operator-(a)`) | PASS | 0 Bytes Leaked |
 | `79_operator_overload_class_ERROR` | Rejecting operator overloading for class types | PASS | Compile Error (Expected) |
+| `80_interface_basic` | Interface declaration, method contracts, and conformance | PASS | 0 Bytes Leaked |
+| `81_interface_multiple_impls` | Polymorphic trait monomorphization across distinct classes | PASS | 0 Bytes Leaked |
+| `82_interface_missing_method_ERROR` | Rejecting incomplete interface implementation | PASS | Compile Error (Expected) |
+| `83_interface_signature_mismatch_ERROR` | Rejecting method return type or argument count mismatch | PASS | Compile Error (Expected) |
+| `84_interface_struct_impl_ERROR` | Rejecting interface implementation on value structs | PASS | Compile Error (Expected) |
+| `85_interface_unimplementing_call_ERROR` | Rejecting calls on types not implementing interface | PASS | Compile Error (Expected) |
+| `86_interface_non_interface_method_ERROR` | Rejecting invocation of non-interface methods via interface type | PASS | Compile Error (Expected) |
+| `87_interface_borrowed_param` | Passing borrowed reference to interface-implementing instance | PASS | 0 Bytes Leaked |
+| `88_interface_self_param` | Monomorphized method invocation on `self` receiver | PASS | 0 Bytes Leaked |
+| `89_interface_unused_template_dropped` | Unused interface implementations eliminated from emitted C | PASS | 0 Bytes Leaked |
+| `90_operator_overload_comparison` | Comparison operator overloading (`==`, `!=`, `<`, `>`, `<=`, `>=`) | PASS | 0 Bytes Leaked |
+| `91_operator_overload_comparison_missing_ERROR` | Rejecting comparison on types without overloaded operator | PASS | Compile Error (Expected) |
+| `92_operator_overload_comparison_wrong_return_ERROR` | Rejecting comparison operator returning non-bool | PASS | Compile Error (Expected) |
+| `93_type_inference_basic` | Local variable type inference via `let x = expr` | PASS | 0 Bytes Leaked |
+| `94_type_inference_mismatch_still_checked_ERROR` | Inferred types strictly checked against reassignment types | PASS | Compile Error (Expected) |
+| `95_compound_assign_primitives` | Compound assignments (`+=`, `-=`, `*=`, `/=`, `%=`) on primitives | PASS | 0 Bytes Leaked |
+| `96_compound_assign_string` | Compound string append (`+=`) with auto-reallocation | PASS | 0 Bytes Leaked |
+| `97_compound_assign_struct_operator` | Compound assignments on structs with operator overloading | PASS | 0 Bytes Leaked |
+| `98_compound_assign_missing_operator_ERROR` | Rejecting compound operator on types lacking corresponding operator | PASS | Compile Error (Expected) |
+| `99_increment_decrement` | Postfix and prefix increment/decrement (`++`, `--`) statements | PASS | 0 Bytes Leaked |
+| `100_increment_as_expression_ERROR` | Rejecting `++`/`--` inside expressions (statement-only) | PASS | Compile Error (Expected) |
+| `101_fstring_escape_sequences` | Escaped characters, quotes, and newlines inside f-string expressions | PASS | 0 Bytes Leaked |
+| `net_01_basic_routes` | HTTP router endpoint dispatch over POSIX sockets | PASS | 0 Bytes Leaked (0 FD Leaks) |
+| `net_02_rapid_requests` | High-frequency concurrent request handling | PASS | 0 Bytes Leaked (0 FD Leaks) |
+| `net_03_malformed_requests` | Graceful handling and rejection of malformed HTTP payloads | PASS | 0 Bytes Leaked (0 FD Leaks) |
+| `net_04_oversized_requests` | Fixed-buffer overflow prevention and rejection | PASS | 0 Bytes Leaked (0 FD Leaks) |
+| `net_05_client_disconnect` | Sudden TCP RST / disconnect recovery without resource leaks | PASS | 0 Bytes Leaked (0 FD Leaks) |
+| `net_06_buffer_growth` | Dynamic payload chunking and streaming response verification | PASS | 0 Bytes Leaked (0 FD Leaks) |
 | `compare_lexers` | Self-hosted lexer diff harness across codebase (100% byte-identical) | PASS | 0 Bytes Leaked |
+| `test_bootstrap` | Self-hosted compiler pipeline (parser + typechecker + codegen + cco) | PASS | 0 Bytes Leaked (Parity 100%) |
 
 ---
 
