@@ -1,0 +1,29 @@
+import "lexer_core.cco";
+import "parser_core.cco";
+import "typechecker_core.cco";
+import "codegen_core.cco";
+
+fn get_arg_or_default(a: &string[], idx: int, def_val: string) -> string {
+    if (len(a) > idx) {
+        return concat(a[idx], "");
+    }
+    return concat(def_val, "");
+}
+
+fn main() -> int {
+    let a: string[] = args();
+    let filename: string = get_arg_or_default(&a, 0, "target.cco");
+    let source: string = read_file(filename);
+    let tokens: Token[] = lex(source);
+    let prog: Program = parse_program(tokens);
+    let errs: int = typecheck_program(&prog);
+    if (errs != 0) {
+        print("Typecheck errors encountered.");
+        return errs;
+    }
+    let c_code: string = codegen_program(&prog);
+    let out_file: string = get_arg_or_default(&a, 1, "build/bootstrap_target.c");
+    write_file(out_file, c_code);
+    print("Self-hosted C11 codegen succeeded.");
+    return 0;
+}

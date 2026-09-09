@@ -1,0 +1,67 @@
+// std/net.cco — Standard Library Network & Socket Primitives
+
+class TcpServer {
+    fd: int;
+    port: int;
+
+    fn accept(self) -> int {
+        return net_accept(self.fd);
+    }
+
+    fn close(self) -> void {
+        net_close(self.fd);
+    }
+}
+
+class TcpClient {
+    fd: int;
+
+    fn send(self, msg: string) -> int {
+        return net_send(self.fd, msg);
+    }
+
+    fn recv(self) -> string {
+        return net_recv(self.fd, 0);
+    }
+
+    fn recv_buf(self, buf_size: int) -> string {
+        return net_recv(self.fd, buf_size);
+    }
+
+    fn close(self) -> void {
+        net_close(self.fd);
+    }
+}
+
+fn tcp_listen(port: int) -> int {
+    return net_listen(port);
+}
+
+fn tcp_accept(fd: int) -> int {
+    return net_accept(fd);
+}
+
+fn tcp_recv(fd: int, buf_size: int) -> string {
+    return net_recv(fd, buf_size);
+}
+
+fn tcp_send(fd: int, msg: string) -> int {
+    return net_send(fd, msg);
+}
+
+fn tcp_close(fd: int) -> void {
+    net_close(fd);
+}
+
+fn sleep_millis(ms: int) -> void {
+    sleep_ms(ms);
+}
+
+fn create_server(port: int) -> TcpServer {
+    let fd: int = net_listen(port);
+    return TcpServer { fd: fd, port: port };
+}
+
+fn create_client(fd: int) -> TcpClient {
+    return TcpClient { fd: fd };
+}

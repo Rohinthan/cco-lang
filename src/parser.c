@@ -1220,6 +1220,7 @@ static AstNode *parse_class(Parser *p) {
             Type *param_types = NULL;
             char **param_class_names = NULL;
             bool *param_is_borrowed = NULL;
+            bool *param_is_array = NULL;
             int *param_lines = NULL;
             int *param_cols = NULL;
             int param_count = 0;
@@ -1235,7 +1236,8 @@ static AstNode *parse_class(Parser *p) {
                     param_types = (Type *)arena_alloc_array(p->arena, param_cap, sizeof(Type));
                     param_class_names = (char **)arena_alloc_array(p->arena, param_cap, sizeof(char *));
                     param_is_borrowed = (bool *)arena_alloc_array(p->arena, param_cap, sizeof(bool));
-                    bool *param_is_array = (bool *)arena_alloc_array(p->arena, param_cap, sizeof(bool));
+                    param_is_array = (bool *)arena_alloc_array(p->arena, param_cap, sizeof(bool));
+
                     param_lines = (int *)arena_alloc_array(p->arena, param_cap, sizeof(int));
                     param_cols = (int *)arena_alloc_array(p->arena, param_cap, sizeof(int));
 
@@ -1292,8 +1294,8 @@ static AstNode *parse_class(Parser *p) {
                         } while (match(p, TOKEN_COMMA));
                     }
                 } else {
-                    bool *param_is_array = NULL;
                     do {
+
                         Token p_name = consume(p, TOKEN_IDENT, "Expected parameter name");
                         consume(p, TOKEN_COLON, "Expected ':' after parameter name");
                         char *p_cls = NULL;
@@ -1353,6 +1355,9 @@ static AstNode *parse_class(Parser *p) {
             m_node->as.method.has_self = has_self;
             m_node->as.method.param_names = param_names;
             m_node->as.method.param_types = param_types;
+            m_node->as.method.param_is_array = param_is_array;
+            m_node->as.method.param_is_map = NULL;
+            m_node->as.method.param_key_types = NULL;
             m_node->as.method.param_class_names = param_class_names;
             m_node->as.method.param_is_borrowed = param_is_borrowed;
             m_node->as.method.param_lines = param_lines;
@@ -1364,6 +1369,7 @@ static AstNode *parse_class(Parser *p) {
             m_node->as.method.return_key_type = ret_key_t;
             m_node->as.method.return_class_name = ret_cls;
             m_node->as.method.body = body;
+
 
             if (method_count >= method_cap) {
                 method_cap = method_cap == 0 ? 4 : method_cap * 2;
@@ -1882,15 +1888,55 @@ static AstNode *parse_impl(Parser *p) {
     return impl_node;
 }
 
+static bool is_module_path_token(TokenType type) {
+    return type == TOKEN_IDENT || (type >= TOKEN_FN && type <= TOKEN_FALSE);
+}
+
 static AstNode *parse_import_stmt(Parser *p) {
     Token tok = consume(p, TOKEN_IMPORT, "Expected 'import'");
-    Token path_tok = consume(p, TOKEN_STRING_LIT, "Expected string literal path after 'import'");
+    char path_buf[512] = {0};
+    if (check(p, TOKEN_STRING_LIT)) {
+        Token path_tok = advance(p);
+        strncpy(path_buf, path_tok.lexeme, sizeof(path_buf) - 1);
+    } else if (is_module_path_token(peek(p).type)) {
+        Token ident = advance(p);
+        strncpy(path_buf, ident.lexeme, sizeof(path_buf) - 1);
+        while (check(p, TOKEN_COLON)) {
+            advance(p); // first ':'
+            if (check(p, TOKEN_COLON)) {
+                advance(p); // second ':'
+            }
+            if (is_module_path_token(peek(p).type)) {
+                Token seg = advance(p);
+                strncat(path_buf, "/", sizeof(path_buf) - strlen(path_buf) - 1);
+                strncat(path_buf, seg.lexeme, sizeof(path_buf) - strlen(path_buf) - 1);
+            }
+        }
+        if (!strstr(path_buf, ".cco")) {
+            strncat(path_buf, ".cco", sizeof(path_buf) - strlen(path_buf) - 1);
+        }
+    } else {
+        fatal_parser_error(peek(p).line, peek(p).col, peek(p).lexeme, "Expected module path (e.g. std::net or \"std/net.cco\") after 'import'");
+    }
+
+    char *colon_colon = strstr(path_buf, "::");
+    while (colon_colon) {
+        *colon_colon = '/';
+        memmove(colon_colon + 1, colon_colon + 2, strlen(colon_colon + 2) + 1);
+        colon_colon = strstr(path_buf, "::");
+    }
+    if (strncmp(path_buf, "std/", 4) == 0 && !strstr(path_buf, ".cco")) {
+        strncat(path_buf, ".cco", sizeof(path_buf) - strlen(path_buf) - 1);
+    }
+
     consume(p, TOKEN_SEMICOLON, "Expected ';' after import statement");
 
     AstNode *node = arena_alloc_node(p->arena, NODE_IMPORT, tok.line, tok.col);
-    node->as.import_stmt.path = arena_strdup(p->arena, path_tok.lexeme);
+    node->as.import_stmt.path = arena_strdup(p->arena, path_buf);
     return node;
 }
+
+
 
 static AstNode *clone_target_node(AstArena *arena, AstNode *target) {
     if (!target) return NULL;

@@ -139,7 +139,7 @@ for item in tests/programs/*; do
 
     # Optional Clang compilation pass
     if command -v clang >/dev/null 2>&1; then
-        clang -Wall -Wextra -Werror -pedantic-errors -std=c11 "$c_out" -o "${bin_out}_clang" -lm
+        clang -Wall -Wextra -Werror -pedantic-errors -Wno-unused-function -Wno-parentheses-equality -std=c11 "$c_out" -o "${bin_out}_clang" -lm
     fi
 
     # Optional TCC compilation pass

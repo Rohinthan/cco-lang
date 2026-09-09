@@ -1,0 +1,122 @@
+import "lexer_core.cco";
+import "parser_core.cco";
+import "typechecker_core.cco";
+import "codegen_core.cco";
+
+// cco.cco — Self-Hosted Compiler Binary Driver in pure Cco
+
+fn starts_with_hyphen(s: string) -> bool {
+    if (len(s) > 0) {
+        if (char_at(s, 0) == '-') {
+            return true;
+        }
+    }
+    return false;
+}
+
+fn get_arg(argv: &string[], idx: int) -> string {
+    if (idx < len(argv)) {
+        return concat(argv[idx], "");
+    }
+    return concat("", "");
+}
+
+fn has_flag(argv: &string[], flag: string) -> bool {
+    let argc: int = len(argv);
+    let i: int = 0;
+    while (i < argc) {
+        let arg: string = get_arg(argv, i);
+        if (equals(arg, flag)) {
+            return true;
+        }
+        i = i + 1;
+    }
+    return false;
+}
+
+fn parse_output_arg(argv: &string[]) -> string {
+    let argc: int = len(argv);
+    let i: int = 0;
+    while (i < argc) {
+        let arg: string = get_arg(argv, i);
+        if (equals(arg, "-o")) {
+            if (i + 1 < argc) {
+                return get_arg(argv, i + 1);
+            }
+        }
+        i = i + 1;
+    }
+    return concat("build/output.c", "");
+}
+
+fn parse_input_arg(argv: &string[]) -> string {
+    let argc: int = len(argv);
+    let i: int = 0;
+    while (i < argc) {
+        let arg: string = get_arg(argv, i);
+        if (equals(arg, "-o")) {
+            i = i + 1;
+        } else if (!starts_with_hyphen(arg)) {
+            return concat(arg, "");
+        }
+        i = i + 1;
+    }
+    return concat("", "");
+}
+
+fn print_usage() -> void {
+    print("Usage: cco <source.cco> [-o output.c] [--emit-c] [--dump-tokens]");
+}
+
+fn main() -> int {
+    let argv: string[] = args();
+    let argc: int = len(argv);
+
+    if (argc < 1) {
+        print_usage();
+        return 1;
+    }
+
+    if (has_flag(&argv, "--help") || has_flag(&argv, "-h")) {
+        print_usage();
+        return 0;
+    }
+
+    let input_path: string = parse_input_arg(&argv);
+    if (len(input_path) == 0) {
+        print("Error: No input file specified");
+        print_usage();
+        return 1;
+    }
+
+    let output_path: string = parse_output_arg(&argv);
+    let emit_c: bool = has_flag(&argv, "--emit-c");
+    let dump_tokens: bool = has_flag(&argv, "--dump-tokens");
+
+    let source: string = read_file(input_path);
+    let tokens: Token[] = lex(source);
+
+    if (dump_tokens) {
+        for t in tokens {
+            print_token(t);
+        }
+        return 0;
+    }
+
+    let prog: Program = parse_program(tokens);
+    let errs: int = typecheck_program(&prog);
+    if (errs != 0) {
+        print("Typecheck errors encountered.");
+        return errs;
+    }
+
+    let c_code: string = codegen_program(&prog);
+
+    if (emit_c) {
+        print(c_code);
+    }
+
+    write_file(output_path, c_code);
+    print("Compilation succeeded.");
+    return 0;
+}

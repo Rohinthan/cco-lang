@@ -1,0 +1,1297 @@
+// codegen_core.cco - Standard ISO C11 Code Generator for Self-Hosted Cco Compiler
+import "ast.cco";
+import "typechecker_core.cco";
+
+fn has_suffix_arr(s: string) -> bool {
+    let n: int = len(s);
+    if (n < 2) { return false; }
+    return char_at(s, n - 2) == '[' && char_at(s, n - 1) == ']';
+}
+
+fn has_prefix_borrow(s: string) -> bool {
+    let n: int = len(s);
+    if (n < 1) { return false; }
+    return char_at(s, 0) == '&';
+}
+
+class Usage {
+    has_concat: bool;
+    has_char_at: bool;
+    has_substring: bool;
+    has_read_file: bool;
+    has_write_file: bool;
+    has_read_line: bool;
+    has_to_int: bool;
+    has_to_float: bool;
+    has_is_int: bool;
+    has_is_float: bool;
+    has_math: bool;
+    has_array: bool;
+    has_args: bool;
+}
+
+fn make_usage() -> Usage {
+    return Usage {
+        has_concat: false,
+        has_char_at: false,
+        has_substring: false,
+        has_read_file: false,
+        has_write_file: false,
+        has_read_line: false,
+        has_to_int: false,
+        has_to_float: false,
+        has_is_int: false,
+        has_is_float: false,
+        has_math: false,
+        has_array: false,
+        has_args: false,
+    };
+}
+
+fn scan_expr_usage(u: &Usage, e: &Expr) -> void {
+    if (e.kind == 7) {
+        if (equals(e.op, "+")) {
+            u.has_concat = true;
+        }
+    }
+    if (e.kind == 9) {
+        if (equals(e.callee, "concat")) { u.has_concat = true; }
+        if (equals(e.callee, "char_at")) { u.has_char_at = true; }
+        if (equals(e.callee, "substring")) { u.has_substring = true; }
+        if (equals(e.callee, "read_file")) { u.has_read_file = true; }
+        if (equals(e.callee, "write_file")) { u.has_write_file = true; }
+        if (equals(e.callee, "read_line")) { u.has_read_line = true; }
+        if (equals(e.callee, "to_int")) { u.has_to_int = true; }
+        if (equals(e.callee, "to_float")) { u.has_to_float = true; }
+        if (equals(e.callee, "is_int")) { u.has_is_int = true; }
+        if (equals(e.callee, "is_float")) { u.has_is_float = true; }
+        if (equals(e.callee, "args")) { u.has_args = true; }
+        if (equals(e.callee, "sqrt") || equals(e.callee, "exp") || equals(e.callee, "log") || equals(e.callee, "sin") || equals(e.callee, "cos") || equals(e.callee, "tan") || equals(e.callee, "pow") || equals(e.callee, "floor") || equals(e.callee, "ceil")) {
+            u.has_math = true;
+        }
+        if (equals(e.callee, "len") || equals(e.callee, "push") || equals(e.callee, "pop")) {
+            u.has_array = true;
+        }
+    }
+    if (e.kind == 11 || e.kind == 13 || e.kind == 14) {
+        u.has_array = true;
+    }
+
+    for (let i: int = 0; i < len(e.children); i++) {
+        scan_expr_usage(u, e.children[i]);
+    }
+    for (let i: int = 0; i < len(e.args); i++) {
+        scan_expr_usage(u, e.args[i]);
+    }
+    for (let i: int = 0; i < len(e.field_values); i++) {
+        scan_expr_usage(u, e.field_values[i]);
+    }
+}
+
+fn scan_stmt_usage(u: &Usage, s: &Stmt) -> void {
+    if (s.kind == 1) {
+        if (has_suffix_arr(s.var_type)) {
+            u.has_array = true;
+        }
+    }
+    for (let i: int = 0; i < len(s.expr); i++) {
+        scan_expr_usage(u, s.expr[i]);
+    }
+    for (let i: int = 0; i < len(s.init_expr); i++) {
+        scan_expr_usage(u, s.init_expr[i]);
+    }
+    for (let i: int = 0; i < len(s.cond_expr); i++) {
+        scan_expr_usage(u, s.cond_expr[i]);
+    }
+    for (let i: int = 0; i < len(s.target_expr); i++) {
+        scan_expr_usage(u, s.target_expr[i]);
+    }
+    for (let i: int = 0; i < len(s.step_stmt); i++) {
+        scan_stmt_usage(u, s.step_stmt[i]);
+    }
+    for (let i: int = 0; i < len(s.then_block); i++) {
+        scan_stmt_usage(u, s.then_block[i]);
+    }
+    for (let i: int = 0; i < len(s.else_block); i++) {
+        scan_stmt_usage(u, s.else_block[i]);
+    }
+    for (let i: int = 0; i < len(s.body); i++) {
+        scan_stmt_usage(u, s.body[i]);
+    }
+}
+
+fn scan_program_usage(u: &Usage, p: &Program) -> void {
+    for (let i: int = 0; i < len(p.functions); i++) {
+        for (let j: int = 0; j < len(p.functions[i].body); j++) {
+            scan_stmt_usage(u, p.functions[i].body[j]);
+        }
+    }
+    for (let c: int = 0; c < len(p.classes); c++) {
+        for (let m: int = 0; m < len(p.classes[c].methods); m++) {
+            for (let j: int = 0; j < len(p.classes[c].methods[m].body); j++) {
+                scan_stmt_usage(u, p.classes[c].methods[m].body[j]);
+            }
+        }
+    }
+}
+
+fn gen_c_type(p: &Program, t: string) -> string {
+    if (has_suffix_arr(t)) {
+        let elem: string = substring(t, 0, len(t) - 2);
+        if (is_class_type(p, elem) || is_enum_type(p, elem)) {
+            let res: string = concat(elem, " **");
+            return res;
+        }
+        if (is_struct_type(p, elem)) {
+            let res: string = concat(elem, " *");
+            return res;
+        }
+        if (equals(elem, "string")) {
+            return "char **";
+        }
+        if (equals(elem, "int")) {
+            return "int *";
+        }
+        if (equals(elem, "float")) {
+            return "double *";
+        }
+        if (equals(elem, "bool")) {
+            return "bool *";
+        }
+        if (equals(elem, "char")) {
+            return "char *";
+        }
+        return "void *";
+    }
+    if (has_prefix_borrow(t)) {
+        let base: string = substring(t, 1, len(t));
+        if (is_class_type(p, base) || is_enum_type(p, base)) {
+            let res: string = concat(base, " *");
+            return res;
+        }
+        if (is_struct_type(p, base)) {
+            let res: string = concat(base, " *");
+            return res;
+        }
+        let base_ct: string = gen_c_type(p, base);
+        let res: string = concat(base_ct, " *");
+        return res;
+    }
+    if (is_class_type(p, t)) {
+        let res: string = concat(t, " *");
+        return res;
+    }
+    if (is_enum_type(p, t)) {
+        let res: string = concat(t, " *");
+        return res;
+    }
+    if (is_struct_type(p, t)) {
+        return concat(t, "");
+    }
+    if (equals(t, "int")) {
+        return "int";
+    }
+    if (equals(t, "float")) {
+        return "double";
+    }
+    if (equals(t, "bool")) {
+        return "bool";
+    }
+    if (equals(t, "char")) {
+        return "char";
+    }
+    if (equals(t, "string")) {
+        return "char *";
+    }
+    if (equals(t, "void")) {
+        return "void";
+    }
+    return "int";
+}
+
+fn gen_indent(level: int) -> string {
+    let out: string = "";
+    for (let i: int = 0; i < level; i++) {
+        out = concat(out, "    ");
+    }
+    return out;
+}
+
+fn escape_c_string(s: string) -> string {
+    let q: string = char_to_str('\"');
+    let bs: string = char_to_str('\\');
+    let esc_q: string = concat(bs, q);
+    let esc_bs: string = concat(bs, bs);
+    let esc_n: string = concat(bs, "n");
+    let esc_t: string = concat(bs, "t");
+    let esc_r: string = concat(bs, "r");
+
+    let out: string = "";
+    for (let i: int = 0; i < len(s); i++) {
+        let c: char = char_at(s, i);
+        if (c == '\"') {
+            out = concat(out, esc_q);
+        } else if (c == '\\') {
+            out = concat(out, esc_bs);
+        } else if (c == '\n') {
+            out = concat(out, esc_n);
+        } else if (c == '\t') {
+            out = concat(out, esc_t);
+        } else if (c == '\r') {
+            out = concat(out, esc_r);
+        } else {
+            let sub: string = substring(s, i, i + 1);
+            out = concat(out, sub);
+        }
+    }
+    return out;
+}
+
+fn gen_struct_def(p: &Program, s: &StructDecl) -> string {
+    let out: string = "typedef struct {\n";
+    for (let i: int = 0; i < len(s.fields); i++) {
+        out = concat(out, "    ");
+        let ft: string = gen_c_type(p, s.fields[i].type_name);
+        out = concat(out, ft);
+        out = concat(out, " ");
+        out = concat(out, s.fields[i].name);
+        out = concat(out, ";\n");
+    }
+    out = concat(out, "} ");
+    out = concat(out, s.name);
+    out = concat(out, ";\n\n");
+    return out;
+}
+
+fn gen_class_def(p: &Program, c: &ClassDecl) -> string {
+    let out: string = "typedef struct ";
+    out = concat(out, c.name);
+    out = concat(out, " ");
+    out = concat(out, c.name);
+    out = concat(out, ";\n\nstruct ");
+    out = concat(out, c.name);
+    out = concat(out, " {\n");
+    for (let i: int = 0; i < len(c.fields); i++) {
+        out = concat(out, "    ");
+        let ft: string = gen_c_type(p, c.fields[i].type_name);
+        out = concat(out, ft);
+        out = concat(out, " ");
+        out = concat(out, c.fields[i].name);
+        out = concat(out, ";\n");
+    }
+    out = concat(out, "};\n\n");
+
+    // Destructor: Class_free
+    out = concat(out, "static inline void ");
+    out = concat(out, c.name);
+    out = concat(out, "_free(");
+    out = concat(out, c.name);
+    out = concat(out, " *p) {\n    if (p) {\n");
+    for (let i: int = 0; i < len(c.fields); i++) {
+        if (equals(c.fields[i].type_name, "string")) {
+            out = concat(out, "        if (p->");
+            out = concat(out, c.fields[i].name);
+            out = concat(out, ") free(p->");
+            out = concat(out, c.fields[i].name);
+            out = concat(out, ");\n");
+        } else if (is_class_type(p, c.fields[i].type_name) || is_enum_type(p, c.fields[i].type_name)) {
+            out = concat(out, "        if (p->");
+            out = concat(out, c.fields[i].name);
+            out = concat(out, ") ");
+            out = concat(out, c.fields[i].type_name);
+            out = concat(out, "_free(p->");
+            out = concat(out, c.fields[i].name);
+            out = concat(out, ");\n");
+        }
+    }
+    out = concat(out, "        free(p);\n    }\n}\n\n");
+
+    // Constructor: Class_new
+    out = concat(out, "static inline ");
+    out = concat(out, c.name);
+    out = concat(out, " *");
+    out = concat(out, c.name);
+    out = concat(out, "_new(");
+    if (len(c.fields) == 0) {
+        out = concat(out, "void");
+    } else {
+        for (let i: int = 0; i < len(c.fields); i++) {
+            if (i > 0) { out = concat(out, ", "); }
+            let ft: string = gen_c_type(p, c.fields[i].type_name);
+            out = concat(out, ft);
+            out = concat(out, " ");
+            out = concat(out, c.fields[i].name);
+        }
+    }
+    out = concat(out, ") {\n    ");
+    out = concat(out, c.name);
+    out = concat(out, " *__obj = (");
+    out = concat(out, c.name);
+    out = concat(out, " *)malloc(sizeof(");
+    out = concat(out, c.name);
+    out = concat(out, "));\n");
+    for (let i: int = 0; i < len(c.fields); i++) {
+        out = concat(out, "    __obj->");
+        out = concat(out, c.fields[i].name);
+        out = concat(out, " = ");
+        out = concat(out, c.fields[i].name);
+        out = concat(out, ";\n");
+    }
+    out = concat(out, "    return __obj;\n}\n\n");
+
+    return out;
+}
+
+fn gen_enum_def(p: &Program, e: &EnumDecl) -> string {
+    let out: string = "typedef enum {\n";
+    for (let i: int = 0; i < len(e.variants); i++) {
+        if (i > 0) { out = concat(out, ",\n"); }
+        out = concat(out, "    ");
+        out = concat(out, e.name);
+        out = concat(out, "_TAG_");
+        out = concat(out, e.variants[i].name);
+    }
+    out = concat(out, "\n} __cco_");
+    out = concat(out, e.name);
+    out = concat(out, "_tag;\n\ntypedef struct ");
+    out = concat(out, e.name);
+    out = concat(out, " ");
+    out = concat(out, e.name);
+    out = concat(out, ";\n\nstruct ");
+    out = concat(out, e.name);
+    out = concat(out, " {\n    __cco_");
+    out = concat(out, e.name);
+    out = concat(out, "_tag tag;\n    union {\n        int _dummy;\n");
+    for (let i: int = 0; i < len(e.variants); i++) {
+        if (len(e.variants[i].fields) > 0) {
+            out = concat(out, "        struct {\n");
+            for (let f: int = 0; f < len(e.variants[i].fields); f++) {
+                out = concat(out, "            ");
+                let ft: string = gen_c_type(p, e.variants[i].fields[f].type_name);
+                out = concat(out, ft);
+                out = concat(out, " ");
+                out = concat(out, e.variants[i].fields[f].name);
+                out = concat(out, ";\n");
+            }
+            out = concat(out, "        } ");
+            out = concat(out, e.variants[i].name);
+            out = concat(out, ";\n");
+        }
+    }
+    out = concat(out, "    } as;\n};\n\nstatic inline void ");
+    out = concat(out, e.name);
+    out = concat(out, "_free(");
+    out = concat(out, e.name);
+    out = concat(out, " *p) {\n    if (!p) return;\n    switch (p->tag) {\n");
+    for (let i: int = 0; i < len(e.variants); i++) {
+        out = concat(out, "        case ");
+        out = concat(out, e.name);
+        out = concat(out, "_TAG_");
+        out = concat(out, e.variants[i].name);
+        out = concat(out, ":\n");
+        for (let f: int = 0; f < len(e.variants[i].fields); f++) {
+            if (equals(e.variants[i].fields[f].type_name, "string")) {
+                out = concat(out, "            if (p->as.");
+                out = concat(out, e.variants[i].name);
+                out = concat(out, ".");
+                out = concat(out, e.variants[i].fields[f].name);
+                out = concat(out, ") free(p->as.");
+                out = concat(out, e.variants[i].name);
+                out = concat(out, ".");
+                out = concat(out, e.variants[i].fields[f].name);
+                out = concat(out, ");\n");
+            } else if (is_class_type(p, e.variants[i].fields[f].type_name) || is_enum_type(p, e.variants[i].fields[f].type_name)) {
+                out = concat(out, "            if (p->as.");
+                out = concat(out, e.variants[i].name);
+                out = concat(out, ".");
+                out = concat(out, e.variants[i].fields[f].name);
+                out = concat(out, ") ");
+                out = concat(out, e.variants[i].fields[f].type_name);
+                out = concat(out, "_free(p->as.");
+                out = concat(out, e.variants[i].name);
+                out = concat(out, ".");
+                out = concat(out, e.variants[i].fields[f].name);
+                out = concat(out, ");\n");
+            }
+        }
+        out = concat(out, "            break;\n");
+    }
+    out = concat(out, "    }\n    free(p);\n}\n\n");
+
+    for (let i: int = 0; i < len(e.variants); i++) {
+        out = concat(out, "static inline ");
+        out = concat(out, e.name);
+        out = concat(out, " *");
+        out = concat(out, e.name);
+        out = concat(out, "_new_");
+        out = concat(out, e.variants[i].name);
+        out = concat(out, "(");
+        if (len(e.variants[i].fields) == 0) {
+            out = concat(out, "void");
+        } else {
+            for (let f: int = 0; f < len(e.variants[i].fields); f++) {
+                if (f > 0) { out = concat(out, ", "); }
+                let ft: string = gen_c_type(p, e.variants[i].fields[f].type_name);
+                out = concat(out, ft);
+                out = concat(out, " ");
+                out = concat(out, e.variants[i].fields[f].name);
+            }
+        }
+        out = concat(out, ") {\n    ");
+        out = concat(out, e.name);
+        out = concat(out, " *p = (");
+        out = concat(out, e.name);
+        out = concat(out, " *)malloc(sizeof(");
+        out = concat(out, e.name);
+        out = concat(out, "));\n    p->tag = ");
+        out = concat(out, e.name);
+        out = concat(out, "_TAG_");
+        out = concat(out, e.variants[i].name);
+        out = concat(out, ";\n");
+        for (let f: int = 0; f < len(e.variants[i].fields); f++) {
+            out = concat(out, "    p->as.");
+            out = concat(out, e.variants[i].name);
+            out = concat(out, ".");
+            out = concat(out, e.variants[i].fields[f].name);
+            out = concat(out, " = ");
+            out = concat(out, e.variants[i].fields[f].name);
+            out = concat(out, ";\n");
+        }
+        out = concat(out, "    return p;\n}\n\n");
+    }
+
+    return out;
+}
+
+fn gen_expr(p: &Program, st: &SymTab, e: &Expr) -> string {
+    // 1: EXPR_INT
+    if (e.kind == 1) {
+        return int_to_str(e.int_val);
+    }
+    // 2: EXPR_FLOAT
+    if (e.kind == 2) {
+        return "0.0";
+    }
+    // 3: EXPR_STRING
+    if (e.kind == 3) {
+        let q: string = char_to_str('\"');
+        let s_esc: string = escape_c_string(e.str_val);
+        let res: string = concat(q, s_esc);
+        res = concat(res, q);
+        return res;
+    }
+    // 4: EXPR_BOOL
+    if (e.kind == 4) {
+        if (e.bool_val) { return "true"; }
+        return "false";
+    }
+    // 5: EXPR_CHAR
+    if (e.kind == 5) {
+        let ch_s: string = char_to_str(e.char_val);
+        let res: string = concat("'", ch_s);
+        res = concat(res, "'");
+        return res;
+    }
+    // 6: EXPR_IDENT
+    if (e.kind == 6) {
+        return concat(e.callee, "");
+    }
+    // 7: EXPR_BINARY
+    if (e.kind == 7) {
+        if (len(e.children) >= 2) {
+            let left_s: string = gen_expr(p, st, e.children[0]);
+            let right_s: string = gen_expr(p, st, e.children[1]);
+            let lt: string = infer_expr_type(p, st, e.children[0]);
+            if (equals(e.op, "+") && equals(lt, "string")) {
+                let res: string = concat("__cco_concat(", left_s);
+                res = concat(res, ", ");
+                res = concat(res, right_s);
+                res = concat(res, ")");
+                return res;
+            }
+            let res: string = concat("(", left_s);
+            res = concat(res, " ");
+            res = concat(res, e.op);
+            res = concat(res, " ");
+            res = concat(res, right_s);
+            res = concat(res, ")");
+            return res;
+        }
+        return "0";
+    }
+    // 8: EXPR_UNARY
+    if (e.kind == 8) {
+        if (len(e.children) > 0) {
+            let child_s: string = gen_expr(p, st, e.children[0]);
+            let res: string = concat("(", e.op);
+            res = concat(res, child_s);
+            res = concat(res, ")");
+            return res;
+        }
+        return "0";
+    }
+    // 9: EXPR_CALL
+    if (e.kind == 9) {
+        if (equals(e.callee, "concat") && len(e.args) >= 2) {
+            let a0: string = gen_expr(p, st, e.args[0]);
+            let a1: string = gen_expr(p, st, e.args[1]);
+            let res: string = concat("__cco_concat(", a0);
+            res = concat(res, ", ");
+            res = concat(res, a1);
+            res = concat(res, ")");
+            return res;
+        }
+        if (equals(e.callee, "char_at") && len(e.args) >= 2) {
+            let a0: string = gen_expr(p, st, e.args[0]);
+            let a1: string = gen_expr(p, st, e.args[1]);
+            let res: string = concat("__cco_char_at(", a0);
+            res = concat(res, ", ");
+            res = concat(res, a1);
+            res = concat(res, ")");
+            return res;
+        }
+        if (equals(e.callee, "substring") && len(e.args) >= 3) {
+            let a0: string = gen_expr(p, st, e.args[0]);
+            let a1: string = gen_expr(p, st, e.args[1]);
+            let a2: string = gen_expr(p, st, e.args[2]);
+            let res: string = concat("__cco_substring(", a0);
+            res = concat(res, ", ");
+            res = concat(res, a1);
+            res = concat(res, ", ");
+            res = concat(res, a2);
+            res = concat(res, ")");
+            return res;
+        }
+        if (equals(e.callee, "read_file") && len(e.args) >= 1) {
+            let a0: string = gen_expr(p, st, e.args[0]);
+            let res: string = concat("__cco_read_file(", a0);
+            res = concat(res, ")");
+            return res;
+        }
+        if (equals(e.callee, "write_file") && len(e.args) >= 2) {
+            let a0: string = gen_expr(p, st, e.args[0]);
+            let a1: string = gen_expr(p, st, e.args[1]);
+            let res: string = concat("__cco_write_file(", a0);
+            res = concat(res, ", ");
+            res = concat(res, a1);
+            res = concat(res, ")");
+            return res;
+        }
+        if (equals(e.callee, "len") && len(e.args) >= 1) {
+            let a0: string = gen_expr(p, st, e.args[0]);
+            let res: string = concat("((int)__cco_arr_len_raw(", a0);
+            res = concat(res, "))");
+            return res;
+        }
+        if (equals(e.callee, "to_int") && len(e.args) >= 1) {
+            let a0: string = gen_expr(p, st, e.args[0]);
+            let res: string = concat("__cco_to_int(", a0);
+            res = concat(res, ")");
+            return res;
+        }
+        if (equals(e.callee, "to_float") && len(e.args) >= 1) {
+            let a0: string = gen_expr(p, st, e.args[0]);
+            let res: string = concat("__cco_to_float(", a0);
+            res = concat(res, ")");
+            return res;
+        }
+        if (equals(e.callee, "is_int") && len(e.args) >= 1) {
+            let a0: string = gen_expr(p, st, e.args[0]);
+            let res: string = concat("__cco_is_int(", a0);
+            res = concat(res, ")");
+            return res;
+        }
+        if (equals(e.callee, "is_float") && len(e.args) >= 1) {
+            let a0: string = gen_expr(p, st, e.args[0]);
+            let res: string = concat("__cco_is_float(", a0);
+            res = concat(res, ")");
+            return res;
+        }
+
+        // Method call: receiver in children[0]
+        if (len(e.children) > 0) {
+            let recv_t: string = infer_expr_type(p, st, e.children[0]);
+            let recv_s: string = gen_expr(p, st, e.children[0]);
+            let res: string = concat(recv_t, "_");
+            res = concat(res, e.callee);
+            res = concat(res, "(");
+            res = concat(res, recv_s);
+            for (let i: int = 0; i < len(e.args); i++) {
+                let a_s: string = gen_expr(p, st, e.args[i]);
+                res = concat(res, ", ");
+                res = concat(res, a_s);
+            }
+            res = concat(res, ")");
+            return res;
+        }
+
+        // Regular function call
+        let res: string = concat(e.callee, "(");
+        for (let i: int = 0; i < len(e.args); i++) {
+            if (i > 0) { res = concat(res, ", "); }
+            let a_s: string = gen_expr(p, st, e.args[i]);
+            res = concat(res, a_s);
+        }
+        res = concat(res, ")");
+        return res;
+    }
+    // 10: EXPR_MEMBER
+    if (e.kind == 10) {
+        if (len(e.children) > 0) {
+            let obj_s: string = gen_expr(p, st, e.children[0]);
+            let obj_t: string = infer_expr_type(p, st, e.children[0]);
+            if (is_struct_type(p, obj_t)) {
+                let res: string = concat(obj_s, ".");
+                res = concat(res, e.callee);
+                return res;
+            } else {
+                let res: string = concat(obj_s, "->");
+                res = concat(res, e.callee);
+                return res;
+            }
+        }
+        return concat(e.callee, "");
+    }
+    // 11: EXPR_INDEX
+    if (e.kind == 11) {
+        if (len(e.children) >= 2) {
+            let obj_s: string = gen_expr(p, st, e.children[0]);
+            let idx_s: string = gen_expr(p, st, e.children[1]);
+            let res: string = concat(obj_s, "[");
+            res = concat(res, idx_s);
+            res = concat(res, "]");
+            return res;
+        }
+        return "0";
+    }
+    // 12: EXPR_NEW
+    if (e.kind == 12) {
+        if (is_struct_type(p, e.type_name)) {
+            let res: string = concat("(", e.type_name);
+            res = concat(res, "){ ");
+            for (let i: int = 0; i < len(e.field_values); i++) {
+                if (i > 0) { res = concat(res, ", "); }
+                res = concat(res, ".");
+                res = concat(res, e.field_names[i]);
+                res = concat(res, " = ");
+                let val_s: string = gen_expr(p, st, e.field_values[i]);
+                res = concat(res, val_s);
+            }
+            res = concat(res, " }");
+            return res;
+        }
+        if (is_class_type(p, e.type_name)) {
+            let res: string = concat(e.type_name, "_new(");
+            for (let i: int = 0; i < len(e.field_values); i++) {
+                if (i > 0) { res = concat(res, ", "); }
+                let val_s: string = gen_expr(p, st, e.field_values[i]);
+                res = concat(res, val_s);
+            }
+            res = concat(res, ")");
+            return res;
+        }
+        if (is_enum_type(p, e.type_name)) {
+            let res: string = concat(e.type_name, "_new_");
+            res = concat(res, e.callee);
+            res = concat(res, "(");
+            for (let i: int = 0; i < len(e.field_values); i++) {
+                if (i > 0) { res = concat(res, ", "); }
+                let val_s: string = gen_expr(p, st, e.field_values[i]);
+                res = concat(res, val_s);
+            }
+            res = concat(res, ")");
+            return res;
+        }
+        return "0";
+    }
+    // 13: EXPR_ALLOC
+    if (e.kind == 13) {
+        let elem_t: string = gen_c_type(p, e.type_name);
+        let count_s: string = "0";
+        if (len(e.children) > 0) {
+            count_s = gen_expr(p, st, e.children[0]);
+        }
+        let res: string = concat("((", elem_t);
+        res = concat(res, " *)__cco_alloc_arr(sizeof(");
+        res = concat(res, elem_t);
+        res = concat(res, "), ");
+        res = concat(res, count_s);
+        res = concat(res, "))");
+        return res;
+    }
+    // 14: EXPR_LIST_NEW
+    if (e.kind == 14) {
+        let arr_t: string = gen_c_type(p, concat(e.type_name, "[]"));
+        let elem_t: string = gen_c_type(p, e.type_name);
+        let res: string = concat("((", arr_t);
+        res = concat(res, ")__cco_list_new(sizeof(");
+        res = concat(res, elem_t);
+        res = concat(res, "))");
+        return res;
+    }
+
+    return "0";
+}
+
+fn gen_for_init(p: &Program, st: &SymTab, s: &Stmt) -> string {
+    if (s.kind == 1) {
+        let ct: string = gen_c_type(p, s.var_type);
+        let res: string = concat(ct, " ");
+        res = concat(res, s.var_name);
+        if (len(s.init_expr) > 0) {
+            let init_s: string = gen_expr(p, st, s.init_expr[0]);
+            res = concat(res, " = ");
+            res = concat(res, init_s);
+        }
+        symtab_add(st, s.var_name, s.var_type);
+        return res;
+    }
+    if (s.kind == 2) {
+        let val_s: string = gen_expr(p, st, s.expr[0]);
+        let res: string = concat(s.var_name, " = ");
+        res = concat(res, val_s);
+        return res;
+    }
+    return "";
+}
+
+fn gen_for_step(p: &Program, st: &SymTab, s: &Stmt) -> string {
+    if (s.kind == 4) {
+        let tgt: string = gen_expr(p, st, s.target_expr[0]);
+        if (equals(s.op, "++")) {
+            let res: string = concat(tgt, " = (");
+            res = concat(res, tgt);
+            res = concat(res, " + 1)");
+            return res;
+        } else {
+            let res: string = concat(tgt, " = (");
+            res = concat(res, tgt);
+            res = concat(res, " - 1)");
+            return res;
+        }
+    }
+    if (s.kind == 3) {
+        let tgt: string = gen_expr(p, st, s.target_expr[0]);
+        let val: string = gen_expr(p, st, s.expr[0]);
+        let op: string = substring(s.op, 0, 1);
+        let res: string = concat(tgt, " = (");
+        res = concat(res, tgt);
+        res = concat(res, " ");
+        res = concat(res, op);
+        res = concat(res, " ");
+        res = concat(res, val);
+        res = concat(res, ")");
+        return res;
+    }
+    if (s.kind == 2) {
+        let val_s: string = gen_expr(p, st, s.expr[0]);
+        let res: string = concat(s.var_name, " = ");
+        res = concat(res, val_s);
+        return res;
+    }
+    if (s.kind == 12) {
+        return gen_expr(p, st, s.expr[0]);
+    }
+    return "";
+}
+
+fn gen_stmt(p: &Program, st: &SymTab, s: &Stmt, indent: int, cv_names: &string[], cv_types: &string[], cv_count: &int[], is_main: bool) -> string {
+    let ind: string = gen_indent(indent);
+
+    // 1: STMT_LET
+    if (s.kind == 1) {
+        let ct: string = gen_c_type(p, s.var_type);
+        let out: string = concat(ind, ct);
+        out = concat(out, " ");
+        out = concat(out, s.var_name);
+        if (len(s.init_expr) > 0) {
+            let init_s: string = gen_expr(p, st, s.init_expr[0]);
+            out = concat(out, " = ");
+            out = concat(out, init_s);
+        }
+        out = concat(out, ";\n");
+        symtab_add(st, s.var_name, s.var_type);
+        if (is_class_type(p, s.var_type) || is_enum_type(p, s.var_type)) {
+            let idx: int = cv_count[0];
+            if (idx < 64) {
+                cv_names[idx] = concat(s.var_name, "");
+                cv_types[idx] = concat(s.var_type, "");
+                cv_count[0] = idx + 1;
+            }
+        }
+        return out;
+    }
+
+    // 2: STMT_ASSIGN
+    if (s.kind == 2) {
+        let val_s: string = gen_expr(p, st, s.expr[0]);
+        let out: string = concat(ind, s.var_name);
+        out = concat(out, " = ");
+        out = concat(out, val_s);
+        out = concat(out, ";\n");
+        return out;
+    }
+
+    // 3: STMT_COMPOUND_ASSIGN
+    if (s.kind == 3) {
+        let tgt: string = gen_expr(p, st, s.target_expr[0]);
+        let val: string = gen_expr(p, st, s.expr[0]);
+        let op: string = substring(s.op, 0, 1);
+        let out: string = concat(ind, tgt);
+        out = concat(out, " = (");
+        out = concat(out, tgt);
+        out = concat(out, " ");
+        out = concat(out, op);
+        out = concat(out, " ");
+        out = concat(out, val);
+        out = concat(out, ");\n");
+        return out;
+    }
+
+    // 4: STMT_INC_DEC
+    if (s.kind == 4) {
+        let tgt: string = gen_expr(p, st, s.target_expr[0]);
+        let op: string = substring(s.op, 0, 1);
+        let out: string = concat(ind, tgt);
+        out = concat(out, " = (");
+        out = concat(out, tgt);
+        out = concat(out, " ");
+        out = concat(out, op);
+        out = concat(out, " 1);\n");
+        return out;
+    }
+
+    // 5: STMT_IF
+    if (s.kind == 5) {
+        let cond_s: string = gen_expr(p, st, s.cond_expr[0]);
+        let out: string = concat(ind, "if (");
+        out = concat(out, cond_s);
+        out = concat(out, ") {\n");
+        symtab_push_scope(st);
+        for (let i: int = 0; i < len(s.then_block); i++) {
+            let st_s: string = gen_stmt(p, st, s.then_block[i], indent + 1, cv_names, cv_types, cv_count, is_main);
+            out = concat(out, st_s);
+        }
+        symtab_pop_scope(st);
+        if (len(s.else_block) > 0) {
+            out = concat(out, ind);
+            out = concat(out, "} else {\n");
+            symtab_push_scope(st);
+            for (let i: int = 0; i < len(s.else_block); i++) {
+                let st_s: string = gen_stmt(p, st, s.else_block[i], indent + 1, cv_names, cv_types, cv_count, is_main);
+                out = concat(out, st_s);
+            }
+            symtab_pop_scope(st);
+            out = concat(out, ind);
+            out = concat(out, "}\n");
+        } else {
+            out = concat(out, ind);
+            out = concat(out, "}\n");
+        }
+        return out;
+    }
+
+    // 6: STMT_WHILE
+    if (s.kind == 6) {
+        let cond_s: string = gen_expr(p, st, s.cond_expr[0]);
+        let out: string = concat(ind, "while (");
+        out = concat(out, cond_s);
+        out = concat(out, ") {\n");
+        symtab_push_scope(st);
+        for (let i: int = 0; i < len(s.body); i++) {
+            let st_s: string = gen_stmt(p, st, s.body[i], indent + 1, cv_names, cv_types, cv_count, is_main);
+            out = concat(out, st_s);
+        }
+        symtab_pop_scope(st);
+        out = concat(out, ind);
+        out = concat(out, "}\n");
+        return out;
+    }
+
+    // 7: STMT_FOR
+    if (s.kind == 7) {
+        symtab_push_scope(st);
+        let out: string = concat(ind, "for (");
+        if (len(s.then_block) > 0) {
+            let init_s: string = gen_for_init(p, st, s.then_block[0]);
+            out = concat(out, init_s);
+        }
+        out = concat(out, "; (");
+        if (len(s.cond_expr) > 0) {
+            let cond_s: string = gen_expr(p, st, s.cond_expr[0]);
+            out = concat(out, cond_s);
+        }
+        out = concat(out, "); ");
+        if (len(s.step_stmt) > 0) {
+            let step_s: string = gen_for_step(p, st, s.step_stmt[0]);
+            out = concat(out, step_s);
+        }
+        out = concat(out, ") {\n");
+        for (let i: int = 0; i < len(s.body); i++) {
+            let st_s: string = gen_stmt(p, st, s.body[i], indent + 1, cv_names, cv_types, cv_count, is_main);
+            out = concat(out, st_s);
+        }
+        symtab_pop_scope(st);
+        out = concat(out, ind);
+        out = concat(out, "}\n");
+        return out;
+    }
+
+    // 8: STMT_RETURN
+    if (s.kind == 8) {
+        if (is_main) {
+            let out: string = concat(ind, "int __cco_ret_val = ");
+            if (len(s.expr) > 0) {
+                let ret_val_s: string = gen_expr(p, st, s.expr[0]);
+                out = concat(out, ret_val_s);
+            } else {
+                out = concat(out, "0");
+            }
+            out = concat(out, ";\n");
+            for (let i: int = cv_count[0] - 1; i >= 0; i--) {
+                out = concat(out, ind);
+                out = concat(out, cv_types[i]);
+                out = concat(out, "_free(");
+                out = concat(out, cv_names[i]);
+                out = concat(out, ");\n");
+            }
+            out = concat(out, ind);
+            out = concat(out, "return __cco_ret_val;\n");
+            return out;
+        }
+
+        let out: string = "";
+        for (let i: int = cv_count[0] - 1; i >= 0; i--) {
+            out = concat(out, ind);
+            out = concat(out, cv_types[i]);
+            out = concat(out, "_free(");
+            out = concat(out, cv_names[i]);
+            out = concat(out, ");\n");
+        }
+        out = concat(out, ind);
+        if (len(s.expr) > 0) {
+            let val_s: string = gen_expr(p, st, s.expr[0]);
+            out = concat(out, "return ");
+            out = concat(out, val_s);
+            out = concat(out, ";\n");
+        } else {
+            out = concat(out, "return;\n");
+        }
+        return out;
+    }
+
+    // 9: STMT_BREAK
+    if (s.kind == 9) {
+        let out: string = concat(ind, "break;\n");
+        return out;
+    }
+
+    // 10: STMT_CONTINUE
+    if (s.kind == 10) {
+        let out: string = concat(ind, "continue;\n");
+        return out;
+    }
+
+    // 11: STMT_PRINT
+    if (s.kind == 11) {
+        let val_s: string = gen_expr(p, st, s.expr[0]);
+        let vt: string = infer_expr_type(p, st, s.expr[0]);
+        let q: string = char_to_str('\"');
+        let bs: string = char_to_str('\\');
+        let n_esc: string = concat(bs, "n");
+
+        let out: string = concat(ind, "printf(");
+        if (equals(vt, "float")) {
+            out = concat(out, q);
+            out = concat(out, "%g");
+            out = concat(out, n_esc);
+            out = concat(out, q);
+            out = concat(out, ", (double)(");
+            out = concat(out, val_s);
+            out = concat(out, "));\n");
+            return out;
+        }
+        if (equals(vt, "bool")) {
+            out = concat(out, q);
+            out = concat(out, "%s");
+            out = concat(out, n_esc);
+            out = concat(out, q);
+            out = concat(out, ", (");
+            out = concat(out, val_s);
+            out = concat(out, ") ? ");
+            out = concat(out, q);
+            out = concat(out, "true");
+            out = concat(out, q);
+            out = concat(out, " : ");
+            out = concat(out, q);
+            out = concat(out, "false");
+            out = concat(out, q);
+            out = concat(out, ");\n");
+            return out;
+        }
+        if (equals(vt, "char")) {
+            out = concat(out, q);
+            out = concat(out, "%c");
+            out = concat(out, n_esc);
+            out = concat(out, q);
+            out = concat(out, ", ");
+            out = concat(out, val_s);
+            out = concat(out, ");\n");
+            return out;
+        }
+        if (equals(vt, "string")) {
+            out = concat(out, q);
+            out = concat(out, "%s");
+            out = concat(out, n_esc);
+            out = concat(out, q);
+            out = concat(out, ", ");
+            out = concat(out, val_s);
+            out = concat(out, ");\n");
+            return out;
+        }
+        out = concat(out, q);
+        out = concat(out, "%ld");
+        out = concat(out, n_esc);
+        out = concat(out, q);
+        out = concat(out, ", (long)(");
+        out = concat(out, val_s);
+        out = concat(out, "));\n");
+        return out;
+    }
+
+    // 12: STMT_EXPR
+    if (s.kind == 12) {
+        let val_s: string = gen_expr(p, st, s.expr[0]);
+        let out: string = concat(ind, val_s);
+        out = concat(out, ";\n");
+        return out;
+    }
+
+    // 13: STMT_BLOCK
+    if (s.kind == 13) {
+        let out: string = concat(ind, "{\n");
+        symtab_push_scope(st);
+        for (let i: int = 0; i < len(s.body); i++) {
+            let st_s: string = gen_stmt(p, st, s.body[i], indent + 1, cv_names, cv_types, cv_count, is_main);
+            out = concat(out, st_s);
+        }
+        symtab_pop_scope(st);
+        out = concat(out, ind);
+        out = concat(out, "}\n");
+        return out;
+    }
+
+    return "";
+}
+
+fn gen_function_decl(p: &Program, f: &FunctionDecl) -> string {
+    if (equals(f.name, "main")) {
+        return "";
+    }
+    let ret_t: string = gen_c_type(p, f.return_type);
+    let out: string = concat(ret_t, " ");
+    out = concat(out, f.name);
+    out = concat(out, "(");
+    for (let i: int = 0; i < len(f.params); i++) {
+        if (i > 0) { out = concat(out, ", "); }
+        let pt: string = gen_c_type(p, f.params[i].type_name);
+        out = concat(out, pt);
+        out = concat(out, " ");
+        out = concat(out, f.params[i].name);
+    }
+    out = concat(out, ");\n\n");
+    return out;
+}
+
+fn gen_function_def(p: &Program, f: &FunctionDecl) -> string {
+    let is_main: bool = equals(f.name, "main");
+    let st: SymTab = make_symtab();
+    let cv_names: string[] = alloc(string, 64);
+    let cv_types: string[] = alloc(string, 64);
+    let cv_count: int[] = alloc(int, 1);
+    cv_count[0] = 0;
+
+    let out: string = "";
+    if (is_main) {
+        out = "int main(int __cco_main_argc, char **__cco_main_argv) {\n";
+        out = concat(out, "    __cco_argc = __cco_main_argc;\n    __cco_argv = __cco_main_argv;\n");
+    } else {
+        let ret_t: string = gen_c_type(p, f.return_type);
+        out = concat(ret_t, " ");
+        out = concat(out, f.name);
+        out = concat(out, "(");
+        for (let i: int = 0; i < len(f.params); i++) {
+            if (i > 0) { out = concat(out, ", "); }
+            let pt: string = gen_c_type(p, f.params[i].type_name);
+            out = concat(out, pt);
+            out = concat(out, " ");
+            out = concat(out, f.params[i].name);
+            symtab_add(&st, f.params[i].name, f.params[i].type_name);
+        }
+        out = concat(out, ") {\n");
+    }
+
+    for (let i: int = 0; i < len(f.body); i++) {
+        let st_s: string = gen_stmt(p, &st, f.body[i], 1, &cv_names, &cv_types, &cv_count, is_main);
+        out = concat(out, st_s);
+    }
+
+    out = concat(out, "}\n\n");
+    return out;
+}
+
+fn gen_method_decl(p: &Program, class_name: string, m: &FunctionDecl) -> string {
+    let ret_t: string = gen_c_type(p, m.return_type);
+    let out: string = concat(ret_t, " ");
+    out = concat(out, class_name);
+    out = concat(out, "_");
+    out = concat(out, m.name);
+    out = concat(out, "(");
+    out = concat(out, class_name);
+    out = concat(out, " *self");
+    for (let i: int = 0; i < len(m.params); i++) {
+        out = concat(out, ", ");
+        let pt: string = gen_c_type(p, m.params[i].type_name);
+        out = concat(out, pt);
+        out = concat(out, " ");
+        out = concat(out, m.params[i].name);
+    }
+    out = concat(out, ");\n\n");
+    return out;
+}
+
+fn gen_method_def(p: &Program, class_name: string, m: &FunctionDecl) -> string {
+    let st: SymTab = make_symtab();
+    let cv_names: string[] = alloc(string, 64);
+    let cv_types: string[] = alloc(string, 64);
+    let cv_count: int[] = alloc(int, 1);
+    cv_count[0] = 0;
+
+    symtab_add(&st, "self", class_name);
+    let ret_t: string = gen_c_type(p, m.return_type);
+    let out: string = concat(ret_t, " ");
+    out = concat(out, class_name);
+    out = concat(out, "_");
+    out = concat(out, m.name);
+    out = concat(out, "(");
+    out = concat(out, class_name);
+    out = concat(out, " *self");
+    for (let i: int = 0; i < len(m.params); i++) {
+        out = concat(out, ", ");
+        let pt: string = gen_c_type(p, m.params[i].type_name);
+        out = concat(out, pt);
+        out = concat(out, " ");
+        out = concat(out, m.params[i].name);
+        symtab_add(&st, m.params[i].name, m.params[i].type_name);
+    }
+    out = concat(out, ") {\n");
+
+    for (let i: int = 0; i < len(m.body); i++) {
+        let st_s: string = gen_stmt(p, &st, m.body[i], 1, &cv_names, &cv_types, &cv_count, false);
+        out = concat(out, st_s);
+    }
+
+    out = concat(out, "}\n\n");
+    return out;
+}
+
+fn emit_preludes(u: &Usage) -> string {
+    let out: string = "/* Generated by Cco (C--) Self-Hosted Compiler */\n#define _POSIX_C_SOURCE 200809L\n#include <stdio.h>\n#include <stdlib.h>\n#include <stdbool.h>\n#include <string.h>\n#include <strings.h>\n#include <signal.h>\n#include <math.h>\n#include <time.h>\n#include <errno.h>\n#include <unistd.h>\n#include <sys/types.h>\n#include <sys/socket.h>\n#include <netinet/in.h>\n#include <arpa/inet.h>\n#include <fcntl.h>\n\nstatic int __cco_argc;\nstatic char **__cco_argv;\n\n";
+
+    if (u.has_concat) {
+        let q: string = char_to_str('\"');
+        let qq: string = concat(q, q);
+        out = concat(out, "static inline char *__cco_concat(const char *a, const char *b) {\n    if (!a) a = ");
+        out = concat(out, qq);
+        out = concat(out, ";\n    if (!b) b = ");
+        out = concat(out, qq);
+        out = concat(out, ";\n    size_t len_a = strlen(a);\n    size_t len_b = strlen(b);\n    char *res = (char *)malloc(len_a + len_b + 1);\n    if (!res) exit(1);\n    strcpy(res, a);\n    strcat(res, b);\n    return res;\n}\n\n");
+    }
+
+    if (u.has_char_at) {
+        out = concat(out, "static inline char __cco_char_at(const char *s, int i) {\n    if (!s) exit(1);\n    int len = (int)strlen(s);\n    if (i < 0 || i >= len) exit(1);\n    return s[i];\n}\n\n");
+    }
+
+    if (u.has_substring) {
+        let q: string = char_to_str('\"');
+        let qq: string = concat(q, q);
+        out = concat(out, "static inline char *__cco_substring(const char *s, int start, int end) {\n    if (!s) s = ");
+        out = concat(out, qq);
+        out = concat(out, ";\n    int len = (int)strlen(s);\n    if (start < 0) start = 0;\n    if (end > len) end = len;\n    if (start > end) start = end;\n    int sub_len = end - start;\n    char *res = (char *)malloc(sub_len + 1);\n    if (!res) exit(1);\n    memcpy(res, s + start, sub_len);\n    res[sub_len] = 0;\n    return res;\n}\n\n");
+    }
+
+    if (u.has_read_file) {
+        let q: string = char_to_str('\"');
+        let rb: string = concat(q, "rb");
+        rb = concat(rb, q);
+        out = concat(out, "static inline char *__cco_read_file(const char *path) {\n    FILE *f = fopen(path, ");
+        out = concat(out, rb);
+        out = concat(out, ");\n    if (!f) exit(1);\n    fseek(f, 0L, SEEK_END);\n    long sz = ftell(f);\n    rewind(f);\n    char *buf = (char *)malloc(sz + 1);\n    if (!buf) exit(1);\n    size_t read_bytes = fread(buf, 1, sz, f);\n    buf[read_bytes] = 0;\n    fclose(f);\n    return buf;\n}\n\n");
+    }
+
+    if (u.has_write_file) {
+        let q: string = char_to_str('\"');
+        let wb: string = concat(q, "wb");
+        wb = concat(wb, q);
+        out = concat(out, "static inline bool __cco_write_file(const char *path, const char *content) {\n    FILE *f = fopen(path, ");
+        out = concat(out, wb);
+        out = concat(out, ");\n    if (!f) return false;\n    if (content) {\n        size_t len = strlen(content);\n        if (fwrite(content, 1, len, f) != len) {\n            fclose(f);\n            return false;\n        }\n    }\n    fclose(f);\n    return true;\n}\n\n");
+    }
+
+    if (u.has_array) {
+        out = concat(out, "typedef struct {\n    size_t capacity;\n    size_t length;\n} __cco_arr_header;\n\nstatic inline void __cco_free_arr(void *ptr) {\n    if (ptr) {\n        free(((__cco_arr_header *)ptr) - 1);\n    }\n}\n\nstatic inline size_t __cco_arr_len_raw(const void *ptr) {\n    if (!ptr) return 0;\n    return (((const __cco_arr_header *)ptr) - 1)->length;\n}\n\nstatic inline void *__cco_alloc_arr(size_t elem_size, size_t count) {\n    __cco_arr_header *hdr = (__cco_arr_header *)malloc(sizeof(__cco_arr_header) + elem_size * count);\n    if (!hdr) exit(1);\n    hdr->capacity = count;\n    hdr->length = count;\n    memset(hdr + 1, 0, elem_size * count);\n    return (void *)(hdr + 1);\n}\n\nstatic inline void *__cco_list_new(size_t elem_size) {\n    __cco_arr_header *hdr = (__cco_arr_header *)malloc(sizeof(__cco_arr_header) + elem_size * 4);\n    if (!hdr) exit(1);\n    hdr->capacity = 4;\n    hdr->length = 0;\n    return (void *)(hdr + 1);\n}\n\n");
+    }
+
+    return out;
+}
+
+fn codegen_program(prog: &Program) -> string {
+    let u: Usage = make_usage();
+    scan_program_usage(&u, prog);
+
+    let out: string = emit_preludes(&u);
+
+    // 1. Struct definitions
+    for (let i: int = 0; i < len(prog.structs); i++) {
+        let s_def: string = gen_struct_def(prog, prog.structs[i]);
+        out = concat(out, s_def);
+    }
+
+    // 2. Enum definitions
+    for (let i: int = 0; i < len(prog.enums); i++) {
+        let e_def: string = gen_enum_def(prog, prog.enums[i]);
+        out = concat(out, e_def);
+    }
+
+    // 3. Class definitions
+    for (let i: int = 0; i < len(prog.classes); i++) {
+        let c_def: string = gen_class_def(prog, prog.classes[i]);
+        out = concat(out, c_def);
+    }
+
+    // 4. Function & method prototypes
+    for (let i: int = 0; i < len(prog.functions); i++) {
+        let f_decl: string = gen_function_decl(prog, prog.functions[i]);
+        out = concat(out, f_decl);
+    }
+    for (let c: int = 0; c < len(prog.classes); c++) {
+        for (let m: int = 0; m < len(prog.classes[c].methods); m++) {
+            let m_decl: string = gen_method_decl(prog, prog.classes[c].name, prog.classes[c].methods[m]);
+            out = concat(out, m_decl);
+        }
+    }
+
+    // 5. Function definitions
+    for (let i: int = 0; i < len(prog.functions); i++) {
+        let f_def: string = gen_function_def(prog, prog.functions[i]);
+        out = concat(out, f_def);
+    }
+    for (let c: int = 0; c < len(prog.classes); c++) {
+        for (let m: int = 0; m < len(prog.classes[c].methods); m++) {
+            let m_def: string = gen_method_def(prog, prog.classes[c].name, prog.classes[c].methods[m]);
+            out = concat(out, m_def);
+        }
+    }
+
+    return out;
+}

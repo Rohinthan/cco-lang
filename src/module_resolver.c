@@ -10,6 +10,7 @@
 #include <string.h>
 #include <libgen.h>
 #include <limits.h>
+#include <unistd.h>
 
 typedef struct {
     char *canonical_path;
@@ -93,8 +94,47 @@ static char *resolve_path(const char *raw_path, const char *importing_file_path)
     if (realpath(combined, resolved) != NULL) {
         return strdup(resolved);
     }
+
+    // Fallback 1: Direct path from current working directory
+    if (realpath(raw_path, resolved) != NULL) {
+        return strdup(resolved);
+    }
+
+    // Fallback 2: Standard Library resolution (paths starting with "std/")
+    if (strncmp(raw_path, "std/", 4) == 0) {
+        const char *env_std = getenv("CCO_STD_PATH");
+        if (env_std) {
+            snprintf(combined, sizeof(combined), "%s/%s", env_std, raw_path + 4);
+            if (realpath(combined, resolved) != NULL) return strdup(resolved);
+            snprintf(combined, sizeof(combined), "%s/%s", env_std, raw_path);
+            if (realpath(combined, resolved) != NULL) return strdup(resolved);
+        }
+
+        // Check relative to running compiler binary (/proc/self/exe)
+        char exe_buf[PATH_MAX];
+        ssize_t len = readlink("/proc/self/exe", exe_buf, sizeof(exe_buf) - 1);
+        if (len > 0) {
+            exe_buf[len] = '\0';
+            char *exe_dir = get_directory(exe_buf);
+            snprintf(combined, sizeof(combined), "%s/%s", exe_dir, raw_path);
+            if (realpath(combined, resolved) != NULL) { free(exe_dir); return strdup(resolved); }
+            snprintf(combined, sizeof(combined), "%s/../%s", exe_dir, raw_path);
+            if (realpath(combined, resolved) != NULL) { free(exe_dir); return strdup(resolved); }
+            snprintf(combined, sizeof(combined), "%s/../lib/cco/%s", exe_dir, raw_path);
+            if (realpath(combined, resolved) != NULL) { free(exe_dir); return strdup(resolved); }
+            free(exe_dir);
+        }
+
+        // Check standard system installation paths
+        snprintf(combined, sizeof(combined), "/usr/local/lib/cco/%s", raw_path);
+        if (realpath(combined, resolved) != NULL) return strdup(resolved);
+        snprintf(combined, sizeof(combined), "/usr/lib/cco/%s", raw_path);
+        if (realpath(combined, resolved) != NULL) return strdup(resolved);
+    }
+
     return NULL;
 }
+
 
 static bool is_already_resolved(ResolverCtx *ctx, const char *canonical_path) {
     for (int i = 0; i < ctx->resolved_count; i++) {

@@ -1,0 +1,41 @@
+// std/math.cco — Standard Library Math Utilities
+
+fn abs(x: int) -> int {
+    return abs_int(x);
+}
+
+fn min(a: int, b: int) -> int {
+    return min_int(a, b);
+}
+
+fn max(a: int, b: int) -> int {
+    return max_int(a, b);
+}
+
+fn clamp(val: int, low: int, high: int) -> int {
+    if (val < low) { return low; }
+    if (val > high) { return high; }
+    return val;
+}
+
+fn min_float_val(a: float, b: float) -> float {
+    return min_float(a, b);
+}
+
+fn max_float_val(a: float, b: float) -> float {
+    return max_float(a, b);
+}
+
+fn clamp_float(val: float, low: float, high: float) -> float {
+    if (val < low) { return low; }
+    if (val > high) { return high; }
+    return val;
+}
+
+fn rand_seed(seed: int) -> void {
+    random_seed(seed);
+}
+
+fn rand_int(min_val: int, max_val: int) -> int {
+    return random_int(min_val, max_val);
+}

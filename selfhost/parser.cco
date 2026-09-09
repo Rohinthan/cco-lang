@@ -1,0 +1,20 @@
+import "parser_core.cco";
+
+fn main() -> int {
+    let source: string = read_file("target.cco");
+    let tokens: Token[] = lex(source);
+    let prog: Program = parse_program(tokens);
+    let s_fn: string = int_to_str(len(prog.functions));
+    let m_fn: string = concat("Parsed functions: ", s_fn);
+    print(m_fn);
+    let s_st: string = int_to_str(len(prog.structs));
+    let m_st: string = concat("Parsed structs: ", s_st);
+    print(m_st);
+    let s_cl: string = int_to_str(len(prog.classes));
+    let m_cl: string = concat("Parsed classes: ", s_cl);
+    print(m_cl);
+    let s_en: string = int_to_str(len(prog.enums));
+    let m_en: string = concat("Parsed enums: ", s_en);
+    print(m_en);
+    return 0;
+}

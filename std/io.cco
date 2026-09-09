@@ -1,0 +1,13 @@
+// std/io.cco — Standard Library I/O and File Utilities
+
+fn file_read(path: string) -> string {
+    return read_file(path);
+}
+
+fn file_write(path: string, content: string) -> bool {
+    return write_file(path, content);
+}
+
+fn io_read_line() -> string {
+    return read_line();
+}

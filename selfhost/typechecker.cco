@@ -1,0 +1,17 @@
+import "lexer_core.cco";
+import "parser_core.cco";
+import "typechecker_core.cco";
+
+fn main() -> int {
+    let source: string = read_file("target.cco");
+    let tokens: Token[] = lex(source);
+    let prog: Program = parse_program(tokens);
+    let errs: int = typecheck_program(&prog);
+    let s_err: string = int_to_str(errs);
+    let m_err: string = concat("Typecheck errors: ", s_err);
+    print(m_err);
+    let s_fn: string = int_to_str(len(prog.functions));
+    let m_fn: string = concat("Typechecked functions: ", s_fn);
+    print(m_fn);
+    return errs;
+}

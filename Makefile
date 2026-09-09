@@ -19,11 +19,14 @@ install: cco gcco
 	@mkdir -p $(PREFIX)/bin
 	@cp -f cco $(PREFIX)/bin/cco
 	@cp -f gcco $(PREFIX)/bin/gcco
-	@echo "Successfully installed 'cco' and 'gcco' to $(PREFIX)/bin"
+	@mkdir -p $(PREFIX)/lib/cco/std
+	@cp -rf std/*.cco $(PREFIX)/lib/cco/std/
+	@echo "Successfully installed 'cco', 'gcco', and standard library to $(PREFIX)"
 
 uninstall:
 	@rm -f $(PREFIX)/bin/cco $(PREFIX)/bin/gcco
-	@echo "Removed 'cco' and 'gcco' from $(PREFIX)/bin"
+	@rm -rf $(PREFIX)/lib/cco
+	@echo "Removed 'cco', 'gcco', and standard library from $(PREFIX)"
 
 unit_tests: cco
 	@mkdir -p build
@@ -40,10 +43,36 @@ unit_tests: cco
 test_selfhost: cco
 	@bash tests/compare_lexers.sh
 
-test: unit_tests test_selfhost
+test_bootstrap: cco
+	@mkdir -p build
+	@cp -f selfhost/target.cco target.cco
+	@echo "--- Transpiling Self-Hosted Modules ---"
+	./cco selfhost/parser.cco -o selfhost/parser.c
+	$(CC) $(CFLAGS) selfhost/parser.c -o selfhost/parser $(LDFLAGS)
+	./cco selfhost/typechecker.cco -o selfhost/typechecker.c
+	$(CC) $(CFLAGS) selfhost/typechecker.c -o selfhost/typechecker $(LDFLAGS)
+	./cco selfhost/codegen.cco -o selfhost/codegen.c
+	$(CC) $(CFLAGS) selfhost/codegen.c -o selfhost/codegen $(LDFLAGS)
+	./cco selfhost/cco.cco -o selfhost/cco.c
+	$(CC) $(CFLAGS) selfhost/cco.c -o selfhost/cco $(LDFLAGS)
+	@echo "--- Running Self-Hosted Pipeline under Valgrind ---"
+	valgrind --leak-check=full --error-exitcode=1 ./selfhost/parser
+	valgrind --leak-check=full --error-exitcode=1 ./selfhost/typechecker
+	valgrind --leak-check=full --error-exitcode=1 ./selfhost/codegen target.cco build/bootstrap_target.c
+	valgrind --leak-check=full --error-exitcode=1 ./selfhost/cco target.cco -o build/bootstrap_target.c
+	@echo "--- Building Emitted C with Strict Flags ---"
+	$(CC) $(CFLAGS) build/bootstrap_target.c -o build/bootstrap_target $(LDFLAGS)
+	@echo "--- Verifying Bootstrap Executable under Valgrind ---"
+	valgrind --leak-check=full --error-exitcode=1 ./build/bootstrap_target > build/bootstrap_actual.txt
+	@./cco target.cco --run > build/bootstrap_expected.txt
+	@diff -u build/bootstrap_actual.txt build/bootstrap_expected.txt
+	@echo "Bootstrap parity test: PASSED (100% match, 0 leaks, 0 errors)"
+
+test: unit_tests test_selfhost test_bootstrap
 	@bash tests/run_tests.sh
 
 clean:
-	rm -rf build cco gcco selfhost/lexer_selfhosted selfhost/lexer_selfhosted.c target.cco
+	rm -rf build cco gcco selfhost/lexer_selfhosted selfhost/lexer_selfhosted.c selfhost/parser selfhost/parser.c selfhost/typechecker selfhost/typechecker.c selfhost/codegen selfhost/codegen.c selfhost/cco selfhost/cco.c
 
-.PHONY: all install uninstall unit_tests test_selfhost test clean
+.PHONY: all install uninstall unit_tests test_selfhost test_bootstrap test clean
+

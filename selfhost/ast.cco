@@ -1,0 +1,854 @@
+// ast.cco - Abstract Syntax Tree Definitions for Self-Hosted Cco Compiler
+
+class Param {
+    name: string;
+    type_name: string;
+    is_borrowed: bool;
+    is_array: bool;
+}
+
+class Field {
+    name: string;
+    type_name: string;
+    is_array: bool;
+}
+
+class Expr {
+    kind: int;
+    int_val: int;
+    float_val: float;
+    str_val: string;
+    bool_val: bool;
+    char_val: char;
+    op: string;
+    callee: string;
+    type_name: string;
+    children: Expr[];
+    args: Expr[];
+    field_names: string[];
+    field_values: Expr[];
+    line: int;
+    col: int;
+}
+
+class Stmt {
+    kind: int;
+    var_name: string;
+    var_type: string;
+    has_explicit_type: bool;
+    op: string;
+    expr: Expr[];
+    init_expr: Expr[];
+    cond_expr: Expr[];
+    target_expr: Expr[];
+    step_stmt: Stmt[];
+    then_block: Stmt[];
+    else_block: Stmt[];
+    body: Stmt[];
+    arm_variant: string;
+    arm_is_wildcard: bool;
+    arm_bind_vars: string[];
+    line: int;
+    col: int;
+}
+
+class FunctionDecl {
+    name: string;
+    params: Param[];
+    return_type: string;
+    is_operator: bool;
+    operator_symbol: string;
+    body: Stmt[];
+    line: int;
+    col: int;
+}
+
+class StructDecl {
+    name: string;
+    fields: Field[];
+    line: int;
+    col: int;
+}
+
+class ClassDecl {
+    name: string;
+    fields: Field[];
+    methods: FunctionDecl[];
+    line: int;
+    col: int;
+}
+
+class VariantDecl {
+    name: string;
+    fields: Field[];
+    is_unit: bool;
+}
+
+class EnumDecl {
+    name: string;
+    variants: VariantDecl[];
+    line: int;
+    col: int;
+}
+
+class Program {
+    structs: StructDecl[];
+    classes: ClassDecl[];
+    enums: EnumDecl[];
+    functions: FunctionDecl[];
+}
+
+// AST Helper Constructors
+
+fn make_param(name: string, type_name: string, is_borrowed: bool, is_array: bool) -> Param {
+    return Param {
+        name: concat(name, ""),
+        type_name: concat(type_name, ""),
+        is_borrowed: is_borrowed,
+        is_array: is_array,
+    };
+}
+
+fn make_field(name: string, type_name: string, is_array: bool) -> Field {
+    return Field {
+        name: concat(name, ""),
+        type_name: concat(type_name, ""),
+        is_array: is_array,
+    };
+}
+
+fn make_int_expr(val: int, line: int, col: int) -> Expr {
+    return Expr {
+        kind: 1, // EXPR_INT
+        int_val: val,
+        float_val: 0.0,
+        str_val: concat("", ""),
+        bool_val: false,
+        char_val: ' ',
+        op: concat("", ""),
+        callee: concat("", ""),
+        type_name: concat("int", ""),
+        children: list_new(Expr),
+        args: list_new(Expr),
+        field_names: list_new(string),
+        field_values: list_new(Expr),
+        line: line,
+        col: col,
+    };
+}
+
+fn make_float_expr(val: float, line: int, col: int) -> Expr {
+    return Expr {
+        kind: 2, // EXPR_FLOAT
+        int_val: 0,
+        float_val: val,
+        str_val: concat("", ""),
+        bool_val: false,
+        char_val: ' ',
+        op: concat("", ""),
+        callee: concat("", ""),
+        type_name: concat("float", ""),
+        children: list_new(Expr),
+        args: list_new(Expr),
+        field_names: list_new(string),
+        field_values: list_new(Expr),
+        line: line,
+        col: col,
+    };
+}
+
+fn make_string_expr(val: string, line: int, col: int) -> Expr {
+    return Expr {
+        kind: 3, // EXPR_STRING
+        int_val: 0,
+        float_val: 0.0,
+        str_val: concat(val, ""),
+        bool_val: false,
+        char_val: ' ',
+        op: concat("", ""),
+        callee: concat("", ""),
+        type_name: concat("string", ""),
+        children: list_new(Expr),
+        args: list_new(Expr),
+        field_names: list_new(string),
+        field_values: list_new(Expr),
+        line: line,
+        col: col,
+    };
+}
+
+fn make_bool_expr(val: bool, line: int, col: int) -> Expr {
+    return Expr {
+        kind: 4, // EXPR_BOOL
+        int_val: 0,
+        float_val: 0.0,
+        str_val: concat("", ""),
+        bool_val: val,
+        char_val: ' ',
+        op: concat("", ""),
+        callee: concat("", ""),
+        type_name: concat("bool", ""),
+        children: list_new(Expr),
+        args: list_new(Expr),
+        field_names: list_new(string),
+        field_values: list_new(Expr),
+        line: line,
+        col: col,
+    };
+}
+
+fn make_char_expr(val: char, line: int, col: int) -> Expr {
+    return Expr {
+        kind: 5, // EXPR_CHAR
+        int_val: 0,
+        float_val: 0.0,
+        str_val: concat("", ""),
+        bool_val: false,
+        char_val: val,
+        op: concat("", ""),
+        callee: concat("", ""),
+        type_name: concat("char", ""),
+        children: list_new(Expr),
+        args: list_new(Expr),
+        field_names: list_new(string),
+        field_values: list_new(Expr),
+        line: line,
+        col: col,
+    };
+}
+
+fn make_ident_expr(name: string, line: int, col: int) -> Expr {
+    return Expr {
+        kind: 6, // EXPR_IDENT
+        int_val: 0,
+        float_val: 0.0,
+        str_val: concat("", ""),
+        bool_val: false,
+        char_val: ' ',
+        op: concat("", ""),
+        callee: concat(name, ""),
+        type_name: concat("", ""),
+        children: list_new(Expr),
+        args: list_new(Expr),
+        field_names: list_new(string),
+        field_values: list_new(Expr),
+        line: line,
+        col: col,
+    };
+}
+
+fn make_binary_expr(op: string, left: Expr, right: Expr, line: int, col: int) -> Expr {
+    let ch = list_new(Expr);
+    ch = push(ch, left);
+    ch = push(ch, right);
+    return Expr {
+        kind: 7, // EXPR_BINARY
+        int_val: 0,
+        float_val: 0.0,
+        str_val: concat("", ""),
+        bool_val: false,
+        char_val: ' ',
+        op: concat(op, ""),
+        callee: concat("", ""),
+        type_name: concat("", ""),
+        children: ch,
+        args: list_new(Expr),
+        field_names: list_new(string),
+        field_values: list_new(Expr),
+        line: line,
+        col: col,
+    };
+}
+
+fn make_unary_expr(op: string, operand: Expr, line: int, col: int) -> Expr {
+    let ch = list_new(Expr);
+    ch = push(ch, operand);
+    return Expr {
+        kind: 8, // EXPR_UNARY
+        int_val: 0,
+        float_val: 0.0,
+        str_val: concat("", ""),
+        bool_val: false,
+        char_val: ' ',
+        op: concat(op, ""),
+        callee: concat("", ""),
+        type_name: concat("", ""),
+        children: ch,
+        args: list_new(Expr),
+        field_names: list_new(string),
+        field_values: list_new(Expr),
+        line: line,
+        col: col,
+    };
+}
+
+fn make_call_expr(callee: string, args: Expr[], line: int, col: int) -> Expr {
+    return Expr {
+        kind: 9, // EXPR_CALL
+        int_val: 0,
+        float_val: 0.0,
+        str_val: concat("", ""),
+        bool_val: false,
+        char_val: ' ',
+        op: concat("", ""),
+        callee: concat(callee, ""),
+        type_name: concat("", ""),
+        children: list_new(Expr),
+        args: args,
+        field_names: list_new(string),
+        field_values: list_new(Expr),
+        line: line,
+        col: col,
+    };
+}
+
+fn make_method_call_expr(obj: Expr, method_name: string, args: Expr[], line: int, col: int) -> Expr {
+    let ch = list_new(Expr);
+    ch = push(ch, obj);
+    return Expr {
+        kind: 9, // EXPR_CALL
+        int_val: 0,
+        float_val: 0.0,
+        str_val: concat("", ""),
+        bool_val: false,
+        char_val: ' ',
+        op: concat("", ""),
+        callee: concat(method_name, ""),
+        type_name: concat("", ""),
+        children: ch,
+        args: args,
+        field_names: list_new(string),
+        field_values: list_new(Expr),
+        line: line,
+        col: col,
+    };
+}
+
+fn make_member_expr(obj: Expr, member: string, line: int, col: int) -> Expr {
+    let ch = list_new(Expr);
+    ch = push(ch, obj);
+    return Expr {
+        kind: 10, // EXPR_MEMBER
+        int_val: 0,
+        float_val: 0.0,
+        str_val: concat("", ""),
+        bool_val: false,
+        char_val: ' ',
+        op: concat("", ""),
+        callee: concat(member, ""),
+        type_name: concat("", ""),
+        children: ch,
+        args: list_new(Expr),
+        field_names: list_new(string),
+        field_values: list_new(Expr),
+        line: line,
+        col: col,
+    };
+}
+
+fn make_index_expr(arr: Expr, idx: Expr, line: int, col: int) -> Expr {
+    let ch = list_new(Expr);
+    ch = push(ch, arr);
+    ch = push(ch, idx);
+    return Expr {
+        kind: 11, // EXPR_INDEX
+        int_val: 0,
+        float_val: 0.0,
+        str_val: concat("", ""),
+        bool_val: false,
+        char_val: ' ',
+        op: concat("", ""),
+        callee: concat("", ""),
+        type_name: concat("", ""),
+        children: ch,
+        args: list_new(Expr),
+        field_names: list_new(string),
+        field_values: list_new(Expr),
+        line: line,
+        col: col,
+    };
+}
+
+fn make_new_expr(type_name: string, fnames: string[], fvals: Expr[], line: int, col: int) -> Expr {
+    return Expr {
+        kind: 12, // EXPR_NEW
+        int_val: 0,
+        float_val: 0.0,
+        str_val: concat("", ""),
+        bool_val: false,
+        char_val: ' ',
+        op: concat("", ""),
+        callee: concat(type_name, ""),
+        type_name: concat(type_name, ""),
+        children: list_new(Expr),
+        args: list_new(Expr),
+        field_names: fnames,
+        field_values: fvals,
+        line: line,
+        col: col,
+    };
+}
+
+fn make_alloc_expr(elem_type: string, count_expr: Expr, line: int, col: int) -> Expr {
+    let ch = list_new(Expr);
+    ch = push(ch, count_expr);
+    return Expr {
+        kind: 13, // EXPR_ALLOC
+        int_val: 0,
+        float_val: 0.0,
+        str_val: concat("", ""),
+        bool_val: false,
+        char_val: ' ',
+        op: concat("", ""),
+        callee: concat(elem_type, ""),
+        type_name: concat(elem_type, "[]"),
+        children: ch,
+        args: list_new(Expr),
+        field_names: list_new(string),
+        field_values: list_new(Expr),
+        line: line,
+        col: col,
+    };
+}
+
+fn make_list_new_expr(elem_type: string, line: int, col: int) -> Expr {
+    return Expr {
+        kind: 14, // EXPR_LIST_NEW
+        int_val: 0,
+        float_val: 0.0,
+        str_val: concat("", ""),
+        bool_val: false,
+        char_val: ' ',
+        op: concat("", ""),
+        callee: concat(elem_type, ""),
+        type_name: concat(elem_type, "[]"),
+        children: list_new(Expr),
+        args: list_new(Expr),
+        field_names: list_new(string),
+        field_values: list_new(Expr),
+        line: line,
+        col: col,
+    };
+}
+
+fn make_map_new_expr(key_type: string, val_type: string, line: int, col: int) -> Expr {
+    let map_t = concat("map[", key_type);
+    map_t = concat(map_t, "]");
+    map_t = concat(map_t, val_type);
+    return Expr {
+        kind: 15, // EXPR_MAP_NEW
+        int_val: 0,
+        float_val: 0.0,
+        str_val: concat(key_type, ""),
+        bool_val: false,
+        char_val: ' ',
+        op: concat("", ""),
+        callee: concat(val_type, ""),
+        type_name: map_t,
+        children: list_new(Expr),
+        args: list_new(Expr),
+        field_names: list_new(string),
+        field_values: list_new(Expr),
+        line: line,
+        col: col,
+    };
+}
+
+fn make_fstring_expr(text: string, line: int, col: int) -> Expr {
+    return Expr {
+        kind: 16, // EXPR_FSTRING
+        int_val: 0,
+        float_val: 0.0,
+        str_val: concat(text, ""),
+        bool_val: false,
+        char_val: ' ',
+        op: concat("", ""),
+        callee: concat("", ""),
+        type_name: concat("string", ""),
+        children: list_new(Expr),
+        args: list_new(Expr),
+        field_names: list_new(string),
+        field_values: list_new(Expr),
+        line: line,
+        col: col,
+    };
+}
+
+// Statement Constructors
+
+fn make_let_stmt(name: string, type_name: string, has_type: bool, init: Expr, line: int, col: int) -> Stmt {
+    let inits = list_new(Expr);
+    inits = push(inits, init);
+    return Stmt {
+        kind: 1, // STMT_LET
+        var_name: concat(name, ""),
+        var_type: concat(type_name, ""),
+        has_explicit_type: has_type,
+        op: concat("", ""),
+        expr: list_new(Expr),
+        init_expr: inits,
+        cond_expr: list_new(Expr),
+        target_expr: list_new(Expr),
+        step_stmt: list_new(Stmt),
+        then_block: list_new(Stmt),
+        else_block: list_new(Stmt),
+        body: list_new(Stmt),
+        arm_variant: concat("", ""),
+        arm_is_wildcard: false,
+        arm_bind_vars: list_new(string),
+        line: line,
+        col: col,
+    };
+}
+
+fn make_assign_stmt(target: Expr, val: Expr, line: int, col: int) -> Stmt {
+    let targets = list_new(Expr);
+    targets = push(targets, target);
+    let vals = list_new(Expr);
+    vals = push(vals, val);
+    return Stmt {
+        kind: 2, // STMT_ASSIGN
+        var_name: concat("", ""),
+        var_type: concat("", ""),
+        has_explicit_type: false,
+        op: concat("=", ""),
+        expr: vals, // expr[0] is the RHS value
+        init_expr: list_new(Expr),
+        cond_expr: list_new(Expr),
+        target_expr: targets,
+        step_stmt: list_new(Stmt),
+        then_block: list_new(Stmt),
+        else_block: list_new(Stmt),
+        body: list_new(Stmt),
+        arm_variant: concat("", ""),
+        arm_is_wildcard: false,
+        arm_bind_vars: list_new(string),
+        line: line,
+        col: col,
+    };
+}
+
+fn make_compound_assign_stmt(target: Expr, op: string, val: Expr, line: int, col: int) -> Stmt {
+    let targets = list_new(Expr);
+    targets = push(targets, target);
+    let vals = list_new(Expr);
+    vals = push(vals, val);
+    return Stmt {
+        kind: 3, // STMT_COMPOUND_ASSIGN
+        var_name: concat("", ""),
+        var_type: concat("", ""),
+        has_explicit_type: false,
+        op: concat(op, ""),
+        expr: vals, // expr[0] is the RHS value
+        init_expr: list_new(Expr),
+        cond_expr: list_new(Expr),
+        target_expr: targets,
+        step_stmt: list_new(Stmt),
+        then_block: list_new(Stmt),
+        else_block: list_new(Stmt),
+        body: list_new(Stmt),
+        arm_variant: concat("", ""),
+        arm_is_wildcard: false,
+        arm_bind_vars: list_new(string),
+        line: line,
+        col: col,
+    };
+}
+
+fn make_inc_dec_stmt(target: Expr, op: string, line: int, col: int) -> Stmt {
+    let targets = list_new(Expr);
+    targets = push(targets, target);
+    return Stmt {
+        kind: 4, // STMT_INC_DEC
+        var_name: concat("", ""),
+        var_type: concat("", ""),
+        has_explicit_type: false,
+        op: concat(op, ""),
+        expr: list_new(Expr),
+        init_expr: list_new(Expr),
+        cond_expr: list_new(Expr),
+        target_expr: targets,
+        step_stmt: list_new(Stmt),
+        then_block: list_new(Stmt),
+        else_block: list_new(Stmt),
+        body: list_new(Stmt),
+        arm_variant: concat("", ""),
+        arm_is_wildcard: false,
+        arm_bind_vars: list_new(string),
+        line: line,
+        col: col,
+    };
+}
+
+fn make_if_stmt(cond: Expr, then_b: Stmt[], else_b: Stmt[], line: int, col: int) -> Stmt {
+    let conds = list_new(Expr);
+    conds = push(conds, cond);
+    return Stmt {
+        kind: 5, // STMT_IF
+        var_name: concat("", ""),
+        var_type: concat("", ""),
+        has_explicit_type: false,
+        op: concat("", ""),
+        expr: list_new(Expr),
+        init_expr: list_new(Expr),
+        cond_expr: conds,
+        target_expr: list_new(Expr),
+        step_stmt: list_new(Stmt),
+        then_block: then_b,
+        else_block: else_b,
+        body: list_new(Stmt),
+        arm_variant: concat("", ""),
+        arm_is_wildcard: false,
+        arm_bind_vars: list_new(string),
+        line: line,
+        col: col,
+    };
+}
+
+fn make_while_stmt(cond: Expr, body: Stmt[], line: int, col: int) -> Stmt {
+    let conds = list_new(Expr);
+    conds = push(conds, cond);
+    return Stmt {
+        kind: 6, // STMT_WHILE
+        var_name: concat("", ""),
+        var_type: concat("", ""),
+        has_explicit_type: false,
+        op: concat("", ""),
+        expr: list_new(Expr),
+        init_expr: list_new(Expr),
+        cond_expr: conds,
+        target_expr: list_new(Expr),
+        step_stmt: list_new(Stmt),
+        then_block: list_new(Stmt),
+        else_block: list_new(Stmt),
+        body: body,
+        arm_variant: concat("", ""),
+        arm_is_wildcard: false,
+        arm_bind_vars: list_new(string),
+        line: line,
+        col: col,
+    };
+}
+
+fn make_for_stmt(init: Stmt, cond: Expr, step: Stmt, body: Stmt[], line: int, col: int) -> Stmt {
+    let conds = list_new(Expr);
+    conds = push(conds, cond);
+    let inits = list_new(Stmt);
+    inits = push(inits, init);
+    let steps = list_new(Stmt);
+    steps = push(steps, step);
+    return Stmt {
+        kind: 7, // STMT_FOR
+        var_name: concat("", ""),
+        var_type: concat("", ""),
+        has_explicit_type: false,
+        op: concat("", ""),
+        expr: list_new(Expr),
+        init_expr: list_new(Expr),
+        cond_expr: conds,
+        target_expr: list_new(Expr),
+        step_stmt: steps,
+        then_block: inits, // then_block[0] is the init stmt
+        else_block: list_new(Stmt),
+        body: body,
+        arm_variant: concat("", ""),
+        arm_is_wildcard: false,
+        arm_bind_vars: list_new(string),
+        line: line,
+        col: col,
+    };
+}
+
+fn make_return_stmt(exprs: Expr[], line: int, col: int) -> Stmt {
+    return Stmt {
+        kind: 8, // STMT_RETURN
+        var_name: concat("", ""),
+        var_type: concat("", ""),
+        has_explicit_type: false,
+        op: concat("", ""),
+        expr: exprs,
+        init_expr: list_new(Expr),
+        cond_expr: list_new(Expr),
+        target_expr: list_new(Expr),
+        step_stmt: list_new(Stmt),
+        then_block: list_new(Stmt),
+        else_block: list_new(Stmt),
+        body: list_new(Stmt),
+        arm_variant: concat("", ""),
+        arm_is_wildcard: false,
+        arm_bind_vars: list_new(string),
+        line: line,
+        col: col,
+    };
+}
+
+fn make_break_stmt(line: int, col: int) -> Stmt {
+    return Stmt {
+        kind: 9, // STMT_BREAK
+        var_name: concat("", ""),
+        var_type: concat("", ""),
+        has_explicit_type: false,
+        op: concat("", ""),
+        expr: list_new(Expr),
+        init_expr: list_new(Expr),
+        cond_expr: list_new(Expr),
+        target_expr: list_new(Expr),
+        step_stmt: list_new(Stmt),
+        then_block: list_new(Stmt),
+        else_block: list_new(Stmt),
+        body: list_new(Stmt),
+        arm_variant: concat("", ""),
+        arm_is_wildcard: false,
+        arm_bind_vars: list_new(string),
+        line: line,
+        col: col,
+    };
+}
+
+fn make_continue_stmt(line: int, col: int) -> Stmt {
+    return Stmt {
+        kind: 10, // STMT_CONTINUE
+        var_name: concat("", ""),
+        var_type: concat("", ""),
+        has_explicit_type: false,
+        op: concat("", ""),
+        expr: list_new(Expr),
+        init_expr: list_new(Expr),
+        cond_expr: list_new(Expr),
+        target_expr: list_new(Expr),
+        step_stmt: list_new(Stmt),
+        then_block: list_new(Stmt),
+        else_block: list_new(Stmt),
+        body: list_new(Stmt),
+        arm_variant: concat("", ""),
+        arm_is_wildcard: false,
+        arm_bind_vars: list_new(string),
+        line: line,
+        col: col,
+    };
+}
+
+fn make_print_stmt(val: Expr, line: int, col: int) -> Stmt {
+    let exprs = list_new(Expr);
+    exprs = push(exprs, val);
+    return Stmt {
+        kind: 11, // STMT_PRINT
+        var_name: concat("", ""),
+        var_type: concat("", ""),
+        has_explicit_type: false,
+        op: concat("", ""),
+        expr: exprs,
+        init_expr: list_new(Expr),
+        cond_expr: list_new(Expr),
+        target_expr: list_new(Expr),
+        step_stmt: list_new(Stmt),
+        then_block: list_new(Stmt),
+        else_block: list_new(Stmt),
+        body: list_new(Stmt),
+        arm_variant: concat("", ""),
+        arm_is_wildcard: false,
+        arm_bind_vars: list_new(string),
+        line: line,
+        col: col,
+    };
+}
+
+fn make_expr_stmt(expr: Expr, line: int, col: int) -> Stmt {
+    let exprs = list_new(Expr);
+    exprs = push(exprs, expr);
+    return Stmt {
+        kind: 12, // STMT_EXPR
+        var_name: concat("", ""),
+        var_type: concat("", ""),
+        has_explicit_type: false,
+        op: concat("", ""),
+        expr: exprs,
+        init_expr: list_new(Expr),
+        cond_expr: list_new(Expr),
+        target_expr: list_new(Expr),
+        step_stmt: list_new(Stmt),
+        then_block: list_new(Stmt),
+        else_block: list_new(Stmt),
+        body: list_new(Stmt),
+        arm_variant: concat("", ""),
+        arm_is_wildcard: false,
+        arm_bind_vars: list_new(string),
+        line: line,
+        col: col,
+    };
+}
+
+fn make_block_stmt(stmts: Stmt[], line: int, col: int) -> Stmt {
+    return Stmt {
+        kind: 13, // STMT_BLOCK
+        var_name: concat("", ""),
+        var_type: concat("", ""),
+        has_explicit_type: false,
+        op: concat("", ""),
+        expr: list_new(Expr),
+        init_expr: list_new(Expr),
+        cond_expr: list_new(Expr),
+        target_expr: list_new(Expr),
+        step_stmt: list_new(Stmt),
+        then_block: list_new(Stmt),
+        else_block: list_new(Stmt),
+        body: stmts,
+        arm_variant: concat("", ""),
+        arm_is_wildcard: false,
+        arm_bind_vars: list_new(string),
+        line: line,
+        col: col,
+    };
+}
+
+fn make_match_stmt(expr: Expr, arms: Stmt[], line: int, col: int) -> Stmt {
+    let exprs = list_new(Expr);
+    exprs = push(exprs, expr);
+    return Stmt {
+        kind: 14, // STMT_MATCH
+        var_name: concat("", ""),
+        var_type: concat("", ""),
+        has_explicit_type: false,
+        op: concat("", ""),
+        expr: exprs,
+        init_expr: list_new(Expr),
+        cond_expr: list_new(Expr),
+        target_expr: list_new(Expr),
+        step_stmt: list_new(Stmt),
+        then_block: list_new(Stmt),
+        else_block: list_new(Stmt),
+        body: arms, // arms are Stmts of kind 15 (STMT_MATCH_ARM)
+        arm_variant: concat("", ""),
+        arm_is_wildcard: false,
+        arm_bind_vars: list_new(string),
+        line: line,
+        col: col,
+    };
+}
+
+fn make_match_arm(variant: string, is_wildcard: bool, bind_vars: string[], body: Stmt[], line: int, col: int) -> Stmt {
+    return Stmt {
+        kind: 15, // STMT_MATCH_ARM
+        var_name: concat("", ""),
+        var_type: concat("", ""),
+        has_explicit_type: false,
+        op: concat("", ""),
+        expr: list_new(Expr),
+        init_expr: list_new(Expr),
+        cond_expr: list_new(Expr),
+        target_expr: list_new(Expr),
+        step_stmt: list_new(Stmt),
+        then_block: list_new(Stmt),
+        else_block: list_new(Stmt),
+        body: body,
+        arm_variant: concat(variant, ""),
+        arm_is_wildcard: is_wildcard,
+        arm_bind_vars: bind_vars,
+        line: line,
+        col: col,
+    };
+}
+
+fn helper_arr_len_trigger(dummy: int[]) -> int {
+    return len(dummy);
+}

@@ -1,0 +1,371 @@
+// typechecker_core.cco - Symbol Table, Type Inference & Validation for Self-Hosted Cco Compiler
+import "ast.cco";
+
+class SymTab {
+    names: string[];
+    types: string[];
+    depths: int[];
+    count: int;
+    depth: int;
+}
+
+fn make_symtab() -> SymTab {
+    return SymTab {
+        names: alloc(string, 128),
+        types: alloc(string, 128),
+        depths: alloc(int, 128),
+        count: 0,
+        depth: 0,
+    };
+}
+
+fn symtab_push_scope(st: &SymTab) -> void {
+    st.depth += 1;
+}
+
+fn symtab_pop_scope(st: &SymTab) -> void {
+    let d: int = st.depth;
+    while (st.count > 0 && st.depths[st.count - 1] >= d) {
+        st.count -= 1;
+    }
+    st.depth -= 1;
+}
+
+fn symtab_add(st: &SymTab, name: string, type_name: string) -> void {
+    if (st.count < 128) {
+        let idx: int = st.count;
+        st.names[idx] = concat(name, "");
+        st.types[idx] = concat(type_name, "");
+        st.depths[idx] = st.depth;
+        st.count += 1;
+    }
+}
+
+fn symtab_lookup(st: &SymTab, name: string) -> string {
+    for (let i: int = st.count - 1; i >= 0; i--) {
+        if (equals(st.names[i], name)) {
+            return concat(st.types[i], "");
+        }
+    }
+    return "";
+}
+
+fn is_struct_type(p: &Program, name: string) -> bool {
+    for (let i: int = 0; i < len(p.structs); i++) {
+        if (equals(p.structs[i].name, name)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+fn is_class_type(p: &Program, name: string) -> bool {
+    for (let i: int = 0; i < len(p.classes); i++) {
+        if (equals(p.classes[i].name, name)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+fn is_enum_type(p: &Program, name: string) -> bool {
+    for (let i: int = 0; i < len(p.enums); i++) {
+        if (equals(p.enums[i].name, name)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+fn find_struct_field_type(p: &Program, struct_name: string, field_name: string) -> string {
+    for (let i: int = 0; i < len(p.structs); i++) {
+        if (equals(p.structs[i].name, struct_name)) {
+            for (let j: int = 0; j < len(p.structs[i].fields); j++) {
+                if (equals(p.structs[i].fields[j].name, field_name)) {
+                    return concat(p.structs[i].fields[j].type_name, "");
+                }
+            }
+        }
+    }
+    return "";
+}
+
+fn find_class_field_type(p: &Program, class_name: string, field_name: string) -> string {
+    for (let i: int = 0; i < len(p.classes); i++) {
+        if (equals(p.classes[i].name, class_name)) {
+            for (let j: int = 0; j < len(p.classes[i].fields); j++) {
+                if (equals(p.classes[i].fields[j].name, field_name)) {
+                    return concat(p.classes[i].fields[j].type_name, "");
+                }
+            }
+        }
+    }
+    return "";
+}
+
+fn find_function_return_type(p: &Program, fn_name: string) -> string {
+    for (let i: int = 0; i < len(p.functions); i++) {
+        if (equals(p.functions[i].name, fn_name)) {
+            return concat(p.functions[i].return_type, "");
+        }
+    }
+    return "";
+}
+
+fn infer_expr_type(p: &Program, st: &SymTab, e: &Expr) -> string {
+    // 1: EXPR_INT
+    if (e.kind == 1) { return "int"; }
+    // 2: EXPR_FLOAT
+    if (e.kind == 2) { return "float"; }
+    // 3: EXPR_STRING
+    if (e.kind == 3) { return "string"; }
+    // 4: EXPR_BOOL
+    if (e.kind == 4) { return "bool"; }
+    // 5: EXPR_CHAR
+    if (e.kind == 5) { return "char"; }
+
+    // 6: EXPR_IDENT
+    if (e.kind == 6) {
+        let v_type: string = symtab_lookup(st, e.callee);
+        if (len(v_type) > 0) {
+            return concat(v_type, "");
+        }
+        if (is_struct_type(p, e.callee)) { return concat(e.callee, ""); }
+        if (is_class_type(p, e.callee)) { return concat(e.callee, ""); }
+        return "int";
+    }
+
+    // 7: EXPR_BINARY
+    if (e.kind == 7) {
+        if (equals(e.op, "==") || equals(e.op, "!=") || equals(e.op, "<") || equals(e.op, ">") || equals(e.op, "<=") || equals(e.op, ">=") || equals(e.op, "&&") || equals(e.op, "||")) {
+            return "bool";
+        }
+        if (len(e.children) >= 2) {
+            let lt: string = infer_expr_type(p, st, e.children[0]);
+            let rt: string = infer_expr_type(p, st, e.children[1]);
+            if (equals(lt, "float") || equals(rt, "float")) {
+                return "float";
+            }
+            if (equals(lt, "string") && equals(e.op, "+")) {
+                return "string";
+            }
+            if (is_struct_type(p, lt)) {
+                return concat(lt, "");
+            }
+        }
+        return "int";
+    }
+
+    // 8: EXPR_UNARY
+    if (e.kind == 8) {
+        if (equals(e.op, "!")) {
+            return "bool";
+        }
+        if (len(e.children) > 0) {
+            return infer_expr_type(p, st, e.children[0]);
+        }
+        return "int";
+    }
+
+    // 9: EXPR_CALL
+    if (e.kind == 9) {
+        if (equals(e.callee, "concat") || equals(e.callee, "substring") || equals(e.callee, "read_file") || equals(e.callee, "read_line") || equals(e.callee, "program_name") || equals(e.callee, "net_recv")) {
+            return "string";
+        }
+        if (equals(e.callee, "sqrt") || equals(e.callee, "exp") || equals(e.callee, "log") || equals(e.callee, "sin") || equals(e.callee, "cos") || equals(e.callee, "tan") || equals(e.callee, "pow") || equals(e.callee, "abs_float") || equals(e.callee, "floor") || equals(e.callee, "ceil") || equals(e.callee, "min_float") || equals(e.callee, "max_float") || equals(e.callee, "to_float")) {
+            return "float";
+        }
+        if (equals(e.callee, "equals") || equals(e.callee, "is_int") || equals(e.callee, "is_float") || equals(e.callee, "has") || equals(e.callee, "write_file")) {
+            return "bool";
+        }
+        if (equals(e.callee, "char_at")) {
+            return "char";
+        }
+        if (equals(e.callee, "to_int") || equals(e.callee, "len") || equals(e.callee, "abs_int") || equals(e.callee, "min_int") || equals(e.callee, "max_int") || equals(e.callee, "arg_count") || equals(e.callee, "random_int") || equals(e.callee, "net_listen") || equals(e.callee, "net_accept") || equals(e.callee, "net_send")) {
+            return "int";
+        }
+        if (equals(e.callee, "args")) {
+            return "string[]";
+        }
+        if (equals(e.callee, "net_close") || equals(e.callee, "sleep_ms") || equals(e.callee, "random_seed")) {
+            return "void";
+        }
+        if (equals(e.callee, "pop") && len(e.args) > 0) {
+            let arr_t: string = infer_expr_type(p, st, e.args[0]);
+            if (len(arr_t) > 2 && char_at(arr_t, len(arr_t) - 2) == '[' && char_at(arr_t, len(arr_t) - 1) == ']') {
+                return substring(arr_t, 0, len(arr_t) - 2);
+            }
+        }
+        let fn_ret: string = find_function_return_type(p, e.callee);
+        if (len(fn_ret) > 0) {
+            return concat(fn_ret, "");
+        }
+        return "int";
+    }
+
+    // 10: EXPR_MEMBER
+    if (e.kind == 10) {
+        if (len(e.children) > 0) {
+            let obj_t: string = infer_expr_type(p, st, e.children[0]);
+            let sf_t: string = find_struct_field_type(p, obj_t, e.callee);
+            if (len(sf_t) > 0) { return concat(sf_t, ""); }
+            let cf_t: string = find_class_field_type(p, obj_t, e.callee);
+            if (len(cf_t) > 0) { return concat(cf_t, ""); }
+        }
+        return "int";
+    }
+
+    // 11: EXPR_INDEX
+    if (e.kind == 11) {
+        if (len(e.children) > 0) {
+            let arr_t: string = infer_expr_type(p, st, e.children[0]);
+            if (len(arr_t) > 2 && char_at(arr_t, len(arr_t) - 2) == '[' && char_at(arr_t, len(arr_t) - 1) == ']') {
+                return substring(arr_t, 0, len(arr_t) - 2);
+            }
+        }
+        return "int";
+    }
+
+    // 12: EXPR_NEW
+    if (e.kind == 12) { return concat(e.type_name, ""); }
+    // 13: EXPR_ALLOC
+    if (e.kind == 13) { return concat(e.type_name, ""); }
+    // 14: EXPR_LIST_NEW
+    if (e.kind == 14) { return concat(e.type_name, ""); }
+    // 15: EXPR_MAP_NEW
+    if (e.kind == 15) { return concat(e.type_name, ""); }
+    // 16: EXPR_FSTRING
+    if (e.kind == 16) { return "string"; }
+
+    return "int";
+}
+
+fn typecheck_stmt(p: &Program, st: &SymTab, s: &Stmt) -> void {
+    // 1: STMT_LET
+    if (s.kind == 1) {
+        if (!s.has_explicit_type || equals(s.var_type, "")) {
+            if (len(s.init_expr) > 0) {
+                let inf_t: string = infer_expr_type(p, st, s.init_expr[0]);
+                free(s.var_type);
+                s.var_type = concat(inf_t, "");
+                s.has_explicit_type = true;
+            }
+        }
+        symtab_add(st, s.var_name, s.var_type);
+        return;
+    }
+
+    // 2: STMT_ASSIGN
+    if (s.kind == 2) {
+        return;
+    }
+
+    // 3: STMT_COMPOUND_ASSIGN
+    if (s.kind == 3) {
+        return;
+    }
+
+    // 4: STMT_INC_DEC
+    if (s.kind == 4) {
+        return;
+    }
+
+    // 5: STMT_IF
+    if (s.kind == 5) {
+        symtab_push_scope(st);
+        for (let i: int = 0; i < len(s.then_block); i++) {
+            typecheck_stmt(p, st, s.then_block[i]);
+        }
+        symtab_pop_scope(st);
+
+        symtab_push_scope(st);
+        for (let i: int = 0; i < len(s.else_block); i++) {
+            typecheck_stmt(p, st, s.else_block[i]);
+        }
+        symtab_pop_scope(st);
+        return;
+    }
+
+    // 6: STMT_WHILE
+    if (s.kind == 6) {
+        symtab_push_scope(st);
+        for (let i: int = 0; i < len(s.body); i++) {
+            typecheck_stmt(p, st, s.body[i]);
+        }
+        symtab_pop_scope(st);
+        return;
+    }
+
+    // 7: STMT_FOR
+    if (s.kind == 7) {
+        symtab_push_scope(st);
+        if (len(s.then_block) > 0) {
+            typecheck_stmt(p, st, s.then_block[0]);
+        }
+        if (len(s.step_stmt) > 0) {
+            typecheck_stmt(p, st, s.step_stmt[0]);
+        }
+        for (let i: int = 0; i < len(s.body); i++) {
+            typecheck_stmt(p, st, s.body[i]);
+        }
+        symtab_pop_scope(st);
+        return;
+    }
+
+    // 13: STMT_BLOCK
+    if (s.kind == 13) {
+        symtab_push_scope(st);
+        for (let i: int = 0; i < len(s.body); i++) {
+            typecheck_stmt(p, st, s.body[i]);
+        }
+        symtab_pop_scope(st);
+        return;
+    }
+
+    // 14: STMT_MATCH
+    if (s.kind == 14) {
+        for (let a: int = 0; a < len(s.body); a++) {
+            symtab_push_scope(st);
+            for (let j: int = 0; j < len(s.body[a].body); j++) {
+                typecheck_stmt(p, st, s.body[a].body[j]);
+            }
+            symtab_pop_scope(st);
+        }
+        return;
+    }
+}
+
+fn typecheck_function(prog: &Program, f: &FunctionDecl) -> void {
+    let st: SymTab = make_symtab();
+    for (let i: int = 0; i < len(f.params); i++) {
+        symtab_add(&st, f.params[i].name, f.params[i].type_name);
+    }
+    for (let i: int = 0; i < len(f.body); i++) {
+        typecheck_stmt(prog, &st, f.body[i]);
+    }
+}
+
+fn typecheck_method(prog: &Program, class_name: string, m: &FunctionDecl) -> void {
+    let st: SymTab = make_symtab();
+    symtab_add(&st, "self", class_name);
+    for (let i: int = 0; i < len(m.params); i++) {
+        symtab_add(&st, m.params[i].name, m.params[i].type_name);
+    }
+    for (let i: int = 0; i < len(m.body); i++) {
+        typecheck_stmt(prog, &st, m.body[i]);
+    }
+}
+
+fn typecheck_program(prog: &Program) -> int {
+    for (let i: int = 0; i < len(prog.functions); i++) {
+        typecheck_function(prog, prog.functions[i]);
+    }
+
+    for (let c: int = 0; c < len(prog.classes); c++) {
+        for (let m: int = 0; m < len(prog.classes[c].methods); m++) {
+            typecheck_method(prog, prog.classes[c].name, prog.classes[c].methods[m]);
+        }
+    }
+
+    return 0;
+}

@@ -373,14 +373,23 @@ static void analyze_node(ScopeStack *stack, AstNode *node) {
                 if (r_owned_idx != -1) {
                     stack->scopes[r_scope_idx].transferred[r_owned_idx] = true;
                     if (stack->current_function) {
-                        stack->current_function->as.function.returns_heap_pointer = true;
+                        if (stack->current_function->type == NODE_FUNCTION) {
+                            stack->current_function->as.function.returns_heap_pointer = true;
+                        } else if (stack->current_function->type == NODE_METHOD) {
+                            stack->current_function->as.method.returns_heap_pointer = true;
+                        }
                     }
                 }
             } else if (node->as.return_stmt.value && ((node->as.return_stmt.value->type == NODE_ALLOC && !node->as.return_stmt.value->as.alloc.is_map) || (node->as.return_stmt.value->type == NODE_CALL && is_stdlib_heap_fn(node->as.return_stmt.value->as.call.callee)))) {
                 if (stack->current_function) {
-                    stack->current_function->as.function.returns_heap_pointer = true;
+                    if (stack->current_function->type == NODE_FUNCTION) {
+                        stack->current_function->as.function.returns_heap_pointer = true;
+                    } else if (stack->current_function->type == NODE_METHOD) {
+                        stack->current_function->as.method.returns_heap_pointer = true;
+                    }
                 }
             }
+
 
             for (int s_idx = stack->depth - 1; s_idx >= 0; s_idx--) {
                 Scope *s = &stack->scopes[s_idx];

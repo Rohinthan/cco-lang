@@ -1,0 +1,45 @@
+// std/string.cco — Standard Library String Utilities
+
+fn string_concat(a: string, b: string) -> string {
+    return concat(a, b);
+}
+
+fn string_sub(s: string, start: int, end: int) -> string {
+    return substring(s, start, end);
+}
+
+fn string_char_at(s: string, i: int) -> char {
+    return char_at(s, i);
+}
+
+fn to_str_int(n: int) -> string {
+    return f"{n}";
+}
+
+fn to_str_float(f: float) -> string {
+    return f"{f}";
+}
+
+fn to_str_bool(b: bool) -> string {
+    return f"{b}";
+}
+
+fn to_str_char(c: char) -> string {
+    return f"{c}";
+}
+
+fn parse_int(s: string) -> int {
+    return to_int(s);
+}
+
+fn parse_float(s: string) -> float {
+    return to_float(s);
+}
+
+fn is_valid_int(s: string) -> bool {
+    return is_int(s);
+}
+
+fn is_valid_float(s: string) -> bool {
+    return is_float(s);
+}

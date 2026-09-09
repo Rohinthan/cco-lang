@@ -1,0 +1,884 @@
+import "ast.cco";
+import "lexer_core.cco";
+
+// parser_core.cco - Pratt & Recursive Descent Parser for Self-Hosted Cco
+
+class Parser {
+    tokens: Token[];
+    pos: int;
+    error_count: int;
+}
+
+fn is_at_end(p: &Parser) -> bool {
+    if (p.pos >= len(p.tokens)) {
+        return true;
+    }
+    match p.tokens[p.pos].kind {
+        TokenKind.Eof => { return true; }
+        _ => { return false; }
+    }
+}
+
+fn advance(p: &Parser) -> void {
+    if (!is_at_end(p)) {
+        p.pos = p.pos + 1;
+    }
+}
+
+fn peek_line(p: &Parser) -> int {
+    if (p.pos >= len(p.tokens)) { return 0; }
+    return p.tokens[p.pos].line;
+}
+
+fn peek_col(p: &Parser) -> int {
+    if (p.pos >= len(p.tokens)) { return 0; }
+    return p.tokens[p.pos].col;
+}
+
+fn check_keyword(p: &Parser, kw: string) -> bool {
+    if (is_at_end(p)) { return false; }
+    match p.tokens[p.pos].kind {
+        TokenKind.Keyword { word } => {
+            return equals(word, kw);
+        }
+        _ => { return false; }
+    }
+}
+
+fn check_symbol(p: &Parser, sym: string) -> bool {
+    if (is_at_end(p)) { return false; }
+    match p.tokens[p.pos].kind {
+        TokenKind.Symbol { text } => {
+            return equals(text, sym);
+        }
+        _ => { return false; }
+    }
+}
+
+fn check_ident(p: &Parser) -> bool {
+    if (is_at_end(p)) { return false; }
+    match p.tokens[p.pos].kind {
+        TokenKind.Ident { name } => { return true; }
+        _ => { return false; }
+    }
+}
+
+fn is_token_int(p: &Parser) -> bool {
+    if (is_at_end(p)) { return false; }
+    match p.tokens[p.pos].kind {
+        TokenKind.IntLit { value } => { return true; }
+        _ => { return false; }
+    }
+}
+
+fn is_token_float(p: &Parser) -> bool {
+    if (is_at_end(p)) { return false; }
+    match p.tokens[p.pos].kind {
+        TokenKind.FloatLit { value } => { return true; }
+        _ => { return false; }
+    }
+}
+
+fn is_token_string(p: &Parser) -> bool {
+    if (is_at_end(p)) { return false; }
+    match p.tokens[p.pos].kind {
+        TokenKind.StringLit { value } => { return true; }
+        _ => { return false; }
+    }
+}
+
+fn is_token_fstring(p: &Parser) -> bool {
+    if (is_at_end(p)) { return false; }
+    match p.tokens[p.pos].kind {
+        TokenKind.FStringLit { value } => { return true; }
+        _ => { return false; }
+    }
+}
+
+fn is_token_char(p: &Parser) -> bool {
+    if (is_at_end(p)) { return false; }
+    match p.tokens[p.pos].kind {
+        TokenKind.CharLit { value } => { return true; }
+        _ => { return false; }
+    }
+}
+
+fn peek_int(p: &Parser) -> int {
+    if (is_at_end(p)) { return 0; }
+    match p.tokens[p.pos].kind {
+        TokenKind.IntLit { value } => { return value; }
+        _ => { return 0; }
+    }
+}
+
+fn peek_float(p: &Parser) -> float {
+    if (is_at_end(p)) { return 0.0; }
+    match p.tokens[p.pos].kind {
+        TokenKind.FloatLit { value } => { return value; }
+        _ => { return 0.0; }
+    }
+}
+
+fn peek_string(p: &Parser) -> string {
+    if (is_at_end(p)) { return concat("", ""); }
+    match p.tokens[p.pos].kind {
+        TokenKind.StringLit { value } => { return concat(value, ""); }
+        _ => { return concat("", ""); }
+    }
+}
+
+fn peek_fstring(p: &Parser) -> string {
+    if (is_at_end(p)) { return concat("", ""); }
+    match p.tokens[p.pos].kind {
+        TokenKind.FStringLit { value } => { return concat(value, ""); }
+        _ => { return concat("", ""); }
+    }
+}
+
+fn peek_char(p: &Parser) -> char {
+    if (is_at_end(p)) { return ' '; }
+    match p.tokens[p.pos].kind {
+        TokenKind.CharLit { value } => { return value; }
+        _ => { return ' '; }
+    }
+}
+
+fn peek_ident(p: &Parser) -> string {
+    if (is_at_end(p)) { return concat("", ""); }
+    match p.tokens[p.pos].kind {
+        TokenKind.Ident { name } => { return concat(name, ""); }
+        _ => { return concat("", ""); }
+    }
+}
+
+fn peek_symbol(p: &Parser) -> string {
+    if (is_at_end(p)) { return concat("", ""); }
+    match p.tokens[p.pos].kind {
+        TokenKind.Symbol { text } => { return concat(text, ""); }
+        _ => { return concat("", ""); }
+    }
+}
+
+fn match_keyword(p: &Parser, kw: string) -> bool {
+    if (check_keyword(p, kw)) {
+        advance(p);
+        return true;
+    }
+    return false;
+}
+
+fn match_symbol(p: &Parser, sym: string) -> bool {
+    if (check_symbol(p, sym)) {
+        advance(p);
+        return true;
+    }
+    return false;
+}
+
+fn report_error(p: &Parser, msg: string, line: int, col: int) -> void {
+    p.error_count = p.error_count + 1;
+    let s_line: string = int_to_str(line);
+    let s_col: string = int_to_str(col);
+    let err: string = concat("Syntax Error [", s_line);
+    err = concat(err, ":");
+    err = concat(err, s_col);
+    err = concat(err, "]: ");
+    err = concat(err, msg);
+    print(err);
+}
+
+fn consume_ident(p: &Parser, msg: string) -> string {
+    let line: int = peek_line(p);
+    let col: int = peek_col(p);
+    if (check_ident(p)) {
+        let name: string = peek_ident(p);
+        advance(p);
+        return name;
+    }
+    report_error(p, msg, line, col);
+    advance(p);
+    return concat("", "");
+}
+
+fn consume_symbol(p: &Parser, sym: string, msg: string) -> bool {
+    let line: int = peek_line(p);
+    let col: int = peek_col(p);
+    if (check_symbol(p, sym)) {
+        advance(p);
+        return true;
+    }
+    report_error(p, msg, line, col);
+    return false;
+}
+
+fn consume_keyword(p: &Parser, kw: string, msg: string) -> bool {
+    let line: int = peek_line(p);
+    let col: int = peek_col(p);
+    if (check_keyword(p, kw)) {
+        advance(p);
+        return true;
+    }
+    report_error(p, msg, line, col);
+    return false;
+}
+
+fn get_precedence(p: &Parser) -> int {
+    if (is_at_end(p)) { return 0; }
+    match p.tokens[p.pos].kind {
+        TokenKind.Symbol { text } => {
+            if (equals(text, "=")) { return 1; }
+            if (equals(text, "||")) { return 2; }
+            if (equals(text, "&&")) { return 3; }
+            if (equals(text, "==") || equals(text, "!=")) { return 4; }
+            if (equals(text, "<") || equals(text, "<=") || equals(text, ">") || equals(text, ">=")) { return 5; }
+            if (equals(text, "+") || equals(text, "-")) { return 6; }
+            if (equals(text, "*") || equals(text, "/") || equals(text, "%")) { return 7; }
+            if (equals(text, "(") || equals(text, ".") || equals(text, "[")) { return 9; }
+            return 0;
+        }
+        _ => { return 0; }
+    }
+}
+
+fn parse_type_name(p: &Parser) -> string {
+    let is_borrowed: bool = false;
+    if (match_symbol(p, "&")) {
+        is_borrowed = true;
+    }
+    let line: int = peek_line(p);
+    let col: int = peek_col(p);
+    let base: string = "";
+    if (check_ident(p)) {
+        base = peek_ident(p);
+        advance(p);
+    } else if (check_keyword(p, "int") || check_keyword(p, "float") || check_keyword(p, "string") || check_keyword(p, "bool") || check_keyword(p, "char") || check_keyword(p, "void")) {
+        match p.tokens[p.pos].kind {
+            TokenKind.Keyword { word } => {
+                base = concat(word, "");
+                advance(p);
+            }
+            _ => {}
+        }
+    } else {
+        report_error(p, "Expected type name", line, col);
+        advance(p);
+        return concat("int", "");
+    }
+
+    if (match_symbol(p, "[")) {
+        consume_symbol(p, "]", "Expected ']' in array type");
+        base = concat(base, "[]");
+    }
+    if (is_borrowed) {
+        base = concat("&", base);
+    }
+    return base;
+}
+
+fn parse_args(p: &Parser) -> Expr[] {
+    let args: Expr[] = list_new(Expr);
+    if (!check_symbol(p, ")")) {
+        let first: Expr = parse_expr(p, 0);
+        args = push(args, first);
+        while (match_symbol(p, ",")) {
+            let next_arg: Expr = parse_expr(p, 0);
+            args = push(args, next_arg);
+        }
+    }
+    consume_symbol(p, ")", "Expected ')' after argument list");
+    return args;
+}
+
+fn parse_struct_or_enum_inst(p: &Parser, type_name: string, line: int, col: int) -> Expr {
+    consume_symbol(p, "{", "Expected '{' in struct/enum instantiation");
+    let fnames: string[] = list_new(string);
+    let fvals: Expr[] = list_new(Expr);
+    if (!check_symbol(p, "}")) {
+        let fname: string = consume_ident(p, "Expected field name");
+        consume_symbol(p, ":", "Expected ':' after field name");
+        let fval: Expr = parse_expr(p, 0);
+        fnames = push(fnames, fname);
+        fvals = push(fvals, fval);
+        while (match_symbol(p, ",")) {
+            if (check_symbol(p, "}")) { break; }
+            let fnm: string = consume_ident(p, "Expected field name");
+            consume_symbol(p, ":", "Expected ':' after field name");
+            let fvl: Expr = parse_expr(p, 0);
+            fnames = push(fnames, fnm);
+            fvals = push(fvals, fvl);
+        }
+    }
+    consume_symbol(p, "}", "Expected '}' after struct/enum fields");
+    return make_new_expr(type_name, fnames, fvals, line, col);
+}
+
+fn parse_prefix(p: &Parser) -> Expr {
+    let line: int = peek_line(p);
+    let col: int = peek_col(p);
+
+    if (is_token_int(p)) {
+        let v: int = peek_int(p);
+        advance(p);
+        return make_int_expr(v, line, col);
+    }
+    if (is_token_float(p)) {
+        let v: float = peek_float(p);
+        advance(p);
+        return make_float_expr(v, line, col);
+    }
+    if (is_token_string(p)) {
+        let v: string = peek_string(p);
+        advance(p);
+        return make_string_expr(v, line, col);
+    }
+    if (is_token_fstring(p)) {
+        let v: string = peek_fstring(p);
+        advance(p);
+        return make_fstring_expr(v, line, col);
+    }
+    if (is_token_char(p)) {
+        let v: char = peek_char(p);
+        advance(p);
+        return make_char_expr(v, line, col);
+    }
+    if (match_keyword(p, "true")) {
+        return make_bool_expr(true, line, col);
+    }
+    if (match_keyword(p, "false")) {
+        return make_bool_expr(false, line, col);
+    }
+    if (match_keyword(p, "alloc")) {
+        consume_symbol(p, "(", "Expected '(' after 'alloc'");
+        let elem_t: string = parse_type_name(p);
+        consume_symbol(p, ",", "Expected ',' in alloc");
+        let cnt: Expr = parse_expr(p, 0);
+        consume_symbol(p, ")", "Expected ')' after alloc");
+        return make_alloc_expr(elem_t, cnt, line, col);
+    }
+    if (match_keyword(p, "list_new")) {
+        consume_symbol(p, "(", "Expected '(' after 'list_new'");
+        let elem_t: string = parse_type_name(p);
+        consume_symbol(p, ")", "Expected ')' after list_new");
+        return make_list_new_expr(elem_t, line, col);
+    }
+    if (match_keyword(p, "map_new")) {
+        consume_symbol(p, "(", "Expected '(' after 'map_new'");
+        let kt: string = parse_type_name(p);
+        consume_symbol(p, ",", "Expected ',' in map_new");
+        let vt: string = parse_type_name(p);
+        consume_symbol(p, ")", "Expected ')' after map_new");
+        return make_map_new_expr(kt, vt, line, col);
+    }
+    if (check_ident(p)) {
+        let type_prefix: string = peek_ident(p);
+        advance(p);
+        // Check for Enum.Variant
+        let is_type: bool = len(type_prefix) > 0 && char_at(type_prefix, 0) >= 'A' && char_at(type_prefix, 0) <= 'Z';
+        if (is_type && check_symbol(p, ".")) {
+            if (p.pos + 1 < len(p.tokens)) {
+                let is_var_upper: bool = false;
+                match p.tokens[p.pos + 1].kind {
+                    TokenKind.Ident { name } => {
+                        if (len(name) > 0 && char_at(name, 0) >= 'A' && char_at(name, 0) <= 'Z') {
+                            is_var_upper = true;
+                        }
+                    }
+                    _ => {}
+                }
+                if (is_var_upper) {
+                    advance(p);
+                    let vname: string = consume_ident(p, "Expected variant name after '.'");
+                    let full_enum_name: string = concat(type_prefix, ".");
+                    full_enum_name = concat(full_enum_name, vname);
+                    if (check_symbol(p, "{")) {
+                        return parse_struct_or_enum_inst(p, full_enum_name, line, col);
+                    }
+                    return make_ident_expr(full_enum_name, line, col);
+                }
+            }
+        }
+        // Check for struct instantiation: Name { ... }
+        if (check_symbol(p, "{")) {
+            return parse_struct_or_enum_inst(p, type_prefix, line, col);
+        }
+        return make_ident_expr(type_prefix, line, col);
+    }
+    if (match_symbol(p, "(")) {
+        let inner: Expr = parse_expr(p, 0);
+        consume_symbol(p, ")", "Expected ')' after grouped expression");
+        return inner;
+    }
+    if (check_symbol(p, "-") || check_symbol(p, "!") || check_symbol(p, "&")) {
+        let op_text: string = peek_symbol(p);
+        advance(p);
+        let operand: Expr = parse_expr(p, 8); // PREC_UNARY
+        return make_unary_expr(op_text, operand, line, col);
+    }
+
+    report_error(p, "Unexpected token in expression", line, col);
+    advance(p);
+    return make_int_expr(0, line, col);
+}
+
+fn parse_expr(p: &Parser, prec: int) -> Expr {
+    let expr: Expr = parse_prefix(p);
+
+    while (!is_at_end(p) && get_precedence(p) > prec) {
+        let line: int = peek_line(p);
+        let col: int = peek_col(p);
+        let op_text: string = peek_symbol(p);
+
+        if (equals(op_text, "(")) {
+            // Function call
+            advance(p);
+            let args: Expr[] = parse_args(p);
+            expr = make_call_expr(expr.callee, args, line, col);
+        } else if (equals(op_text, ".")) {
+            // Member access or method call
+            advance(p);
+            let member: string = consume_ident(p, "Expected member name after '.'");
+            if (match_symbol(p, "(")) {
+                let args: Expr[] = parse_args(p);
+                expr = make_method_call_expr(expr, member, args, line, col);
+            } else {
+                expr = make_member_expr(expr, member, line, col);
+            }
+        } else if (equals(op_text, "[")) {
+            // Array indexing
+            advance(p);
+            let idx: Expr = parse_expr(p, 0);
+            consume_symbol(p, "]", "Expected ']' after array index");
+            expr = make_index_expr(expr, idx, line, col);
+        } else {
+            // Binary operator
+            let op_prec: int = get_precedence(p);
+            advance(p);
+            let right: Expr = parse_expr(p, op_prec);
+            expr = make_binary_expr(op_text, expr, right, line, col);
+        }
+    }
+
+    return expr;
+}
+
+fn parse_block_stmts(p: &Parser) -> Stmt[] {
+    let stmts: Stmt[] = list_new(Stmt);
+    while (!is_at_end(p) && !check_symbol(p, "}")) {
+        let s: Stmt = parse_stmt(p);
+        stmts = push(stmts, s);
+    }
+    return stmts;
+}
+
+fn parse_let_type(p: &Parser, has_type: bool) -> string {
+    if (has_type) {
+        return parse_type_name(p);
+    }
+    return "";
+}
+
+fn parse_for_step(p: &Parser, step_target: Expr, line: int, col: int) -> Stmt {
+    if (check_symbol(p, "++") || check_symbol(p, "--")) {
+        let op: string = peek_symbol(p);
+        advance(p);
+        return make_inc_dec_stmt(step_target, op, line, col);
+    }
+    if (check_symbol(p, "+=") || check_symbol(p, "-=") || check_symbol(p, "*=") || check_symbol(p, "/=") || check_symbol(p, "%=")) {
+        let op: string = peek_symbol(p);
+        advance(p);
+        let val: Expr = parse_expr(p, 0);
+        return make_compound_assign_stmt(step_target, op, val, line, col);
+    }
+    if (match_symbol(p, "=")) {
+        let val: Expr = parse_expr(p, 0);
+        return make_assign_stmt(step_target, val, line, col);
+    }
+    return make_expr_stmt(step_target, line, col);
+}
+
+fn parse_else_block(p: &Parser) -> Stmt[] {
+    let empty: Stmt[] = list_new(Stmt);
+    if (match_keyword(p, "else")) {
+        if (check_keyword(p, "if")) {
+            let else_b: Stmt[] = list_new(Stmt);
+            let nested_if: Stmt = parse_stmt(p);
+            else_b = push(else_b, nested_if);
+            return else_b;
+        }
+        consume_symbol(p, "{", "Expected '{' before else block");
+        let blk: Stmt[] = parse_block_stmts(p);
+        consume_symbol(p, "}", "Expected '}' after else block");
+        return blk;
+    }
+    return empty;
+}
+
+fn parse_stmt(p: &Parser) -> Stmt {
+    let line: int = peek_line(p);
+    let col: int = peek_col(p);
+
+    // 1. Let statement
+    if (match_keyword(p, "let")) {
+        let name: string = consume_ident(p, "Expected variable name after 'let'");
+        let has_type: bool = match_symbol(p, ":");
+        let type_name: string = parse_let_type(p, has_type);
+        consume_symbol(p, "=", "Expected '=' in variable declaration");
+        let init: Expr = parse_expr(p, 0);
+        consume_symbol(p, ";", "Expected ';' after let statement");
+        return make_let_stmt(name, type_name, has_type, init, line, col);
+    }
+
+    // 2. If statement
+    if (match_keyword(p, "if")) {
+        consume_symbol(p, "(", "Expected '(' after 'if'");
+        let cond: Expr = parse_expr(p, 0);
+        consume_symbol(p, ")", "Expected ')' after if condition");
+        consume_symbol(p, "{", "Expected '{' before then block");
+        let then_b: Stmt[] = parse_block_stmts(p);
+        consume_symbol(p, "}", "Expected '}' after then block");
+        let else_b: Stmt[] = parse_else_block(p);
+        return make_if_stmt(cond, then_b, else_b, line, col);
+    }
+
+    // 3. While loop
+    if (match_keyword(p, "while")) {
+        consume_symbol(p, "(", "Expected '(' after 'while'");
+        let cond: Expr = parse_expr(p, 0);
+        consume_symbol(p, ")", "Expected ')' after while condition");
+        consume_symbol(p, "{", "Expected '{' before while body");
+        let body: Stmt[] = parse_block_stmts(p);
+        consume_symbol(p, "}", "Expected '}' after while body");
+        return make_while_stmt(cond, body, line, col);
+    }
+
+    // 4. For loop
+    if (match_keyword(p, "for")) {
+        consume_symbol(p, "(", "Expected '(' after 'for'");
+        let init: Stmt = parse_stmt(p);
+        let cond: Expr = parse_expr(p, 0);
+        consume_symbol(p, ";", "Expected ';' after for loop condition");
+
+        let step_target: Expr = parse_expr(p, 0);
+        let step_stmt: Stmt = parse_for_step(p, step_target, line, col);
+
+        consume_symbol(p, ")", "Expected ')' after for loop clause");
+        consume_symbol(p, "{", "Expected '{' before for body");
+        let body: Stmt[] = parse_block_stmts(p);
+        consume_symbol(p, "}", "Expected '}' after for body");
+        return make_for_stmt(init, cond, step_stmt, body, line, col);
+    }
+
+    // 5. Return
+    if (match_keyword(p, "return")) {
+        let exprs: Expr[] = list_new(Expr);
+        if (!match_symbol(p, ";")) {
+            let val: Expr = parse_expr(p, 0);
+            consume_symbol(p, ";", "Expected ';' after return expression");
+            exprs = push(exprs, val);
+        }
+        return make_return_stmt(exprs, line, col);
+    }
+
+    // 6. Break & Continue
+    if (match_keyword(p, "break")) {
+        consume_symbol(p, ";", "Expected ';' after 'break'");
+        return make_break_stmt(line, col);
+    }
+    if (match_keyword(p, "continue")) {
+        consume_symbol(p, ";", "Expected ';' after 'continue'");
+        return make_continue_stmt(line, col);
+    }
+
+    // 7. Print
+    if (match_keyword(p, "print")) {
+        consume_symbol(p, "(", "Expected '(' after 'print'");
+        let val: Expr = parse_expr(p, 0);
+        consume_symbol(p, ")", "Expected ')' after print argument");
+        consume_symbol(p, ";", "Expected ';' after print statement");
+        return make_print_stmt(val, line, col);
+    }
+
+    // 8. Match
+    if (match_keyword(p, "match")) {
+        let scr: Expr = parse_expr(p, 0);
+        consume_symbol(p, "{", "Expected '{' before match arms");
+        let arms: Stmt[] = list_new(Stmt);
+        while (!is_at_end(p) && !check_symbol(p, "}")) {
+            let arm_line: int = peek_line(p);
+            let arm_col: int = peek_col(p);
+            let is_wildcard: bool = false;
+            let variant: string = "";
+            let bind_vars: string[] = list_new(string);
+
+            if (match_symbol(p, "_")) {
+                is_wildcard = true;
+            } else {
+                let enum_tok: string = consume_ident(p, "Expected enum variant or wildcard in match");
+                if (match_symbol(p, ".")) {
+                    variant = consume_ident(p, "Expected variant name after '.'");
+                } else {
+                    variant = enum_tok;
+                }
+                if (match_symbol(p, "{")) {
+                    if (!check_symbol(p, "}")) {
+                        let bv: string = consume_ident(p, "Expected bound variable name");
+                        bind_vars = push(bind_vars, bv);
+                        while (match_symbol(p, ",")) {
+                            if (check_symbol(p, "}")) { break; }
+                            let nbv: string = consume_ident(p, "Expected bound variable name");
+                            bind_vars = push(bind_vars, nbv);
+                        }
+                    }
+                    consume_symbol(p, "}", "Expected '}' after variant pattern bindings");
+                }
+            }
+            consume_symbol(p, "=>", "Expected '=>' after match pattern");
+            consume_symbol(p, "{", "Expected '{' before match arm body");
+            let arm_body: Stmt[] = parse_block_stmts(p);
+            consume_symbol(p, "}", "Expected '}' after match arm body");
+            let arm: Stmt = make_match_arm(variant, is_wildcard, bind_vars, arm_body, arm_line, arm_col);
+            arms = push(arms, arm);
+        }
+        consume_symbol(p, "}", "Expected '}' after match statement");
+        return make_match_stmt(scr, arms, line, col);
+    }
+
+    // 9. Block
+    if (match_symbol(p, "{")) {
+        let stmts: Stmt[] = parse_block_stmts(p);
+        consume_symbol(p, "}", "Expected '}' after block statement");
+        return make_block_stmt(stmts, line, col);
+    }
+
+    // 10. Assignments, compound assignments, inc/dec, or expr statement
+    let expr: Expr = parse_expr(p, 0);
+
+    if (match_symbol(p, "=")) {
+        let val: Expr = parse_expr(p, 0);
+        consume_symbol(p, ";", "Expected ';' after assignment");
+        return make_assign_stmt(expr, val, line, col);
+    }
+
+    if (check_symbol(p, "+=") || check_symbol(p, "-=") || check_symbol(p, "*=") || check_symbol(p, "/=") || check_symbol(p, "%=")) {
+        let op: string = peek_symbol(p);
+        advance(p);
+        let val: Expr = parse_expr(p, 0);
+        consume_symbol(p, ";", "Expected ';' after compound assignment");
+        return make_compound_assign_stmt(expr, op, val, line, col);
+    }
+
+    if (check_symbol(p, "++") || check_symbol(p, "--")) {
+        let op: string = peek_symbol(p);
+        advance(p);
+        consume_symbol(p, ";", "Expected ';' after increment/decrement");
+        return make_inc_dec_stmt(expr, op, line, col);
+    }
+
+    consume_symbol(p, ";", "Expected ';' after expression statement");
+    return make_expr_stmt(expr, line, col);
+}
+
+fn parse_params(p: &Parser) -> Param[] {
+    let params: Param[] = list_new(Param);
+    if (!check_symbol(p, ")")) {
+        let is_borrowed: bool = false;
+        let pname: string = consume_ident(p, "Expected parameter name");
+        consume_symbol(p, ":", "Expected ':' after parameter name");
+        if (match_symbol(p, "&")) { is_borrowed = true; }
+        let ptype: string = parse_type_name(p);
+        params = push(params, make_param(pname, ptype, is_borrowed, false));
+
+        while (match_symbol(p, ",")) {
+            let bor: bool = false;
+            let nm: string = consume_ident(p, "Expected parameter name");
+            consume_symbol(p, ":", "Expected ':' after parameter name");
+            if (match_symbol(p, "&")) { bor = true; }
+            let tp: string = parse_type_name(p);
+            params = push(params, make_param(nm, tp, bor, false));
+        }
+    }
+    consume_symbol(p, ")", "Expected ')' after parameter list");
+    return params;
+}
+
+fn parse_fields(p: &Parser) -> Field[] {
+    let fields: Field[] = list_new(Field);
+    while (!is_at_end(p) && !check_symbol(p, "}") && !check_keyword(p, "fn")) {
+        let fname: string = consume_ident(p, "Expected field name");
+        consume_symbol(p, ":", "Expected ':' after field name");
+        let ftype: string = parse_type_name(p);
+        consume_symbol(p, ";", "Expected ';' after field declaration");
+        fields = push(fields, make_field(fname, ftype, false));
+    }
+    return fields;
+}
+
+fn parse_fn_name(p: &Parser, is_op: bool, op_sym: string) -> string {
+    if (is_op) {
+        return concat("operator", op_sym);
+    }
+    return consume_ident(p, "Expected function name");
+}
+
+fn parse_function_decl(p: &Parser) -> FunctionDecl {
+    let line: int = peek_line(p);
+    let col: int = peek_col(p);
+    consume_keyword(p, "fn", "Expected 'fn'");
+
+    let is_op: bool = false;
+    let op_sym: string = "";
+
+    if (match_keyword(p, "operator")) {
+        is_op = true;
+        op_sym = peek_symbol(p);
+        advance(p);
+    }
+    let fname: string = parse_fn_name(p, is_op, op_sym);
+
+    consume_symbol(p, "(", "Expected '(' after function name");
+    let params: Param[] = parse_params(p);
+
+    let ret_type: string = "void";
+    if (match_symbol(p, "->")) {
+        let parsed_ret: string = parse_type_name(p);
+        ret_type = concat(parsed_ret, "");
+    }
+
+    consume_symbol(p, "{", "Expected '{' before function body");
+    let body: Stmt[] = parse_block_stmts(p);
+    consume_symbol(p, "}", "Expected '}' after function body");
+
+    return FunctionDecl {
+        name: concat(fname, ""),
+        params: params,
+        return_type: concat(ret_type, ""),
+        is_operator: is_op,
+        operator_symbol: concat(op_sym, ""),
+        body: body,
+        line: line,
+        col: col,
+    };
+}
+
+fn parse_struct_decl(p: &Parser) -> StructDecl {
+    let line: int = peek_line(p);
+    let col: int = peek_col(p);
+    consume_keyword(p, "struct", "Expected 'struct'");
+    let name: string = consume_ident(p, "Expected struct name");
+    consume_symbol(p, "{", "Expected '{' before struct fields");
+    let fields: Field[] = parse_fields(p);
+    consume_symbol(p, "}", "Expected '}' after struct fields");
+    return StructDecl {
+        name: concat(name, ""),
+        fields: fields,
+        line: line,
+        col: col,
+    };
+}
+
+fn parse_class_decl(p: &Parser) -> ClassDecl {
+    let line: int = peek_line(p);
+    let col: int = peek_col(p);
+    consume_keyword(p, "class", "Expected 'class'");
+    let name: string = consume_ident(p, "Expected class name");
+    consume_symbol(p, "{", "Expected '{' before class body");
+    let fields: Field[] = parse_fields(p);
+    let methods: FunctionDecl[] = list_new(FunctionDecl);
+    while (check_keyword(p, "fn")) {
+        let m: FunctionDecl = parse_function_decl(p);
+        methods = push(methods, m);
+    }
+    consume_symbol(p, "}", "Expected '}' after class body");
+    return ClassDecl {
+        name: concat(name, ""),
+        fields: fields,
+        methods: methods,
+        line: line,
+        col: col,
+    };
+}
+
+fn parse_enum_decl(p: &Parser) -> EnumDecl {
+    let line: int = peek_line(p);
+    let col: int = peek_col(p);
+    consume_keyword(p, "enum", "Expected 'enum'");
+    let name: string = consume_ident(p, "Expected enum name");
+    consume_symbol(p, "{", "Expected '{' before enum variants");
+    let variants: VariantDecl[] = list_new(VariantDecl);
+
+    while (!is_at_end(p) && !check_symbol(p, "}")) {
+        let vname: string = consume_ident(p, "Expected variant name");
+        let vfields: Field[] = list_new(Field);
+        let is_unit: bool = true;
+
+        if (match_symbol(p, "{")) {
+            is_unit = false;
+            while (!is_at_end(p) && !check_symbol(p, "}")) {
+                let fnm: string = consume_ident(p, "Expected field name");
+                consume_symbol(p, ":", "Expected ':' after field name");
+                let ftp: string = parse_type_name(p);
+                if (match_symbol(p, ",")) { }
+                vfields = push(vfields, make_field(fnm, ftp, false));
+            }
+            consume_symbol(p, "}", "Expected '}' after variant fields");
+        }
+        if (match_symbol(p, ",")) { }
+        variants = push(variants, VariantDecl { name: concat(vname, ""), fields: vfields, is_unit: is_unit });
+    }
+    consume_symbol(p, "}", "Expected '}' after enum declaration");
+
+    return EnumDecl {
+        name: concat(name, ""),
+        variants: variants,
+        line: line,
+        col: col,
+    };
+}
+
+fn parse_program(tokens: Token[]) -> Program {
+    let p: Parser = Parser {
+        tokens: tokens,
+        pos: 0,
+        error_count: 0,
+    };
+
+    let structs: StructDecl[] = list_new(StructDecl);
+    let classes: ClassDecl[] = list_new(ClassDecl);
+    let enums: EnumDecl[] = list_new(EnumDecl);
+    let functions: FunctionDecl[] = list_new(FunctionDecl);
+
+    while (!is_at_end(&p)) {
+        if (match_keyword(&p, "import")) {
+            let tok_str: string = peek_string(&p);
+            advance(&p);
+            consume_symbol(&p, ";", "Expected ';' after import");
+            continue;
+        }
+
+        if (check_keyword(&p, "struct")) {
+            let s: StructDecl = parse_struct_decl(&p);
+            structs = push(structs, s);
+        } else if (check_keyword(&p, "class")) {
+            let c: ClassDecl = parse_class_decl(&p);
+            classes = push(classes, c);
+        } else if (check_keyword(&p, "enum")) {
+            let e: EnumDecl = parse_enum_decl(&p);
+            enums = push(enums, e);
+        } else if (check_keyword(&p, "fn")) {
+            let f: FunctionDecl = parse_function_decl(&p);
+            functions = push(functions, f);
+        } else {
+            let line: int = peek_line(&p);
+            let col: int = peek_col(&p);
+            report_error(&p, "Expected top-level declaration (fn, struct, class, enum)", line, col);
+            advance(&p);
+        }
+    }
+
+    return Program {
+        structs: structs,
+        classes: classes,
+        enums: enums,
+        functions: functions,
+    };
+}
