@@ -14,7 +14,7 @@ typedef struct {
     int col;
 } ErrorLocation;
 
-void print_formatted_error(const char *short_msg,
+_Noreturn void print_formatted_error(const char *short_msg,
                           ErrorLocation primary,
                           const char *primary_caret_note,
                           const char *note_msg,
@@ -22,7 +22,7 @@ void print_formatted_error(const char *short_msg,
                           const char *note_caret_note,
                           const char *extra_footer_note);
 
-void fatal_lexer_error(int line, int col, const char *msg);
-void fatal_parser_error(int line, int col, const char *token_str, const char *msg);
+_Noreturn void fatal_lexer_error(int line, int col, const char *msg);
+_Noreturn void fatal_parser_error(int line, int col, const char *token_str, const char *msg);
 
 #endif // ERRORS_H

@@ -1591,7 +1591,7 @@ static AstNode *parse_function(Parser *p) {
 
     if (match(p, TOKEN_OPERATOR)) {
         is_operator = true;
-        Token op_tok;
+        Token op_tok = {0};
         if (match(p, TOKEN_PLUS)) {
             op_tok = previous(p);
             op_symbol = "+";
