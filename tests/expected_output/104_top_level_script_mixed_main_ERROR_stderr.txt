@@ -1,0 +1,12 @@
+error: cannot mix top-level statements with an explicit fn main — choose one
+  --> tests/programs/104_top_level_script_mixed_main_ERROR.cco:6:1
+    |
+  6 | let x: int = 10;
+    | ^ top-level statement here
+    |
+note: explicit fn main declared here:
+  --> tests/programs/104_top_level_script_mixed_main_ERROR.cco:1:1
+    |
+  1 | fn main() -> int {
+    | ^ explicit fn main here
+    |
