@@ -1,0 +1,7 @@
+fn main() -> int {
+    print("inside main");
+    return 0;
+}
+
+let x: int = 10;
+print(x);
