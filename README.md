@@ -61,6 +61,31 @@ When building production services or running benchmarks, re-compiling via `--run
 
 ---
 
+### Top-Level Script Syntax (Recommended for Scripts & Simple Programs)
+
+Cco supports Python-script-style top-level executable code. You do **not** need to wrap your entry-point code in a boilerplate `fn main() -> int { ... return 0; }`:
+
+```cco
+let x = 10;
+let y = 20;
+print(f"sum = {x + y}");
+```
+
+Compile and run directly:
+```bash
+cco script.cco -o script
+./script
+```
+
+#### How Top-Level Scripts Work:
+- **Zero Boilerplate**: Ordinary statements (`let`, `if`, `while`, `for`, `match`, `print`, function calls, expressions) can be written directly at the top level of the entry file.
+- **Functions Alongside Scripts**: You can declare helper functions (`fn`), structs, classes, and enums alongside top-level executable code in any order.
+- **Desugared to `main()`**: The compiler automatically collects top-level statements in source order and desugars them into a synthesized `main()` function with an implicit exit code `0`. All resource cleanups and affine ownership scopes are handled identically with 0 memory leaks.
+- **Explicit `fn main()` Remains Fully Supported**: Hand-written `fn main() -> int { ... }` remains 100% valid for multi-file architectures or custom entry points. Mixing top-level statements with an explicit `fn main` is rejected with a clear compile error (`cannot mix top-level statements with an explicit fn main — choose one`).
+- **Imported Modules Stay Declarative**: Imported files reached via `import "x.cco";` must contain only declarations (`fn`, `class`, `struct`, etc.). Top-level statements are exclusively allowed in the entry file (`only the entry file may contain top-level executable statements`).
+
+---
+
 ### Executing Programs with `./cco <file.cco> --run` (Development Mode)
 
 To rapidly test and debug a Cco program without creating a persistent binary, use the `--run` flag:
@@ -716,6 +741,10 @@ All test cases are verified using `valgrind --leak-check=full --error-exitcode=1
 | `99_increment_decrement` | Postfix and prefix increment/decrement (`++`, `--`) statements | PASS | 0 Bytes Leaked |
 | `100_increment_as_expression_ERROR` | Rejecting `++`/`--` inside expressions (statement-only) | PASS | Compile Error (Expected) |
 | `101_fstring_escape_sequences` | Escaped characters, quotes, and newlines inside f-string expressions | PASS | 0 Bytes Leaked |
+| `102_top_level_script_basic` | Top-level script syntax (variables, arithmetic, printing without `main`) | PASS | 0 Bytes Leaked |
+| `103_top_level_script_with_fn` | Top-level script with alongside helper function definitions | PASS | 0 Bytes Leaked |
+| `104_top_level_script_mixed_main_ERROR` | Rejecting mixing top-level statements with explicit `fn main` | PASS | Compile Error (Expected) |
+| `105_top_level_script_in_import_ERROR` | Rejecting top-level executable statements in imported modules | PASS | Compile Error (Expected) |
 | `net_01_basic_routes` | HTTP router endpoint dispatch over POSIX sockets | PASS | 0 Bytes Leaked (0 FD Leaks) |
 | `net_02_rapid_requests` | High-frequency concurrent request handling | PASS | 0 Bytes Leaked (0 FD Leaks) |
 | `net_03_malformed_requests` | Graceful handling and rejection of malformed HTTP payloads | PASS | 0 Bytes Leaked (0 FD Leaks) |
