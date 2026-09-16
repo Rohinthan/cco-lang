@@ -1,18 +1,15 @@
-// 05_array_sum.cco — Dynamic array allocation and iteration with v19 sugar
+// 05_array_sum.cco — Dynamic array allocation and iteration in top-level script style
 
-fn main() -> int {
-    let size = 5;
-    let numbers = alloc(int, size);
+let size: int = 5;
+let numbers: int = alloc(int, size);
 
-    for (let i = 0; i < size; i++) {
-        numbers[i] = (i + 1) * 10;
-    }
-
-    let sum = 0;
-    for (let i = 0; i < size; i++) {
-        sum += numbers[i];
-    }
-
-    print(sum);
-    return 0;
+for (let i: int = 0; i < size; i++) {
+    numbers[i] = (i + 1) * 10;
 }
+
+let sum: int = 0;
+for (let i: int = 0; i < size; i++) {
+    sum += numbers[i];
+}
+
+print(sum);
