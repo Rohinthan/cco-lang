@@ -1,0 +1,6 @@
+import "imported.cco";
+
+fn main() -> int {
+    print("entry main");
+    return 0;
+}
