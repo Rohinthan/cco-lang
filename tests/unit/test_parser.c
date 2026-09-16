@@ -264,6 +264,35 @@ void test_parse_interface() {
     printf("[PASS] test_parse_interface\n");
 }
 
+void test_parse_top_level_script() {
+    const char *src = "let x: int = 10; print(x);";
+    TokenArray tokens = lex_source(src);
+    AstArena *arena = create_ast_arena();
+    Parser parser = create_parser(tokens, arena);
+
+    AstNode *prog = parse_program(&parser);
+    assert(prog != NULL);
+    assert(prog->type == NODE_PROGRAM);
+    assert(prog->as.program.top_level_count == 2);
+    assert(prog->as.program.top_level_stmts[0]->type == NODE_LET);
+    assert(prog->as.program.top_level_stmts[1]->type == NODE_PRINT);
+
+    desugar_top_level_program(prog, arena, "script.cco");
+    assert(prog->as.program.count == 1);
+    assert(prog->as.program.top_level_count == 0);
+    AstNode *fn = prog->as.program.functions[0];
+    assert(fn->type == NODE_FUNCTION);
+    assert(strcmp(fn->as.function.name, "main") == 0);
+    assert(fn->as.function.return_type == TY_INT);
+    assert(fn->as.function.body->type == NODE_BLOCK);
+    assert(fn->as.function.body->as.block.count == 3);
+    assert(fn->as.function.body->as.block.stmts[2]->type == NODE_RETURN);
+
+    free_ast_arena(arena);
+    free_tokens(&tokens);
+    printf("[PASS] test_parse_top_level_script\n");
+}
+
 int main() {
     printf("Running Parser Unit Tests...\n");
     test_parse_simple_func();
@@ -273,6 +302,7 @@ int main() {
     test_parse_map();
     test_parse_enum();
     test_parse_interface();
+    test_parse_top_level_script();
     printf("All Parser tests passed!\n");
     return 0;
 }
