@@ -114,6 +114,8 @@ struct AstNode {
             int impl_count;
             AstNode **functions;
             int count;
+            AstNode **top_level_stmts;
+            int top_level_count;
         } program;
 
         struct {
