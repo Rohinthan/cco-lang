@@ -1,0 +1,2 @@
+let in_imported: int = 42;
+print(in_imported);
