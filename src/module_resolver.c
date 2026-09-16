@@ -460,6 +460,20 @@ static void resolve_file_rec(ResolverCtx *ctx, const char *raw_path, const char 
     Parser parser = create_parser(tokens, arena);
     AstNode *file_ast = parse_program(&parser);
 
+    if (importing_canonical != NULL) {
+        if (file_ast->as.program.top_level_count > 0) {
+            AstNode *first_stmt = file_ast->as.program.top_level_stmts[0];
+            char short_msg[256];
+            snprintf(short_msg, sizeof(short_msg), "only the entry file may contain top-level executable statements");
+            ErrorLocation primary = {display_path, first_stmt->line, first_stmt->col};
+            print_formatted_error(short_msg, primary, "top-level statement in imported file",
+                                  "imported files must contain only declarations (fn, class, struct, enum, interface, impl)",
+                                  NULL, NULL, NULL);
+        }
+    } else {
+        desugar_top_level_program(file_ast, arena, display_path);
+    }
+
     // 1. Recurse on imports depth-first
     for (int i = 0; i < file_ast->as.program.import_count; i++) {
         AstNode *imp = file_ast->as.program.imports[i];
