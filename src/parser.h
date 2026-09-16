@@ -12,5 +12,6 @@ typedef struct {
 
 Parser create_parser(TokenArray tokens, AstArena *arena);
 AstNode *parse_program(Parser *parser);
+void desugar_top_level_program(AstNode *prog, AstArena *arena, const char *source_file);
 
 #endif // PARSER_H
