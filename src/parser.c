@@ -2377,11 +2377,15 @@ AstNode *parse_program(Parser *p) {
     int fn_count = 0;
     int fn_cap = 0;
 
+    AstNode **top_level_stmts = NULL;
+    int top_level_count = 0;
+    int top_level_cap = 0;
+
     bool seen_decl = false;
 
     while (!is_at_end(p)) {
         if (check(p, TOKEN_IMPORT)) {
-            if (seen_decl) {
+            if (seen_decl || top_level_count > 0) {
                 fatal_parser_error(peek(p).line, peek(p).col, peek(p).lexeme, "import statements must appear before any function or class declaration");
             }
             AstNode *imp = parse_import_stmt(p);
@@ -2452,8 +2456,17 @@ AstNode *parse_program(Parser *p) {
                 functions = new_fns;
             }
             functions[fn_count++] = fn;
+        } else if (check(p, TOKEN_RETURN)) {
+            fatal_parser_error(peek(p).line, peek(p).col, peek(p).lexeme, "return statement is not allowed outside functions");
         } else {
-            fatal_parser_error(peek(p).line, peek(p).col, peek(p).lexeme, "Expected 'import', 'interface', 'impl', 'class', 'struct', 'enum', or 'fn'");
+            AstNode *stmt = parse_statement(p);
+            if (top_level_count >= top_level_cap) {
+                top_level_cap = top_level_cap == 0 ? 8 : top_level_cap * 2;
+                AstNode **new_stmts = (AstNode **)arena_alloc_array(p->arena, top_level_cap, sizeof(AstNode *));
+                if (top_level_stmts) memcpy(new_stmts, top_level_stmts, top_level_count * sizeof(AstNode *));
+                top_level_stmts = new_stmts;
+            }
+            top_level_stmts[top_level_count++] = stmt;
         }
     }
 
@@ -2472,6 +2485,8 @@ AstNode *parse_program(Parser *p) {
     prog->as.program.enum_count = enum_count;
     prog->as.program.functions = functions;
     prog->as.program.count = fn_count;
+    prog->as.program.top_level_stmts = top_level_stmts;
+    prog->as.program.top_level_count = top_level_count;
 
     for (int i = 0; i < prog->as.program.count; i++) {
         AstNode *fn = prog->as.program.functions[i];
@@ -2590,4 +2605,91 @@ AstNode *parse_program(Parser *p) {
     desugar_and_infer_program(p->arena, prog);
 
     return prog;
+}
+
+void desugar_top_level_program(AstNode *prog, AstArena *arena, const char *source_file) {
+    if (!prog || prog->type != NODE_PROGRAM) return;
+    if (prog->as.program.top_level_count == 0) return;
+
+    // Check if explicit fn main already exists
+    AstNode *explicit_main = NULL;
+    for (int i = 0; i < prog->as.program.count; i++) {
+        AstNode *fn = prog->as.program.functions[i];
+        if (fn && !fn->as.function.is_operator && strcmp(fn->as.function.name, "main") == 0) {
+            explicit_main = fn;
+            break;
+        }
+    }
+
+    if (explicit_main != NULL) {
+        AstNode *first_stmt = prog->as.program.top_level_stmts[0];
+        char short_msg[256];
+        snprintf(short_msg, sizeof(short_msg), "cannot mix top-level statements with an explicit fn main — choose one");
+        const char *fn_path = source_file ? source_file : get_error_filename();
+        ErrorLocation primary = {fn_path, first_stmt->line, first_stmt->col};
+        ErrorLocation note_loc = {fn_path, explicit_main->line, explicit_main->col};
+        print_formatted_error(short_msg, primary, "top-level statement here", "explicit fn main declared here:", &note_loc, "explicit fn main here", NULL);
+    }
+
+    int stmt_count = prog->as.program.top_level_count;
+    int fline = prog->as.program.top_level_stmts[0]->line;
+    int fcol = prog->as.program.top_level_stmts[0]->col;
+    int lline = prog->as.program.top_level_stmts[stmt_count - 1]->line;
+    int lcol = prog->as.program.top_level_stmts[stmt_count - 1]->col;
+
+    AstNode *ret_zero = arena_alloc_node(arena, NODE_RETURN, lline, lcol);
+    ret_zero->source_file = source_file ? arena_strdup(arena, source_file) : NULL;
+    AstNode *lit_zero = arena_alloc_node(arena, NODE_LITERAL, lline, lcol);
+    lit_zero->source_file = source_file ? arena_strdup(arena, source_file) : NULL;
+    lit_zero->as.literal.lit_type = TY_INT;
+    lit_zero->as.literal.val.i = 0;
+    ret_zero->as.return_stmt.value = lit_zero;
+
+    AstNode *body_block = arena_alloc_node(arena, NODE_BLOCK, fline, fcol);
+    body_block->source_file = source_file ? arena_strdup(arena, source_file) : NULL;
+    body_block->as.block.stmts = (AstNode **)arena_alloc_array(arena, stmt_count + 1, sizeof(AstNode *));
+    for (int i = 0; i < stmt_count; i++) {
+        body_block->as.block.stmts[i] = prog->as.program.top_level_stmts[i];
+    }
+    body_block->as.block.stmts[stmt_count] = ret_zero;
+    body_block->as.block.count = stmt_count + 1;
+    body_block->as.block.owned_vars = NULL;
+    body_block->as.block.owned_count = 0;
+
+    AstNode *synth_main = arena_alloc_node(arena, NODE_FUNCTION, fline, fcol);
+    synth_main->source_file = source_file ? arena_strdup(arena, source_file) : NULL;
+    synth_main->as.function.name = arena_strdup(arena, "main");
+    synth_main->as.function.is_operator = false;
+    synth_main->as.function.operator_symbol = NULL;
+    synth_main->as.function.param_names = NULL;
+    synth_main->as.function.param_types = NULL;
+    synth_main->as.function.param_is_array = NULL;
+    synth_main->as.function.param_is_map = NULL;
+    synth_main->as.function.param_key_types = NULL;
+    synth_main->as.function.param_class_names = NULL;
+    synth_main->as.function.param_is_borrowed = NULL;
+    synth_main->as.function.param_is_impl_trait = NULL;
+    synth_main->as.function.param_impl_trait_names = NULL;
+    synth_main->as.function.param_lines = NULL;
+    synth_main->as.function.param_cols = NULL;
+    synth_main->as.function.param_count = 0;
+    synth_main->as.function.return_type = TY_INT;
+    synth_main->as.function.return_is_array = false;
+    synth_main->as.function.return_is_map = false;
+    synth_main->as.function.return_key_type = TY_INT;
+    synth_main->as.function.return_class_name = NULL;
+    synth_main->as.function.returns_heap_pointer = false;
+    synth_main->as.function.body = desugar_stmt_node(arena, prog, synth_main, body_block);
+
+    int new_fn_count = prog->as.program.count + 1;
+    AstNode **new_fns = (AstNode **)arena_alloc_array(arena, new_fn_count, sizeof(AstNode *));
+    for (int i = 0; i < prog->as.program.count; i++) {
+        new_fns[i] = prog->as.program.functions[i];
+    }
+    new_fns[prog->as.program.count] = synth_main;
+    prog->as.program.functions = new_fns;
+    prog->as.program.count = new_fn_count;
+
+    prog->as.program.top_level_stmts = NULL;
+    prog->as.program.top_level_count = 0;
 }
