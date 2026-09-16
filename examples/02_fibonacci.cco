@@ -1,4 +1,4 @@
-// 02_fibonacci.cco — Fibonacci sequence generator using loops and recursion
+// 02_fibonacci.cco — Fibonacci sequence generator using loops and recursion (Top-Level Script Style)
 
 fn fib_iterative(n: int) -> int {
     if (n <= 0) { return 0; }
@@ -22,8 +22,5 @@ fn fib_recursive(n: int) -> int {
     return fib_recursive(n - 1) + fib_recursive(n - 2);
 }
 
-fn main() -> int {
-    print(fib_iterative(10));
-    print(fib_recursive(10));
-    return 0;
-}
+print(fib_iterative(10));
+print(fib_recursive(10));
