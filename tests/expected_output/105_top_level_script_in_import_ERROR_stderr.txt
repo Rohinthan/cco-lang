@@ -1,0 +1,7 @@
+error: only the entry file may contain top-level executable statements
+  --> tests/programs/105_top_level_script_in_import_ERROR/imported.cco:1:1
+    |
+  1 | let in_imported: int = 42;
+    | ^ top-level statement in imported file
+    |
+note: imported files must contain only declarations (fn, class, struct, enum, interface, impl)
