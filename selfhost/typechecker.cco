@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 import "lexer_core.cco";
 import "parser_core.cco";
 import "typechecker_core.cco";

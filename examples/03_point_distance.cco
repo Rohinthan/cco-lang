@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // 03_point_distance.cco — Object-oriented Point class using math stdlib
 
 class Point {

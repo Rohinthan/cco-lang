@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // 05_array_sum.cco — Dynamic array allocation and iteration in top-level script style
 
 let size: int = 5;

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // 04_string_builder.cco — String concatenation and substring utilities
 
 fn main() -> int {

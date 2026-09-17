@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // 09_object_array_todo.cco — Demonstrates Growable Arrays of Objects and for-each iteration in Cco v9.0
 
 class Task {

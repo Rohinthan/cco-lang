@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 #ifndef CCO_MAP_RUNTIME_H
 #define CCO_MAP_RUNTIME_H
 

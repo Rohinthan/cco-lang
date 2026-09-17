@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Interactive Number Guessing Game in Cco v19
 // Demonstrates f-strings, random_seed(), random_int(), read_line(), is_int(), to_int(), and type inference
 

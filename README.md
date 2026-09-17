@@ -768,3 +768,7 @@ Cco-generated C output strictly conforms to **standard ISO C11** (`-std=c11 -ped
 
 ---
 
+## 10. License
+
+Cco is licensed under the GNU General Public License v3.0 or later.
+See LICENSE for the full license text.

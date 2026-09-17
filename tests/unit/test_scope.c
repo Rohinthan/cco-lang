@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 #include "../../src/lexer.h"
 #include "../../src/ast.h"
 #include "../../src/parser.h"

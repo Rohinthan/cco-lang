@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 #ifndef TRAIT_RESOLVER_H
 #define TRAIT_RESOLVER_H
 

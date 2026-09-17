@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // std/net.cco — Standard Library Network & Socket Primitives
 
 class TcpServer {

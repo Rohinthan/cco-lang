@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Test server that explicitly calls net_recv(client_fd, 512) with a small initial buffer
 
 fn handle_http_client(client_fd: int, req_id: int) -> void {

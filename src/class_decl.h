@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 #ifndef CLASS_DECL_H
 #define CLASS_DECL_H
 

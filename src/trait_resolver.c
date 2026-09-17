@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 #define _POSIX_C_SOURCE 200809L
 #include "trait_resolver.h"
 #include "class_decl.h"

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 #ifndef MODULE_RESOLVER_H
 #define MODULE_RESOLVER_H
 

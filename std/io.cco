@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // std/io.cco — Standard Library I/O and File Utilities
 
 fn file_read(path: string) -> string {

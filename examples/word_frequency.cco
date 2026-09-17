@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Word Frequency Counter in Cco v10
 // Demonstrates hash maps (map[string]int), keys(), has(), get(), put(), and len()
 

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // 07_ownership_demo.cco — Demonstrating ownership transfer vs borrowed references
 
 class Resource {

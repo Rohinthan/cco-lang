@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 fn main() -> int {
     print("Enter numerator: ");
     let input1 = read_line();

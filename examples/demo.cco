@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Cco (C--) Demonstration Program
 // Demonstrates automatic scope-exit memory management with alloc()
 

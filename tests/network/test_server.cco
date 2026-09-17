@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Hardened Cco Test HTTP Server for Network Test Suite
 
 fn handle_http_client(client_fd: int, req_id: int) -> void {

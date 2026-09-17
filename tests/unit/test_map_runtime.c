@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 #include "../../src/map_runtime.h"
 #include <assert.h>
 #include <stdio.h>

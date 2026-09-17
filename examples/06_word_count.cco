@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // 06_word_count.cco — Reading a text file and counting words
 
 fn is_space(c: char) -> bool {

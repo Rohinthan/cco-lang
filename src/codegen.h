@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 #ifndef CODEGEN_H
 #define CODEGEN_H
 

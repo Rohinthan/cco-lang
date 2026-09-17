@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 fn main() -> int {
     random_seed(12345);
     let secret = random_int(1, 20);

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // std/string.cco — Standard Library String Utilities
 
 fn string_concat(a: string, b: string) -> string {

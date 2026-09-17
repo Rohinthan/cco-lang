@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 #ifndef SCOPE_ANALYSIS_H
 #define SCOPE_ANALYSIS_H
 

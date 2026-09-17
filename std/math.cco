@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // std/math.cco — Standard Library Math Utilities
 
 fn abs(x: int) -> int {
