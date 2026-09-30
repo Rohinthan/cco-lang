@@ -648,11 +648,15 @@ static AstNode *parse_unary(Parser *p) {
         Token op = advance(p);
         fatal_parser_error(op.line, op.col, op.lexeme, "'--' can only be used as a statement in this version");
     }
-    if (match(p, TOKEN_NOT) || match(p, TOKEN_MINUS) || match(p, TOKEN_AMP)) {
+    if (match(p, TOKEN_NOT) || match(p, TOKEN_KW_NOT) || match(p, TOKEN_MINUS) || match(p, TOKEN_AMP)) {
         Token op = previous(p);
         AstNode *operand = parse_unary(p);
         AstNode *node = arena_alloc_node(p->arena, NODE_UNARY, op.line, op.col);
-        snprintf(node->as.unary.op, sizeof(node->as.unary.op), "%s", op.lexeme);
+        if (op.type == TOKEN_NOT || op.type == TOKEN_KW_NOT) {
+            snprintf(node->as.unary.op, sizeof(node->as.unary.op), "!");
+        } else {
+            snprintf(node->as.unary.op, sizeof(node->as.unary.op), "%s", op.lexeme);
+        }
         node->as.unary.operand = operand;
         return node;
     }
@@ -727,11 +731,11 @@ static AstNode *parse_equality(Parser *p) {
 static AstNode *parse_logic_and(Parser *p) {
     AstNode *expr = parse_equality(p);
 
-    while (match(p, TOKEN_AND)) {
+    while (match(p, TOKEN_AND) || match(p, TOKEN_KW_AND)) {
         Token op = previous(p);
         AstNode *right = parse_equality(p);
         AstNode *node = arena_alloc_node(p->arena, NODE_BINARY, op.line, op.col);
-        snprintf(node->as.binary.op, sizeof(node->as.binary.op), "%s", op.lexeme);
+        snprintf(node->as.binary.op, sizeof(node->as.binary.op), "&&");
         node->as.binary.left = expr;
         node->as.binary.right = right;
         expr = node;
@@ -743,11 +747,11 @@ static AstNode *parse_logic_and(Parser *p) {
 static AstNode *parse_logic_or(Parser *p) {
     AstNode *expr = parse_logic_and(p);
 
-    while (match(p, TOKEN_OR)) {
+    while (match(p, TOKEN_OR) || match(p, TOKEN_KW_OR)) {
         Token op = previous(p);
         AstNode *right = parse_logic_and(p);
         AstNode *node = arena_alloc_node(p->arena, NODE_BINARY, op.line, op.col);
-        snprintf(node->as.binary.op, sizeof(node->as.binary.op), "%s", op.lexeme);
+        snprintf(node->as.binary.op, sizeof(node->as.binary.op), "||");
         node->as.binary.left = expr;
         node->as.binary.right = right;
         expr = node;
@@ -802,6 +806,32 @@ static AstNode *parse_let_stmt(Parser *p) {
 }
 
 static AstNode *parse_assign_or_expr_stmt(Parser *p) {
+    if (check(p, TOKEN_IDENT) && p->current + 1 < p->tokens.count && p->tokens.tokens[p->current + 1].type == TOKEN_COLON) {
+        Token name_tok = advance(p);
+        advance(p); // consume ':'
+        bool has_explicit_type = true;
+        char *class_name = NULL;
+        bool is_array = false;
+        bool is_map = false;
+        Type key_type = TY_INT;
+        Type var_type = parse_type_with_class(p, &class_name, NULL, &is_array, &is_map, &key_type);
+
+        consume(p, TOKEN_ASSIGN, "Expected '=' in variable declaration");
+        AstNode *value = parse_expr(p);
+        consume(p, TOKEN_SEMICOLON, "Expected ';' after variable declaration");
+
+        AstNode *node = arena_alloc_node(p->arena, NODE_LET, name_tok.line, name_tok.col);
+        node->as.let.name = arena_strdup(p->arena, name_tok.lexeme);
+        node->as.let.var_type = var_type;
+        node->as.let.is_array = is_array;
+        node->as.let.is_map = is_map;
+        node->as.let.key_type = key_type;
+        node->as.let.class_name = class_name;
+        node->as.let.value = value;
+        node->as.let.has_explicit_type = has_explicit_type;
+        return node;
+    }
+
     AstNode *lhs = parse_expr(p);
 
     if (match(p, TOKEN_INCREMENT)) {
@@ -865,11 +895,39 @@ static AstNode *parse_assign_or_expr_stmt(Parser *p) {
     return node;
 }
 
+static bool is_outer_condition_paren(Parser *p) {
+    if (!check(p, TOKEN_LPAREN)) return false;
+    int depth = 0;
+    int i = p->current;
+    while (i < p->tokens.count) {
+        if (p->tokens.tokens[i].type == TOKEN_LPAREN) {
+            depth++;
+        } else if (p->tokens.tokens[i].type == TOKEN_RPAREN) {
+            depth--;
+            if (depth == 0) {
+                if (i + 1 < p->tokens.count && p->tokens.tokens[i + 1].type == TOKEN_LBRACE) {
+                    return true;
+                }
+                return false;
+            }
+        } else if (p->tokens.tokens[i].type == TOKEN_EOF) {
+            break;
+        }
+        i++;
+    }
+    return false;
+}
+
 static AstNode *parse_if_stmt(Parser *p) {
     Token tok = consume(p, TOKEN_IF, "Expected 'if'");
-    consume(p, TOKEN_LPAREN, "Expected '(' after 'if'");
+    bool has_paren = is_outer_condition_paren(p);
+    if (has_paren) {
+        consume(p, TOKEN_LPAREN, "Expected '(' after 'if'");
+    }
     AstNode *cond = parse_expr(p);
-    consume(p, TOKEN_RPAREN, "Expected ')' after if condition");
+    if (has_paren) {
+        consume(p, TOKEN_RPAREN, "Expected ')' after if condition");
+    }
 
     AstNode *then_b = parse_block(p);
     AstNode *else_b = NULL;
@@ -891,9 +949,14 @@ static AstNode *parse_if_stmt(Parser *p) {
 
 static AstNode *parse_while_stmt(Parser *p) {
     Token tok = consume(p, TOKEN_WHILE, "Expected 'while'");
-    consume(p, TOKEN_LPAREN, "Expected '(' after 'while'");
+    bool has_paren = is_outer_condition_paren(p);
+    if (has_paren) {
+        consume(p, TOKEN_LPAREN, "Expected '(' after 'while'");
+    }
     AstNode *cond = parse_expr(p);
-    consume(p, TOKEN_RPAREN, "Expected ')' after while condition");
+    if (has_paren) {
+        consume(p, TOKEN_RPAREN, "Expected ')' after while condition");
+    }
 
     AstNode *body = parse_block(p);
 
@@ -1057,12 +1120,54 @@ static AstNode *parse_for_each_stmt(Parser *p) {
     Token tok = consume(p, TOKEN_FOR, "Expected 'for'");
     Token var_tok = consume(p, TOKEN_IDENT, "Expected loop variable after 'for'");
     consume(p, TOKEN_IN, "Expected 'in' after loop variable");
-    AstNode *coll_expr = parse_expr(p);
+    AstNode *start_or_coll = parse_expr(p);
+
+    if (match(p, TOKEN_DOT_DOT)) {
+        AstNode *end_expr = parse_expr(p);
+        AstNode *body = parse_block(p);
+
+        // Desugar into counted for loop:
+        // 1. init: let <var>: int = <start_or_coll>;
+        AstNode *init_node = arena_alloc_node(p->arena, NODE_LET, tok.line, tok.col);
+        init_node->as.let.name = arena_strdup(p->arena, var_tok.lexeme);
+        init_node->as.let.var_type = TY_INT;
+        init_node->as.let.is_array = false;
+        init_node->as.let.is_map = false;
+        init_node->as.let.key_type = TY_INT;
+        init_node->as.let.class_name = NULL;
+        init_node->as.let.value = start_or_coll;
+        init_node->as.let.has_explicit_type = true;
+
+        // 2. cond: <var> < <end_expr>
+        AstNode *var_cond = arena_alloc_node(p->arena, NODE_IDENT, tok.line, tok.col);
+        var_cond->as.ident.name = arena_strdup(p->arena, var_tok.lexeme);
+        AstNode *cond_node = arena_alloc_node(p->arena, NODE_BINARY, tok.line, tok.col);
+        snprintf(cond_node->as.binary.op, sizeof(cond_node->as.binary.op), "<");
+        cond_node->as.binary.left = var_cond;
+        cond_node->as.binary.right = end_expr;
+
+        // 3. step: <var>++
+        AstNode *var_step = arena_alloc_node(p->arena, NODE_IDENT, tok.line, tok.col);
+        var_step->as.ident.name = arena_strdup(p->arena, var_tok.lexeme);
+        AstNode *step_node = arena_alloc_node(p->arena, NODE_COMPOUND_ASSIGN, tok.line, tok.col);
+        step_node->as.compound_assign.target = var_step;
+        snprintf(step_node->as.compound_assign.op, sizeof(step_node->as.compound_assign.op), "++");
+        step_node->as.compound_assign.value = NULL;
+
+        // 4. NODE_FOR
+        AstNode *for_node = arena_alloc_node(p->arena, NODE_FOR, tok.line, tok.col);
+        for_node->as.for_stmt.init = init_node;
+        for_node->as.for_stmt.cond = cond_node;
+        for_node->as.for_stmt.step = step_node;
+        for_node->as.for_stmt.body = body;
+        return for_node;
+    }
+
     AstNode *body = parse_block(p);
 
     AstNode *node = arena_alloc_node(p->arena, NODE_FOR_EACH, tok.line, tok.col);
     node->as.for_each.loop_var_name = arena_strdup(p->arena, var_tok.lexeme);
-    node->as.for_each.collection_expr = coll_expr;
+    node->as.for_each.collection_expr = start_or_coll;
     node->as.for_each.body = body;
     return node;
 }
@@ -1350,7 +1455,20 @@ static AstNode *parse_class(Parser *p) {
             bool ret_is_map = false;
             Type ret_key_t = TY_INT;
             Type ret_type = parse_type_with_class(p, &ret_cls, NULL, &ret_is_arr, &ret_is_map, &ret_key_t);
-            AstNode *body = parse_block(p);
+            AstNode *body = NULL;
+            if (match(p, TOKEN_ASSIGN)) {
+                AstNode *expr = parse_expr(p);
+                consume(p, TOKEN_SEMICOLON, "Expected ';' after expression body");
+                AstNode *ret_node = arena_alloc_node(p->arena, NODE_RETURN, expr->line, expr->col);
+                ret_node->as.return_stmt.value = expr;
+                AstNode **stmts = (AstNode **)arena_alloc_array(p->arena, 1, sizeof(AstNode *));
+                stmts[0] = ret_node;
+                body = arena_alloc_node(p->arena, NODE_BLOCK, expr->line, expr->col);
+                body->as.block.stmts = stmts;
+                body->as.block.count = 1;
+            } else {
+                body = parse_block(p);
+            }
 
             AstNode *m_node = arena_alloc_node(p->arena, NODE_METHOD, m_tok.line, m_tok.col);
             m_node->as.method.name = arena_strdup(p->arena, m_name.lexeme);
@@ -1723,7 +1841,20 @@ static AstNode *parse_function(Parser *p) {
     bool ret_is_map = false;
     Type ret_key_t = TY_INT;
     Type return_type = parse_type_with_class(p, &ret_cls, NULL, &ret_is_arr, &ret_is_map, &ret_key_t);
-    AstNode *body = parse_block(p);
+    AstNode *body = NULL;
+    if (match(p, TOKEN_ASSIGN)) {
+        AstNode *expr = parse_expr(p);
+        consume(p, TOKEN_SEMICOLON, "Expected ';' after expression body");
+        AstNode *ret_node = arena_alloc_node(p->arena, NODE_RETURN, expr->line, expr->col);
+        ret_node->as.return_stmt.value = expr;
+        AstNode **stmts = (AstNode **)arena_alloc_array(p->arena, 1, sizeof(AstNode *));
+        stmts[0] = ret_node;
+        body = arena_alloc_node(p->arena, NODE_BLOCK, expr->line, expr->col);
+        body->as.block.stmts = stmts;
+        body->as.block.count = 1;
+    } else {
+        body = parse_block(p);
+    }
 
     AstNode *node = arena_alloc_node(p->arena, NODE_FUNCTION, tok.line, tok.col);
     node->as.function.name = fn_name;
@@ -1891,7 +2022,7 @@ static AstNode *parse_impl(Parser *p) {
 }
 
 static bool is_module_path_token(TokenType type) {
-    return type == TOKEN_IDENT || (type >= TOKEN_FN && type <= TOKEN_FALSE);
+    return type == TOKEN_IDENT || (type >= TOKEN_FN && type <= TOKEN_KW_NOT);
 }
 
 static AstNode *parse_import_stmt(Parser *p) {
@@ -1988,6 +2119,227 @@ static AstNode *make_assign_from_target(AstArena *arena, AstNode *target, AstNod
     return NULL;
 }
 
+typedef struct InferVar {
+    const char *name;
+    Type type;
+    char *class_name;
+    bool is_array;
+    bool is_map;
+    Type key_type;
+    int line;
+    int col;
+} InferVar;
+
+typedef struct InferScope {
+    struct InferScope *parent;
+    InferVar *vars;
+    int count;
+    int cap;
+} InferScope;
+
+static InferScope *create_infer_scope(AstArena *arena, InferScope *parent) {
+    InferScope *s = (InferScope *)arena_alloc_array(arena, 1, sizeof(InferScope));
+    s->parent = parent;
+    s->vars = NULL;
+    s->count = 0;
+    s->cap = 0;
+    return s;
+}
+
+static InferVar *infer_scope_lookup(InferScope *s, const char *name) {
+    for (InferScope *cur = s; cur != NULL; cur = cur->parent) {
+        for (int i = 0; i < cur->count; i++) {
+            if (strcmp(cur->vars[i].name, name) == 0) {
+                return &cur->vars[i];
+            }
+        }
+    }
+    return NULL;
+}
+
+static void infer_scope_add(AstArena *arena, InferScope *s, const char *name, Type type,
+                            const char *class_name, bool is_array, bool is_map, Type key_type,
+                            int line, int col) {
+    if (s->count >= s->cap) {
+        s->cap = s->cap == 0 ? 8 : s->cap * 2;
+        InferVar *new_vars = (InferVar *)arena_alloc_array(arena, s->cap, sizeof(InferVar));
+        if (s->vars && s->count > 0) {
+            memcpy(new_vars, s->vars, s->count * sizeof(InferVar));
+        }
+        s->vars = new_vars;
+    }
+    s->vars[s->count].name = arena_strdup(arena, name);
+    s->vars[s->count].type = type;
+    s->vars[s->count].class_name = class_name ? arena_strdup(arena, class_name) : NULL;
+    s->vars[s->count].is_array = is_array;
+    s->vars[s->count].is_map = is_map;
+    s->vars[s->count].key_type = key_type;
+    s->vars[s->count].line = line;
+    s->vars[s->count].col = col;
+    s->count++;
+}
+
+static bool is_known_builtin_fn(const char *name) {
+    if (!name) return false;
+    return strcmp(name, "print") == 0 ||
+           strcmp(name, "println") == 0 ||
+           strcmp(name, "concat") == 0 ||
+           strcmp(name, "substring") == 0 ||
+           strcmp(name, "read_file") == 0 ||
+           strcmp(name, "read_line") == 0 ||
+           strcmp(name, "write_file") == 0 ||
+           strcmp(name, "program_name") == 0 ||
+           strcmp(name, "arg_count") == 0 ||
+           strcmp(name, "args") == 0 ||
+           strcmp(name, "to_int") == 0 ||
+           strcmp(name, "to_float") == 0 ||
+           strcmp(name, "is_int") == 0 ||
+           strcmp(name, "is_float") == 0 ||
+           strcmp(name, "char_at") == 0 ||
+           strcmp(name, "equals") == 0 ||
+           strcmp(name, "sleep_ms") == 0 ||
+           strcmp(name, "random_seed") == 0 ||
+           strcmp(name, "random_int") == 0 ||
+           strcmp(name, "sqrt") == 0 ||
+           strcmp(name, "exp") == 0 ||
+           strcmp(name, "log") == 0 ||
+           strcmp(name, "sin") == 0 ||
+           strcmp(name, "cos") == 0 ||
+           strcmp(name, "tan") == 0 ||
+           strcmp(name, "pow") == 0 ||
+           strcmp(name, "abs_float") == 0 ||
+           strcmp(name, "floor") == 0 ||
+           strcmp(name, "ceil") == 0 ||
+           strcmp(name, "min_float") == 0 ||
+           strcmp(name, "max_float") == 0 ||
+           strcmp(name, "abs_int") == 0 ||
+           strcmp(name, "min_int") == 0 ||
+           strcmp(name, "max_int") == 0 ||
+           strcmp(name, "len") == 0 ||
+           strcmp(name, "get") == 0 ||
+           strcmp(name, "put") == 0 ||
+           strcmp(name, "remove") == 0 ||
+           strcmp(name, "has") == 0 ||
+           strcmp(name, "keys") == 0 ||
+           strcmp(name, "push") == 0 ||
+           strcmp(name, "pop") == 0 ||
+           strcmp(name, "net_listen") == 0 ||
+           strcmp(name, "net_accept") == 0 ||
+           strcmp(name, "net_send") == 0 ||
+           strcmp(name, "net_recv") == 0 ||
+           strcmp(name, "net_close") == 0;
+}
+
+static bool is_defined_identifier(AstNode *program, AstNode *fn, InferScope *scope, const char *name) {
+    if (!name) return false;
+    if (infer_scope_lookup(scope, name) != NULL) return true;
+    if (strcmp(name, "self") == 0) return true;
+    if (fn && fn->type == NODE_FUNCTION && fn->as.function.name && strcmp(fn->as.function.name, name) == 0) return true;
+    if (is_known_builtin_fn(name)) return true;
+    if (program && program->type == NODE_PROGRAM) {
+        for (int i = 0; i < program->as.program.count; i++) {
+            if (program->as.program.functions[i] && strcmp(program->as.program.functions[i]->as.function.name, name) == 0) return true;
+        }
+        for (int i = 0; i < program->as.program.class_count; i++) {
+            if (program->as.program.classes[i] && strcmp(program->as.program.classes[i]->as.class_decl.name, name) == 0) return true;
+        }
+        for (int i = 0; i < program->as.program.struct_count; i++) {
+            if (program->as.program.structs[i] && strcmp(program->as.program.structs[i]->as.struct_decl.name, name) == 0) return true;
+        }
+        for (int i = 0; i < program->as.program.enum_count; i++) {
+            if (program->as.program.enums[i] && strcmp(program->as.program.enums[i]->as.enum_decl.name, name) == 0) return true;
+        }
+        for (int i = 0; i < program->as.program.interface_count; i++) {
+            if (program->as.program.interfaces[i] && strcmp(program->as.program.interfaces[i]->as.interface_decl.name, name) == 0) return true;
+        }
+        if (program->as.program.import_count > 0) {
+            if (isupper((unsigned char)name[0])) return true;
+        }
+    }
+    return false;
+}
+
+static void check_expr_variables(AstArena *arena, AstNode *program, AstNode *fn, InferScope *scope, AstNode *expr) {
+    if (!expr) return;
+
+    switch (expr->type) {
+        case NODE_IDENT: {
+            const char *name = expr->as.ident.name;
+            if (!is_defined_identifier(program, fn, scope, name)) {
+                char short_msg[256];
+                snprintf(short_msg, sizeof(short_msg), "undefined variable '%s'", name);
+                const char *fn_path = expr->source_file ? expr->source_file : get_error_filename();
+                ErrorLocation primary = {fn_path, expr->line, expr->col};
+                print_formatted_error(short_msg, primary, "undefined variable", NULL, NULL, NULL, NULL);
+                exit(1);
+            }
+            break;
+        }
+        case NODE_BINARY:
+            check_expr_variables(arena, program, fn, scope, expr->as.binary.left);
+            check_expr_variables(arena, program, fn, scope, expr->as.binary.right);
+            break;
+        case NODE_UNARY:
+            check_expr_variables(arena, program, fn, scope, expr->as.unary.operand);
+            break;
+        case NODE_CALL:
+            for (int i = 0; i < expr->as.call.arg_count; i++) {
+                check_expr_variables(arena, program, fn, scope, expr->as.call.args[i]);
+            }
+            break;
+        case NODE_METHOD_CALL:
+            check_expr_variables(arena, program, fn, scope, expr->as.method_call.object);
+            for (int i = 0; i < expr->as.method_call.arg_count; i++) {
+                check_expr_variables(arena, program, fn, scope, expr->as.method_call.args[i]);
+            }
+            break;
+        case NODE_MEMBER:
+            if (expr->as.member.object) {
+                if (expr->as.member.object->type == NODE_IDENT) {
+                    const char *obj_name = expr->as.member.object->as.ident.name;
+                    if (!is_defined_identifier(program, fn, scope, obj_name)) {
+                        char short_msg[256];
+                        snprintf(short_msg, sizeof(short_msg), "undefined variable '%s'", obj_name);
+                        const char *fn_path = expr->as.member.object->source_file ? expr->as.member.object->source_file : get_error_filename();
+                        ErrorLocation primary = {fn_path, expr->as.member.object->line, expr->as.member.object->col};
+                        print_formatted_error(short_msg, primary, "undefined variable", NULL, NULL, NULL, NULL);
+                        exit(1);
+                    }
+                } else {
+                    check_expr_variables(arena, program, fn, scope, expr->as.member.object);
+                }
+            }
+            break;
+        case NODE_INDEX:
+            if (expr->as.index.array_expr) {
+                check_expr_variables(arena, program, fn, scope, expr->as.index.array_expr);
+            }
+            if (expr->as.index.index) {
+                check_expr_variables(arena, program, fn, scope, expr->as.index.index);
+            }
+            break;
+        case NODE_ALLOC:
+            if (expr->as.alloc.count_expr) {
+                check_expr_variables(arena, program, fn, scope, expr->as.alloc.count_expr);
+            }
+            break;
+        case NODE_NEW:
+            for (int i = 0; i < expr->as.new_expr.field_count; i++) {
+                check_expr_variables(arena, program, fn, scope, expr->as.new_expr.field_values[i]);
+            }
+            break;
+        case NODE_FSTRING:
+            for (int i = 0; i < expr->as.fstring.part_count; i++) {
+                if (expr->as.fstring.parts[i] && expr->as.fstring.parts[i]->type != NODE_FSTRING_TEXT) {
+                    check_expr_variables(arena, program, fn, scope, expr->as.fstring.parts[i]);
+                }
+            }
+            break;
+        default:
+            break;
+    }
+}
+
 static AstNode *find_let_in_node_rec(AstNode *node, const char *var_name) {
     if (!node || !var_name) return NULL;
     if (node->type == NODE_LET) {
@@ -2020,22 +2372,22 @@ static AstNode *find_let_in_node_rec(AstNode *node, const char *var_name) {
     return NULL;
 }
 
-static void infer_ast_expr_type(AstArena *arena, AstNode *program, AstNode *fn, AstNode *expr, Type *out_type, char **out_class, bool *out_is_array, bool *out_is_map, Type *out_key_type) {
+static bool infer_ast_expr_type(AstArena *arena, AstNode *program, AstNode *fn, InferScope *scope, AstNode *expr, Type *out_type, char **out_class, bool *out_is_array, bool *out_is_map, Type *out_key_type) {
     *out_type = TY_INT;
     *out_class = NULL;
     *out_is_array = false;
     *out_is_map = false;
     *out_key_type = TY_INT;
 
-    if (!expr) return;
+    if (!expr) return false;
 
     if (expr->type == NODE_LITERAL) {
         *out_type = expr->as.literal.lit_type;
-        return;
+        return true;
     }
     if (expr->type == NODE_FSTRING || expr->type == NODE_FSTRING_TEXT) {
         *out_type = TY_STRING;
-        return;
+        return true;
     }
     if (expr->type == NODE_ALLOC) {
         *out_type = expr->as.alloc.elem_type;
@@ -2043,12 +2395,12 @@ static void infer_ast_expr_type(AstArena *arena, AstNode *program, AstNode *fn, 
         *out_is_array = !expr->as.alloc.is_map;
         *out_is_map = expr->as.alloc.is_map;
         *out_key_type = expr->as.alloc.key_type;
-        return;
+        return true;
     }
     if (expr->type == NODE_NEW) {
         *out_type = TY_CLASS;
         *out_class = expr->as.new_expr.class_name ? arena_strdup(arena, expr->as.new_expr.class_name) : NULL;
-        return;
+        return true;
     }
     if (expr->type == NODE_BINARY) {
         if (strcmp(expr->as.binary.op, "==") == 0 || strcmp(expr->as.binary.op, "!=") == 0 ||
@@ -2056,11 +2408,14 @@ static void infer_ast_expr_type(AstArena *arena, AstNode *program, AstNode *fn, 
             strcmp(expr->as.binary.op, "<=") == 0 || strcmp(expr->as.binary.op, ">=") == 0 ||
             strcmp(expr->as.binary.op, "&&") == 0 || strcmp(expr->as.binary.op, "||") == 0) {
             *out_type = TY_BOOL;
-            return;
+            return true;
         }
-        Type lt, rt; char *lc = NULL, *rc = NULL; bool la, ra, lm, rm; Type lk, rk;
-        infer_ast_expr_type(arena, program, fn, expr->as.binary.left, &lt, &lc, &la, &lm, &lk);
-        infer_ast_expr_type(arena, program, fn, expr->as.binary.right, &rt, &rc, &ra, &rm, &rk);
+        Type lt = TY_INT, rt = TY_INT; char *lc = NULL, *rc = NULL; bool la = false, ra = false, lm = false, rm = false; Type lk = TY_INT, rk = TY_INT;
+        bool l_ok = infer_ast_expr_type(arena, program, fn, scope, expr->as.binary.left, &lt, &lc, &la, &lm, &lk);
+        bool r_ok = infer_ast_expr_type(arena, program, fn, scope, expr->as.binary.right, &rt, &rc, &ra, &rm, &rk);
+        if (!l_ok && !r_ok) {
+            return false;
+        }
         if (lt == TY_CLASS && lc) {
             *out_type = TY_CLASS;
             *out_class = arena_strdup(arena, lc);
@@ -2069,25 +2424,35 @@ static void infer_ast_expr_type(AstArena *arena, AstNode *program, AstNode *fn, 
         } else {
             *out_type = TY_INT;
         }
-        return;
+        return true;
     }
     if (expr->type == NODE_UNARY) {
         if (strcmp(expr->as.unary.op, "!") == 0) {
             *out_type = TY_BOOL;
-            return;
+            return true;
         }
-        infer_ast_expr_type(arena, program, fn, expr->as.unary.operand, out_type, out_class, out_is_array, out_is_map, out_key_type);
-        return;
+        return infer_ast_expr_type(arena, program, fn, scope, expr->as.unary.operand, out_type, out_class, out_is_array, out_is_map, out_key_type);
     }
     if (expr->type == NODE_IDENT) {
         const char *var_name = expr->as.ident.name;
+        if (scope) {
+            InferVar *v = infer_scope_lookup(scope, var_name);
+            if (v) {
+                *out_type = v->type;
+                *out_class = v->class_name ? arena_strdup(arena, v->class_name) : NULL;
+                *out_is_array = v->is_array;
+                *out_is_map = v->is_map;
+                *out_key_type = v->key_type;
+                return true;
+            }
+        }
         if (fn && fn->type == NODE_FUNCTION) {
             for (int p = 0; p < fn->as.function.param_count; p++) {
                 if (strcmp(fn->as.function.param_names[p], var_name) == 0) {
                     *out_type = fn->as.function.param_types[p];
                     *out_class = fn->as.function.param_class_names ? fn->as.function.param_class_names[p] : NULL;
                     *out_is_array = fn->as.function.param_is_array ? fn->as.function.param_is_array[p] : false;
-                    return;
+                    return true;
                 }
             }
         } else if (fn && fn->type == NODE_METHOD) {
@@ -2096,7 +2461,7 @@ static void infer_ast_expr_type(AstArena *arena, AstNode *program, AstNode *fn, 
                     *out_type = fn->as.method.param_types[p];
                     *out_class = fn->as.method.param_class_names ? fn->as.method.param_class_names[p] : NULL;
                     *out_is_array = fn->as.method.param_is_array ? fn->as.method.param_is_array[p] : false;
-                    return;
+                    return true;
                 }
             }
         }
@@ -2109,80 +2474,115 @@ static void infer_ast_expr_type(AstArena *arena, AstNode *program, AstNode *fn, 
                 *out_is_array = st->as.let.is_array;
                 *out_is_map = st->as.let.is_map;
                 *out_key_type = st->as.let.key_type;
-                return;
+                return true;
             }
         }
-        return;
+        return false;
     }
     if (expr->type == NODE_CALL) {
         const char *callee = expr->as.call.callee;
         if (strcmp(callee, "concat") == 0 || strcmp(callee, "substring") == 0 || strcmp(callee, "read_file") == 0 || strcmp(callee, "read_line") == 0 || strcmp(callee, "program_name") == 0 || strcmp(callee, "net_recv") == 0) {
             *out_type = TY_STRING;
-            return;
+            return true;
         }
         if (strcmp(callee, "net_close") == 0 || strcmp(callee, "sleep_ms") == 0 || strcmp(callee, "random_seed") == 0) {
             *out_type = TY_VOID;
-            return;
+            return true;
         }
         if (strcmp(callee, "args") == 0) {
             *out_type = TY_STRING;
             *out_is_array = true;
-            return;
+            return true;
         }
         if (strcmp(callee, "sqrt") == 0 || strcmp(callee, "exp") == 0 || strcmp(callee, "log") == 0 || strcmp(callee, "sin") == 0 || strcmp(callee, "cos") == 0 || strcmp(callee, "tan") == 0 || strcmp(callee, "pow") == 0 || strcmp(callee, "abs_float") == 0 || strcmp(callee, "floor") == 0 || strcmp(callee, "ceil") == 0 || strcmp(callee, "min_float") == 0 || strcmp(callee, "max_float") == 0 || strcmp(callee, "to_float") == 0) {
             *out_type = TY_FLOAT;
-            return;
+            return true;
         }
         if (strcmp(callee, "equals") == 0 || strcmp(callee, "is_int") == 0 || strcmp(callee, "is_float") == 0 || strcmp(callee, "has") == 0 || strcmp(callee, "write_file") == 0) {
             *out_type = TY_BOOL;
-            return;
+            return true;
         }
         if (strcmp(callee, "char_at") == 0) {
             *out_type = TY_CHAR;
-            return;
+            return true;
         }
         if (strcmp(callee, "to_int") == 0 || strcmp(callee, "len") == 0 || strcmp(callee, "abs_int") == 0 || strcmp(callee, "min_int") == 0 || strcmp(callee, "max_int") == 0 || strcmp(callee, "arg_count") == 0 || strcmp(callee, "random_int") == 0 || strcmp(callee, "net_listen") == 0 || strcmp(callee, "net_accept") == 0 || strcmp(callee, "net_send") == 0) {
             *out_type = TY_INT;
-            return;
+            return true;
         }
         if (strcmp(callee, "get") == 0 && expr->as.call.arg_count == 2) {
-            Type mt; char *mc = NULL; bool ma, mm; Type mk;
-            infer_ast_expr_type(arena, program, fn, expr->as.call.args[0], &mt, &mc, &ma, &mm, &mk);
-            *out_type = mt;
-            *out_class = mc;
-            return;
+            Type mt = TY_INT; char *mc = NULL; bool ma = false, mm = false; Type mk = TY_INT;
+            bool ok = infer_ast_expr_type(arena, program, fn, scope, expr->as.call.args[0], &mt, &mc, &ma, &mm, &mk);
+            if (ok) {
+                *out_type = mt;
+                *out_class = mc;
+                return true;
+            }
+            return false;
         }
         if (strcmp(callee, "pop") == 0 && expr->as.call.arg_count == 1) {
-            Type at; char *ac = NULL; bool aa, am; Type ak;
-            infer_ast_expr_type(arena, program, fn, expr->as.call.args[0], &at, &ac, &aa, &am, &ak);
-            *out_type = at;
-            *out_class = ac;
-            return;
+            Type at = TY_INT; char *ac = NULL; bool aa, am; Type ak = TY_INT;
+            bool ok = infer_ast_expr_type(arena, program, fn, scope, expr->as.call.args[0], &at, &ac, &aa, &am, &ak);
+            if (ok) {
+                *out_type = at;
+                *out_class = ac;
+                return true;
+            }
+            return false;
         }
         if (program && program->type == NODE_PROGRAM) {
             for (int f = 0; f < program->as.program.count; f++) {
                 AstNode *target_fn = program->as.program.functions[f];
-                if (strcmp(target_fn->as.function.name, callee) == 0) {
+                if (target_fn && strcmp(target_fn->as.function.name, callee) == 0) {
                     *out_type = target_fn->as.function.return_type;
                     *out_class = target_fn->as.function.return_class_name ? arena_strdup(arena, target_fn->as.function.return_class_name) : NULL;
                     *out_is_array = target_fn->as.function.return_is_array;
                     *out_is_map = target_fn->as.function.return_is_map;
                     *out_key_type = target_fn->as.function.return_key_type;
-                    return;
+                    return true;
                 }
             }
         }
+        return false;
+    }
+    if (expr->type == NODE_METHOD_CALL) {
+        Type obj_t = TY_INT; char *obj_c = NULL; bool obj_a = false, obj_m = false; Type obj_k = TY_INT;
+        infer_ast_expr_type(arena, program, fn, scope, expr->as.method_call.object, &obj_t, &obj_c, &obj_a, &obj_m, &obj_k);
+        const char *cname = expr->as.method_call.target_class_name ? expr->as.method_call.target_class_name : obj_c;
+        const char *mname = expr->as.method_call.method_name;
+        if (cname && program && program->type == NODE_PROGRAM) {
+            for (int c = 0; c < program->as.program.class_count; c++) {
+                AstNode *cls = program->as.program.classes[c];
+                if (strcmp(cls->as.class_decl.name, cname) == 0) {
+                    for (int m = 0; m < cls->as.class_decl.method_count; m++) {
+                        AstNode *method = cls->as.class_decl.methods[m];
+                        if (strcmp(method->as.method.name, mname) == 0) {
+                            *out_type = method->as.method.return_type;
+                            *out_class = method->as.method.return_class_name ? arena_strdup(arena, method->as.method.return_class_name) : NULL;
+                            *out_is_array = method->as.method.return_is_array;
+                            *out_is_map = method->as.method.return_is_map;
+                            *out_key_type = method->as.method.return_key_type;
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        return false;
     }
     if (expr->type == NODE_INDEX) {
-        Type at; char *ac = NULL; bool aa, am; Type ak;
-        infer_ast_expr_type(arena, program, fn, expr->as.index.array_expr ? expr->as.index.array_expr : expr, &at, &ac, &aa, &am, &ak);
-        *out_type = at;
-        *out_class = ac;
-        return;
+        Type at = TY_INT; char *ac = NULL; bool aa = false, am = false; Type ak = TY_INT;
+        bool ok = infer_ast_expr_type(arena, program, fn, scope, expr->as.index.array_expr ? expr->as.index.array_expr : expr, &at, &ac, &aa, &am, &ak);
+        if (ok) {
+            *out_type = at;
+            *out_class = ac;
+            return true;
+        }
+        return false;
     }
     if (expr->type == NODE_MEMBER) {
-        Type obj_t; char *obj_c = NULL; bool obj_a = false, obj_m = false; Type obj_k = TY_INT;
-        infer_ast_expr_type(arena, program, fn, expr->as.member.object, &obj_t, &obj_c, &obj_a, &obj_m, &obj_k);
+        Type obj_t = TY_INT; char *obj_c = NULL; bool obj_a = false, obj_m = false; Type obj_k = TY_INT;
+        infer_ast_expr_type(arena, program, fn, scope, expr->as.member.object, &obj_t, &obj_c, &obj_a, &obj_m, &obj_k);
         const char *cname = expr->as.member.field_class_name ? expr->as.member.field_class_name : obj_c;
         const char *mname = expr->as.member.member_name;
         if (cname && program && program->type == NODE_PROGRAM) {
@@ -2192,7 +2592,7 @@ static void infer_ast_expr_type(AstArena *arena, AstNode *program, AstNode *fn, 
                     for (int f = 0; f < st->as.struct_decl.field_count; f++) {
                         if (strcmp(st->as.struct_decl.fields[f]->as.struct_field_decl.name, mname) == 0) {
                             *out_type = st->as.struct_decl.fields[f]->as.struct_field_decl.field_type;
-                            return;
+                            return true;
                         }
                     }
                 }
@@ -2207,40 +2607,137 @@ static void infer_ast_expr_type(AstArena *arena, AstNode *program, AstNode *fn, 
                             *out_is_array = cls->as.class_decl.fields[f]->as.field.is_array;
                             *out_is_map = cls->as.class_decl.fields[f]->as.field.is_map;
                             *out_key_type = cls->as.class_decl.fields[f]->as.field.key_type;
-                            return;
+                            return true;
                         }
                     }
                 }
             }
         }
+        return false;
     }
+    return false;
 }
 
-static AstNode *desugar_stmt_node(AstArena *arena, AstNode *program, AstNode *fn, AstNode *stmt) {
+static AstNode *desugar_stmt_node(AstArena *arena, AstNode *program, AstNode *fn, InferScope *scope, AstNode *stmt) {
     if (!stmt) return NULL;
 
     if (stmt->type == NODE_LET) {
+        if (stmt->as.let.value) {
+            check_expr_variables(arena, program, fn, scope, stmt->as.let.value);
+        }
         if (!stmt->as.let.has_explicit_type) {
-            Type vt; char *vc = NULL; bool va = false, vm = false; Type vk = TY_INT;
-            infer_ast_expr_type(arena, program, fn, stmt->as.let.value, &vt, &vc, &va, &vm, &vk);
+            Type vt = TY_INT; char *vc = NULL; bool va = false, vm = false; Type vk = TY_INT;
+            infer_ast_expr_type(arena, program, fn, scope, stmt->as.let.value, &vt, &vc, &va, &vm, &vk);
             stmt->as.let.var_type = vt;
             stmt->as.let.class_name = vc;
             stmt->as.let.is_array = va;
             stmt->as.let.is_map = vm;
             stmt->as.let.key_type = vk;
         } else {
-            if (stmt->as.let.value && stmt->as.let.value->type == NODE_LITERAL) {
-                Type val_t = stmt->as.let.value->as.literal.lit_type;
-                if (stmt->as.let.var_type != val_t && !(stmt->as.let.var_type == TY_FLOAT && val_t == TY_INT)) {
-                    char short_msg[256];
-                    snprintf(short_msg, sizeof(short_msg), "type mismatch in variable declaration — '%s' is declared with an incompatible type", stmt->as.let.name);
-                    ErrorLocation primary = {get_error_filename(), stmt->line, stmt->col};
-                    print_formatted_error(short_msg, primary, "type mismatch", NULL, NULL, NULL, NULL);
-                    exit(1);
+            if (stmt->as.let.value) {
+                Type val_t = TY_INT; char *val_c = NULL; bool val_a = false, val_m = false; Type val_k = TY_INT;
+                bool val_known = infer_ast_expr_type(arena, program, fn, scope, stmt->as.let.value, &val_t, &val_c, &val_a, &val_m, &val_k);
+                if (val_known) {
+                    bool mismatch = false;
+                    bool is_alloc = (stmt->as.let.value->type == NODE_ALLOC);
+                    bool is_literal = (stmt->as.let.value->type == NODE_LITERAL);
+                    if (stmt->as.let.var_type != val_t) {
+                        if (stmt->as.let.var_type == TY_FLOAT && val_t == TY_INT) {
+                            // int -> float promotion ok
+                        } else if (stmt->as.let.var_type == TY_INT && val_t == TY_FLOAT && !is_literal) {
+                            // float -> int truncation ok for expressions/variables, rejected for literals
+                        } else {
+                            mismatch = true;
+                        }
+                    } else if (!is_alloc && (stmt->as.let.is_array != val_a || stmt->as.let.is_map != val_m)) {
+                        mismatch = true;
+                    } else if (stmt->as.let.var_type == TY_CLASS && val_t == TY_CLASS) {
+                        if (stmt->as.let.class_name && val_c && strcmp(stmt->as.let.class_name, val_c) != 0) {
+                            mismatch = true;
+                        }
+                    }
+                    if (mismatch) {
+                        char short_msg[256];
+                        snprintf(short_msg, sizeof(short_msg), "type mismatch in variable declaration — '%s' is declared with an incompatible type", stmt->as.let.name);
+                        const char *fn_path = stmt->source_file ? stmt->source_file : get_error_filename();
+                        ErrorLocation primary = {fn_path, stmt->line, stmt->col};
+                        print_formatted_error(short_msg, primary, "type mismatch", NULL, NULL, NULL, NULL);
+                        exit(1);
+                    }
+                    if (is_alloc) {
+                        if (stmt->as.let.value->as.alloc.is_map) {
+                            stmt->as.let.is_map = true;
+                            stmt->as.let.key_type = stmt->as.let.value->as.alloc.key_type;
+                        } else {
+                            stmt->as.let.is_array = true;
+                        }
+                    }
                 }
             }
         }
+        infer_scope_add(arena, scope, stmt->as.let.name, stmt->as.let.var_type,
+                        stmt->as.let.class_name, stmt->as.let.is_array, stmt->as.let.is_map,
+                        stmt->as.let.key_type, stmt->line, stmt->col);
         return stmt;
+    }
+
+    if (stmt->type == NODE_ASSIGN) {
+        if (stmt->as.assign.value) {
+            check_expr_variables(arena, program, fn, scope, stmt->as.assign.value);
+        }
+
+        const char *name = stmt->as.assign.name;
+        AstNode *assign_val = stmt->as.assign.value;
+        InferVar *existing = infer_scope_lookup(scope, name);
+        if (!existing) {
+            // First assignment in this lexical scope chain: DECLARATION!
+            char *decl_name = arena_strdup(arena, name);
+            Type vt = TY_INT; char *vc = NULL; bool va = false, vm = false; Type vk = TY_INT;
+            infer_ast_expr_type(arena, program, fn, scope, assign_val, &vt, &vc, &va, &vm, &vk);
+
+            stmt->type = NODE_LET;
+            stmt->as.let.name = decl_name;
+            stmt->as.let.var_type = vt;
+            stmt->as.let.class_name = vc;
+            stmt->as.let.is_array = va;
+            stmt->as.let.is_map = vm;
+            stmt->as.let.key_type = vk;
+            stmt->as.let.value = assign_val;
+            stmt->as.let.retain_rhs = false;
+            stmt->as.let.has_explicit_type = false;
+
+            infer_scope_add(arena, scope, decl_name, vt, vc, va, vm, vk, stmt->line, stmt->col);
+            return stmt;
+        } else {
+            // Subsequent assignment: REASSIGNMENT!
+            Type val_t = TY_INT; char *val_c = NULL; bool val_a = false, val_m = false; Type val_k = TY_INT;
+            bool val_known = infer_ast_expr_type(arena, program, fn, scope, stmt->as.assign.value, &val_t, &val_c, &val_a, &val_m, &val_k);
+
+            if (val_known) {
+                bool mismatch = false;
+                if (existing->type != val_t && !(existing->type == TY_FLOAT && val_t == TY_INT)) {
+                    mismatch = true;
+                } else if (existing->is_array != val_a || existing->is_map != val_m) {
+                    mismatch = true;
+                } else if (existing->type == TY_CLASS && val_t == TY_CLASS) {
+                    if (existing->class_name && val_c && strcmp(existing->class_name, val_c) != 0) {
+                        mismatch = true;
+                    }
+                }
+                if (mismatch) {
+                    char short_msg[256];
+                    snprintf(short_msg, sizeof(short_msg), "type mismatch in assignment — cannot assign value of type '%s' to variable '%s' of type '%s'",
+                             type_to_string(val_t), name, type_to_string(existing->type));
+                    const char *fn_path = stmt->source_file ? stmt->source_file : get_error_filename();
+                    ErrorLocation primary = {fn_path, stmt->line, stmt->col};
+                    ErrorLocation note_loc = {fn_path, existing->line, existing->col};
+                    print_formatted_error(short_msg, primary, "type mismatch in assignment",
+                                          "variable first declared here:", &note_loc, "first declared here", NULL);
+                    exit(1);
+                }
+            }
+            return stmt;
+        }
     }
 
     if (stmt->type == NODE_COMPOUND_ASSIGN) {
@@ -2248,8 +2745,24 @@ static AstNode *desugar_stmt_node(AstArena *arena, AstNode *program, AstNode *fn
         const char *op = stmt->as.compound_assign.op;
         AstNode *val = stmt->as.compound_assign.value;
 
+        if (target->type == NODE_IDENT) {
+            if (!is_defined_identifier(program, fn, scope, target->as.ident.name)) {
+                char short_msg[256];
+                snprintf(short_msg, sizeof(short_msg), "undefined variable '%s'", target->as.ident.name);
+                const char *fn_path = target->source_file ? target->source_file : get_error_filename();
+                ErrorLocation primary = {fn_path, target->line, target->col};
+                print_formatted_error(short_msg, primary, "undefined variable", NULL, NULL, NULL, NULL);
+                exit(1);
+            }
+        } else {
+            check_expr_variables(arena, program, fn, scope, target);
+        }
+        if (val) {
+            check_expr_variables(arena, program, fn, scope, val);
+        }
+
         Type tt; char *tc = NULL; bool ta = false, tm = false; Type tk = TY_INT;
-        infer_ast_expr_type(arena, program, fn, target, &tt, &tc, &ta, &tm, &tk);
+        infer_ast_expr_type(arena, program, fn, scope, target, &tt, &tc, &ta, &tm, &tk);
 
         if (strcmp(op, "++") == 0) {
             AstNode *lit1 = arena_alloc_node(arena, NODE_LITERAL, stmt->line, stmt->col);
@@ -2290,40 +2803,109 @@ static AstNode *desugar_stmt_node(AstArena *arena, AstNode *program, AstNode *fn
     }
 
     if (stmt->type == NODE_BLOCK) {
+        InferScope *block_scope = create_infer_scope(arena, scope);
         for (int i = 0; i < stmt->as.block.count; i++) {
-            stmt->as.block.stmts[i] = desugar_stmt_node(arena, program, fn, stmt->as.block.stmts[i]);
+            stmt->as.block.stmts[i] = desugar_stmt_node(arena, program, fn, block_scope, stmt->as.block.stmts[i]);
         }
         return stmt;
     }
     if (stmt->type == NODE_IF) {
-        stmt->as.if_stmt.then_b = desugar_stmt_node(arena, program, fn, stmt->as.if_stmt.then_b);
+        check_expr_variables(arena, program, fn, scope, stmt->as.if_stmt.cond);
+        stmt->as.if_stmt.then_b = desugar_stmt_node(arena, program, fn, scope, stmt->as.if_stmt.then_b);
         if (stmt->as.if_stmt.else_b) {
-            stmt->as.if_stmt.else_b = desugar_stmt_node(arena, program, fn, stmt->as.if_stmt.else_b);
+            stmt->as.if_stmt.else_b = desugar_stmt_node(arena, program, fn, scope, stmt->as.if_stmt.else_b);
         }
         return stmt;
     }
     if (stmt->type == NODE_WHILE) {
-        stmt->as.while_stmt.body = desugar_stmt_node(arena, program, fn, stmt->as.while_stmt.body);
+        check_expr_variables(arena, program, fn, scope, stmt->as.while_stmt.cond);
+        stmt->as.while_stmt.body = desugar_stmt_node(arena, program, fn, scope, stmt->as.while_stmt.body);
         return stmt;
     }
     if (stmt->type == NODE_FOR) {
+        InferScope *for_scope = create_infer_scope(arena, scope);
         if (stmt->as.for_stmt.init) {
-            stmt->as.for_stmt.init = desugar_stmt_node(arena, program, fn, stmt->as.for_stmt.init);
+            stmt->as.for_stmt.init = desugar_stmt_node(arena, program, fn, for_scope, stmt->as.for_stmt.init);
         }
-        if (stmt->as.for_stmt.step && stmt->as.for_stmt.step->type == NODE_COMPOUND_ASSIGN) {
-            stmt->as.for_stmt.step = desugar_stmt_node(arena, program, fn, stmt->as.for_stmt.step);
+        if (stmt->as.for_stmt.cond) {
+            check_expr_variables(arena, program, fn, for_scope, stmt->as.for_stmt.cond);
         }
-        stmt->as.for_stmt.body = desugar_stmt_node(arena, program, fn, stmt->as.for_stmt.body);
+        if (stmt->as.for_stmt.step) {
+            stmt->as.for_stmt.step = desugar_stmt_node(arena, program, fn, for_scope, stmt->as.for_stmt.step);
+        }
+        stmt->as.for_stmt.body = desugar_stmt_node(arena, program, fn, for_scope, stmt->as.for_stmt.body);
         return stmt;
     }
     if (stmt->type == NODE_FOR_EACH) {
-        stmt->as.for_each.body = desugar_stmt_node(arena, program, fn, stmt->as.for_each.body);
+        check_expr_variables(arena, program, fn, scope, stmt->as.for_each.collection_expr);
+        Type coll_t; char *coll_c = NULL; bool coll_a = false, coll_m = false; Type coll_k = TY_INT;
+        infer_ast_expr_type(arena, program, fn, scope, stmt->as.for_each.collection_expr, &coll_t, &coll_c, &coll_a, &coll_m, &coll_k);
+
+        InferScope *each_scope = create_infer_scope(arena, scope);
+        infer_scope_add(arena, each_scope, stmt->as.for_each.loop_var_name, coll_t, coll_c, false, false, TY_INT, stmt->line, stmt->col);
+        stmt->as.for_each.body = desugar_stmt_node(arena, program, fn, each_scope, stmt->as.for_each.body);
         return stmt;
     }
     if (stmt->type == NODE_MATCH) {
+        check_expr_variables(arena, program, fn, scope, stmt->as.match_stmt.expr);
         for (int a = 0; a < stmt->as.match_stmt.arm_count; a++) {
-            stmt->as.match_stmt.arms[a]->as.match_arm.body = desugar_stmt_node(arena, program, fn, stmt->as.match_stmt.arms[a]->as.match_arm.body);
+            AstNode *arm = stmt->as.match_stmt.arms[a];
+            InferScope *arm_scope = create_infer_scope(arena, scope);
+            for (int b = 0; b < arm->as.match_arm.bind_count; b++) {
+                const char *bname = arm->as.match_arm.bind_names[b];
+                Type b_type = TY_INT;
+                char *b_cls = NULL;
+                if (program && arm->as.match_arm.enum_name && arm->as.match_arm.variant_name) {
+                    for (int e = 0; e < program->as.program.enum_count; e++) {
+                        AstNode *en = program->as.program.enums[e];
+                        if (strcmp(en->as.enum_decl.name, arm->as.match_arm.enum_name) == 0) {
+                            for (int v = 0; v < en->as.enum_decl.variant_count; v++) {
+                                AstNode *var = en->as.enum_decl.variants[v];
+                                if (strcmp(var->as.variant_decl.name, arm->as.match_arm.variant_name) == 0) {
+                                    for (int f = 0; f < var->as.variant_decl.field_count; f++) {
+                                        if (strcmp(var->as.variant_decl.fields[f]->as.field.name, bname) == 0) {
+                                            b_type = var->as.variant_decl.fields[f]->as.field.type;
+                                            b_cls = var->as.variant_decl.fields[f]->as.field.class_name;
+                                            break;
+                                        }
+                                    }
+                                    break;
+                                }
+                            }
+                            break;
+                        }
+                    }
+                }
+                infer_scope_add(arena, arm_scope, bname, b_type, b_cls, false, false, TY_INT, arm->line, arm->col);
+            }
+            arm->as.match_arm.body = desugar_stmt_node(arena, program, fn, arm_scope, arm->as.match_arm.body);
         }
+        return stmt;
+    }
+
+    if (stmt->type == NODE_PRINT) {
+        check_expr_variables(arena, program, fn, scope, stmt->as.print_stmt.value);
+        return stmt;
+    }
+    if (stmt->type == NODE_EXPR_STMT) {
+        check_expr_variables(arena, program, fn, scope, stmt->as.expr_stmt.expr);
+        return stmt;
+    }
+    if (stmt->type == NODE_RETURN) {
+        if (stmt->as.return_stmt.value) {
+            check_expr_variables(arena, program, fn, scope, stmt->as.return_stmt.value);
+        }
+        return stmt;
+    }
+    if (stmt->type == NODE_MEMBER_ASSIGN) {
+        check_expr_variables(arena, program, fn, scope, stmt->as.member_assign.object);
+        check_expr_variables(arena, program, fn, scope, stmt->as.member_assign.value);
+        return stmt;
+    }
+    if (stmt->type == NODE_INDEX_ASSIGN) {
+        check_expr_variables(arena, program, fn, scope, stmt->as.index_assign.array_expr);
+        check_expr_variables(arena, program, fn, scope, stmt->as.index_assign.index);
+        check_expr_variables(arena, program, fn, scope, stmt->as.index_assign.value);
         return stmt;
     }
 
@@ -2336,7 +2918,19 @@ static void desugar_and_infer_program(AstArena *arena, AstNode *program) {
     for (int f = 0; f < program->as.program.count; f++) {
         AstNode *fn = program->as.program.functions[f];
         if (fn && fn->as.function.body) {
-            fn->as.function.body = desugar_stmt_node(arena, program, fn, fn->as.function.body);
+            InferScope *root_scope = create_infer_scope(arena, NULL);
+            for (int p = 0; p < fn->as.function.param_count; p++) {
+                infer_scope_add(arena, root_scope,
+                                fn->as.function.param_names[p],
+                                fn->as.function.param_types[p],
+                                fn->as.function.param_class_names ? fn->as.function.param_class_names[p] : NULL,
+                                fn->as.function.param_is_array ? fn->as.function.param_is_array[p] : false,
+                                fn->as.function.param_is_map ? fn->as.function.param_is_map[p] : false,
+                                fn->as.function.param_key_types ? fn->as.function.param_key_types[p] : TY_INT,
+                                fn->as.function.param_lines ? fn->as.function.param_lines[p] : fn->line,
+                                fn->as.function.param_cols ? fn->as.function.param_cols[p] : fn->col);
+            }
+            fn->as.function.body = desugar_stmt_node(arena, program, fn, root_scope, fn->as.function.body);
         }
     }
     for (int c = 0; c < program->as.program.class_count; c++) {
@@ -2344,7 +2938,19 @@ static void desugar_and_infer_program(AstArena *arena, AstNode *program) {
         for (int m = 0; m < cls->as.class_decl.method_count; m++) {
             AstNode *mn = cls->as.class_decl.methods[m];
             if (mn && mn->as.method.body) {
-                mn->as.method.body = desugar_stmt_node(arena, program, mn, mn->as.method.body);
+                InferScope *root_scope = create_infer_scope(arena, NULL);
+                for (int p = 0; p < mn->as.method.param_count; p++) {
+                    infer_scope_add(arena, root_scope,
+                                    mn->as.method.param_names[p],
+                                    mn->as.method.param_types[p],
+                                    mn->as.method.param_class_names ? mn->as.method.param_class_names[p] : NULL,
+                                    mn->as.method.param_is_array ? mn->as.method.param_is_array[p] : false,
+                                    mn->as.method.param_is_map ? mn->as.method.param_is_map[p] : false,
+                                    mn->as.method.param_key_types ? mn->as.method.param_key_types[p] : TY_INT,
+                                    mn->as.method.param_lines ? mn->as.method.param_lines[p] : mn->line,
+                                    mn->as.method.param_cols ? mn->as.method.param_cols[p] : mn->col);
+                }
+                mn->as.method.body = desugar_stmt_node(arena, program, mn, root_scope, mn->as.method.body);
             }
         }
     }
@@ -2681,7 +3287,8 @@ void desugar_top_level_program(AstNode *prog, AstArena *arena, const char *sourc
     synth_main->as.function.return_key_type = TY_INT;
     synth_main->as.function.return_class_name = NULL;
     synth_main->as.function.returns_heap_pointer = false;
-    synth_main->as.function.body = desugar_stmt_node(arena, prog, synth_main, body_block);
+    InferScope *root_scope = create_infer_scope(arena, NULL);
+    synth_main->as.function.body = desugar_stmt_node(arena, prog, synth_main, root_scope, body_block);
 
     int new_fn_count = prog->as.program.count + 1;
     AstNode **new_fns = (AstNode **)arena_alloc_array(arena, new_fn_count, sizeof(AstNode *));
