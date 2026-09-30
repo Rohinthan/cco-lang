@@ -17,7 +17,7 @@ PASSED=0
 FAILED=0
 TOTAL=0
 
-for file in $(find tests/programs examples -name "*.cco" | sort); do
+for file in $(find tests/programs -name "*.cco" | sort); do
     TOTAL=$((TOTAL + 1))
     echo -n "Comparing lexers on ${file}... "
 

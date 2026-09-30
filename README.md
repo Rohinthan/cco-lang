@@ -38,7 +38,7 @@ Cco supports direct compilation to native standalone machine binaries with a sin
 
 ```bash
 # Compile directly to a standalone native binary
-./cco examples/01_hello_world.cco -o hello
+./cco hello.cco -o hello
 
 # Run the native binary directly at bare-metal execution speed
 ./hello
@@ -46,8 +46,8 @@ Cco supports direct compilation to native standalone machine binaries with a sin
 
 If the `-o` argument is omitted, Cco automatically derives the output executable name from the input source file:
 ```bash
-./cco examples/01_hello_world.cco
-./examples/01_hello_world
+./cco hello.cco
+./hello
 ```
 
 #### Performance Comparison: Native Binary vs `--run`
@@ -91,7 +91,7 @@ cco script.cco -o script
 To rapidly test and debug a Cco program without creating a persistent binary, use the `--run` flag:
 
 ```bash
-./cco examples/01_hello_world.cco --run
+./cco hello.cco --run
 ```
 
 #### What Happens Under the Hood:
