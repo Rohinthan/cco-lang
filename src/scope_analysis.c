@@ -499,9 +499,7 @@ static void analyze_node(ScopeStack *stack, AstNode *node) {
     }
 }
 
-/* ========================================================================= */
-/*  SINGLE OWNERSHIP & MOVE ANALYSIS PASS (Cco v3)                           */
-/* ========================================================================= */
+/* Single ownership and move analysis pass */
 
 typedef struct OwnVar {
     char *name;
