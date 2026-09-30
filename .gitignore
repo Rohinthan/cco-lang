@@ -4,6 +4,14 @@ gcco
 cco-link
 selfhost/lexer_selfhosted
 selfhost/lexer_selfhosted.c
+selfhost/parser
+selfhost/parser.c
+selfhost/typechecker
+selfhost/typechecker.c
+selfhost/codegen
+selfhost/codegen.c
+selfhost/cco
+selfhost/cco.c
 target.cco
 *.o
 /*.cco
