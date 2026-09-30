@@ -70,6 +70,9 @@ static TokenType check_keyword(const char *str) {
     if (strcmp(str, "void") == 0) return TOKEN_TYPE_VOID;
     if (strcmp(str, "true") == 0) return TOKEN_TRUE;
     if (strcmp(str, "false") == 0) return TOKEN_FALSE;
+    if (strcmp(str, "and") == 0) return TOKEN_KW_AND;
+    if (strcmp(str, "or") == 0) return TOKEN_KW_OR;
+    if (strcmp(str, "not") == 0) return TOKEN_KW_NOT;
     return TOKEN_IDENT;
 }
 
@@ -97,10 +100,11 @@ TokenArray lex_source(const char *source) {
             continue;
         }
 
-        // Skip line comments
-        if (c == '/' && source[pos + 1] == '/') {
-            pos += 2;
-            col += 2;
+        // Skip line comments (# or //)
+        if (c == '#' || (c == '/' && source[pos + 1] == '/')) {
+            int advance = (c == '#') ? 1 : 2;
+            pos += advance;
+            col += advance;
             while (source[pos] != '\0' && source[pos] != '\n') {
                 pos++;
                 col++;
@@ -289,6 +293,7 @@ TokenArray lex_source(const char *source) {
 
             while (isdigit(source[pos]) || source[pos] == '.') {
                 if (source[pos] == '.') {
+                    if (source[pos + 1] == '.') break; // Start of '..' range operator
                     if (is_float) break; // Second dot, stop
                     is_float = 1;
                 }
@@ -402,6 +407,11 @@ TokenArray lex_source(const char *source) {
         if (c == '|' && source[pos + 1] == '|') {
             pos += 2; col += 2;
             append_token(&array, (Token){TOKEN_OR, strdup("||"), line, start_col});
+            continue;
+        }
+        if (c == '.' && source[pos + 1] == '.') {
+            pos += 2; col += 2;
+            append_token(&array, (Token){TOKEN_DOT_DOT, strdup(".."), line, start_col});
             continue;
         }
 
@@ -522,7 +532,11 @@ const char *token_type_to_string(TokenType type) {
         case TOKEN_NOT: return "!";
         case TOKEN_AND: return "&&";
         case TOKEN_OR: return "||";
+        case TOKEN_KW_AND: return "and";
+        case TOKEN_KW_OR: return "or";
+        case TOKEN_KW_NOT: return "not";
         case TOKEN_DOT: return ".";
+        case TOKEN_DOT_DOT: return "..";
         case TOKEN_AMP: return "&";
         case TOKEN_EOF: return "EOF";
         case TOKEN_ERROR: return "ERROR";
@@ -568,6 +582,9 @@ void dump_tokens(const TokenArray *array) {
             case TOKEN_TYPE_VOID:
             case TOKEN_TRUE:
             case TOKEN_FALSE:
+            case TOKEN_KW_AND:
+            case TOKEN_KW_OR:
+            case TOKEN_KW_NOT:
                 printf("%d:%d KEYWORD %s\n", tok.line, tok.col, tok.lexeme);
                 break;
             case TOKEN_IDENT:

@@ -166,8 +166,8 @@ fn float_to_str(f: float) -> string {
         frac = frac - d;
         d_count = d_count + 1;
     }
-    let clean: string = strip_trailing_zeros(res);
-    return clean;
+    res = strip_trailing_zeros(res);
+    return res;
 }
 
 fn init_keywords() -> map[string]bool {
@@ -205,6 +205,9 @@ fn init_keywords() -> map[string]bool {
     keywords = put(keywords, "void", true);
     keywords = put(keywords, "true", true);
     keywords = put(keywords, "false", true);
+    keywords = put(keywords, "and", true);
+    keywords = put(keywords, "or", true);
+    keywords = put(keywords, "not", true);
     return keywords;
 }
 
@@ -233,10 +236,12 @@ fn lex(source: string) -> Token[] {
             continue;
         }
 
-        // Skip comments
-        if (c == '/' && i + 1 < n && char_at(source, i + 1) == '/') {
-            i = i + 2;
-            col = col + 2;
+        // Skip comments (// or #)
+        if ((c == '/' && i + 1 < n && char_at(source, i + 1) == '/') || c == '#') {
+            let advance: int = 1;
+            if (c == '/') { advance = 2; }
+            i = i + advance;
+            col = col + advance;
             while (i < n && char_at(source, i) != '\n') {
                 i = i + 1;
                 col = col + 1;
@@ -367,6 +372,9 @@ fn lex(source: string) -> Token[] {
 
             while (i < n && (is_digit(char_at(source, i)) || char_at(source, i) == '.')) {
                 if (char_at(source, i) == '.') {
+                    if (i + 1 < n && char_at(source, i + 1) == '.') {
+                        break;
+                    }
                     if (is_flt) {
                         break;
                     }
@@ -497,6 +505,12 @@ fn lex(source: string) -> Token[] {
             }
             if (c == '|' && next_c == '|') {
                 let sym: string = substring(source, i, i + 2);
+                tokens = push(tokens, Token { kind: TokenKind.Symbol { text: sym }, line: line, col: col });
+                i = i + 2; col = col + 2;
+                continue;
+            }
+            if (c == '.' && next_c == '.') {
+                let sym: string = "..";
                 tokens = push(tokens, Token { kind: TokenKind.Symbol { text: sym }, line: line, col: col });
                 i = i + 2; col = col + 2;
                 continue;

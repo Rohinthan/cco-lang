@@ -38,6 +38,9 @@ typedef enum {
     TOKEN_TYPE_VOID,
     TOKEN_TRUE,
     TOKEN_FALSE,
+    TOKEN_KW_AND,
+    TOKEN_KW_OR,
+    TOKEN_KW_NOT,
 
     // Identifiers and Literals
     TOKEN_IDENT,
@@ -82,6 +85,7 @@ typedef enum {
     TOKEN_AND,        // &&
     TOKEN_OR,         // ||
     TOKEN_DOT,        // .
+    TOKEN_DOT_DOT,    // ..
     TOKEN_AMP,        // &
     TOKEN_UNDERSCORE, // _
 
