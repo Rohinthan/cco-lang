@@ -1,10 +1,10 @@
 CC = gcc
 CFLAGS = -Wall -Wextra -Werror -pedantic-errors -std=c11 -Isrc
-SRC = src/errors.c src/lexer.c src/ast.c src/class_decl.c src/parser.c src/module_resolver.c src/trait_resolver.c src/scope_analysis.c src/codegen.c
+SRC = src/errors.c src/lexer.c src/ast.c src/class_decl.c src/parser.c src/module_resolver.c src/trait_resolver.c src/scope_analysis.c src/codegen.c src/ir.c src/ir_verify.c src/ir_print.c src/ir_lower.c src/ir_codegen_c.c src/x86_64_target.c src/x86_64_regalloc.c src/x86_64_instr.c src/x86_64_encode.c src/x86_64_elf.c src/x86_64_codegen.c src/x86_64_link.c src/ir_opt.c src/ir_dominance.c src/ir_ssa.c src/ir_loop.c src/ir_ssa_opt.c src/ir_ipa.c src/ir_profile.c
 MAIN_SRC = src/main.c
 LDFLAGS = -lm
 
-all: cco gcco
+all: cco gcco cco-link
 
 cco: $(SRC) $(MAIN_SRC)
 	@mkdir -p build
@@ -13,18 +13,22 @@ cco: $(SRC) $(MAIN_SRC)
 gcco: cco
 	@cp -f cco gcco
 
+cco-link: cco
+	@cp -f cco cco-link
+
 PREFIX ?= $(HOME)/.local
 
-install: cco gcco
+install: cco gcco cco-link
 	@mkdir -p $(PREFIX)/bin
 	@cp -f cco $(PREFIX)/bin/cco
 	@cp -f gcco $(PREFIX)/bin/gcco
+	@cp -f cco-link $(PREFIX)/bin/cco-link
 	@mkdir -p $(PREFIX)/lib/cco/std
 	@cp -rf std/*.cco $(PREFIX)/lib/cco/std/
-	@echo "Successfully installed 'cco', 'gcco', and standard library to $(PREFIX)"
+	@echo "Successfully installed 'cco', 'gcco', 'cco-link', and standard library to $(PREFIX)"
 
 uninstall:
-	@rm -f $(PREFIX)/bin/cco $(PREFIX)/bin/gcco
+	@rm -f $(PREFIX)/bin/cco $(PREFIX)/bin/gcco $(PREFIX)/bin/cco-link
 	@rm -rf $(PREFIX)/lib/cco
 	@echo "Removed 'cco', 'gcco', and standard library from $(PREFIX)"
 
@@ -34,11 +38,29 @@ unit_tests: cco
 	$(CC) $(CFLAGS) $(SRC) tests/unit/test_parser.c -o build/test_parser $(LDFLAGS)
 	$(CC) $(CFLAGS) $(SRC) tests/unit/test_scope.c -o build/test_scope $(LDFLAGS)
 	$(CC) $(CFLAGS) tests/unit/test_map_runtime.c -o build/test_map_runtime $(LDFLAGS)
+	$(CC) $(CFLAGS) $(SRC) tests/unit/test_ir.c -o build/test_ir $(LDFLAGS)
+	$(CC) $(CFLAGS) $(SRC) tests/unit/test_x86_64.c -o build/test_x86_64 $(LDFLAGS)
+	$(CC) $(CFLAGS) $(SRC) tests/unit/test_linker.c -o build/test_linker $(LDFLAGS)
+	$(CC) $(CFLAGS) $(SRC) tests/unit/test_opt.c -o build/test_opt $(LDFLAGS)
+	$(CC) $(CFLAGS) $(SRC) tests/unit/test_ssa.c -o build/test_ssa $(LDFLAGS)
+	$(CC) $(CFLAGS) $(SRC) tests/unit/test_opt_ssa.c -o build/test_opt_ssa $(LDFLAGS)
+	$(CC) $(CFLAGS) $(SRC) tests/unit/test_opt_ipa.c -o build/test_opt_ipa $(LDFLAGS)
+	$(CC) $(CFLAGS) $(SRC) tests/unit/test_opt_pgo.c -o build/test_opt_pgo $(LDFLAGS)
+	$(CC) $(CFLAGS) $(SRC) tests/unit/test_syntax.c -o build/test_syntax $(LDFLAGS)
 	@echo "--- Running Unit Tests under Valgrind ---"
 	valgrind --leak-check=full --error-exitcode=1 ./build/test_lexer
 	valgrind --leak-check=full --error-exitcode=1 ./build/test_parser
 	valgrind --leak-check=full --error-exitcode=1 ./build/test_scope
 	valgrind --leak-check=full --error-exitcode=1 ./build/test_map_runtime
+	valgrind --leak-check=full --error-exitcode=1 ./build/test_ir
+	valgrind --leak-check=full --error-exitcode=1 ./build/test_x86_64
+	valgrind --leak-check=full --error-exitcode=1 ./build/test_linker
+	valgrind --leak-check=full --error-exitcode=1 ./build/test_opt
+	valgrind --leak-check=full --error-exitcode=1 ./build/test_ssa
+	valgrind --leak-check=full --error-exitcode=1 ./build/test_opt_ssa
+	valgrind --leak-check=full --error-exitcode=1 ./build/test_opt_ipa
+	valgrind --leak-check=full --error-exitcode=1 ./build/test_opt_pgo
+	valgrind --leak-check=full --error-exitcode=1 ./build/test_syntax
 
 test_selfhost: cco
 	@bash tests/compare_lexers.sh
