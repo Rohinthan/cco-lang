@@ -8,10 +8,3 @@ target.cco
 *.o
 /*.cco
 scripts/
-bench/bench_c
-bench/bench_c_o0
-bench/bench_c_o3
-bench/bench_cpp
-bench/bench_rust
-bench/speed_demo
-
