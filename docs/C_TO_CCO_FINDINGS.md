@@ -92,14 +92,13 @@ Running the test suite confirms 100% pass rate:
 ```bash
 $ make test
 ...
-==================================================
-  Cco (C--) INTEGRATION & VALGRIND TEST SUITE    
-==================================================
+Cco Integration & Valgrind Test Suite
+-------------------------------------
 Testing 01_hello... PASSED (Diff Clean + 0 Leaks)
 ...
 Testing 100_increment_as_expression_ERROR... PASSED (Compilation Failed as Expected)
 Testing 101_fstring_escape_sequences... PASSED (Diff Clean + 0 Leaks)
---------------------------------------------------
+-------------------------------------
 Summary: 101 Passed, 0 Failed
-==================================================
+-------------------------------------
 ```
