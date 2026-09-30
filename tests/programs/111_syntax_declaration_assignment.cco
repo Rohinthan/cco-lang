@@ -1,0 +1,27 @@
+# Top-level execution without let
+x = 10;
+y = 20;
+sum = x + y;
+print(sum);
+
+# Reassignment
+sum = sum + 5;
+print(sum);
+
+# String declaration
+greeting = "Hello ";
+target = "World";
+message = concat(greeting, target);
+print(message);
+
+# In functions
+fn calculate(base: int, mult: int) -> int {
+    acc = 0;
+    for i in 0..mult {
+        acc += base;
+    }
+    return acc;
+}
+
+result = calculate(6, 7);
+print(result);

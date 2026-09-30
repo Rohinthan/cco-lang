@@ -3,9 +3,8 @@ set -e
 
 mkdir -p build
 
-echo "=================================================="
-echo "  Cco (C--) INTEGRATION & VALGRIND TEST SUITE    "
-echo "=================================================="
+echo "Cco Integration & Valgrind Test Suite"
+echo "-------------------------------------"
 if command -v clang >/dev/null 2>&1; then
     echo "  [Compiler] GCC: yes (-pedantic-errors), Clang: yes (-pedantic-errors)"
 else
@@ -14,7 +13,7 @@ fi
 if command -v tcc >/dev/null 2>&1; then
     echo "  [Compiler] TCC: yes"
 fi
-echo "=================================================="
+echo "-------------------------------------"
 
 PASSED=0
 FAILED=0
@@ -170,9 +169,9 @@ for item in tests/programs/*; do
     PASSED=$((PASSED + 1))
 done
 
-echo "=================================================="
-echo "  Cco NATIVE POSIX NETWORKING & FD LEAK SUITE     "
-echo "=================================================="
+echo "-------------------------------------"
+echo "Cco Native POSIX Networking & FD Leak Suite"
+echo "-------------------------------------"
 mkdir -p build/network
 ./cco tests/network/test_server.cco -o build/network/test_server.c
 gcc -Wall -Wextra -Werror -pedantic-errors -std=c11 build/network/test_server.c -o build/network/test_server -lm
@@ -194,11 +193,11 @@ for net_test in tests/network/*.sh; do
     fi
 done
 
-echo "--------------------------------------------------"
+echo "-------------------------------------"
 echo "Network Suite: ${NET_PASSED} Passed, ${NET_FAILED} Failed"
-echo "=================================================="
+echo "-------------------------------------"
 echo "Total Suite Summary: $((PASSED + NET_PASSED)) Passed, $((FAILED + NET_FAILED)) Failed"
-echo "=================================================="
+echo "-------------------------------------"
 
 if [ "$FAILED" -ne 0 ] || [ "$NET_FAILED" -ne 0 ]; then
     exit 1

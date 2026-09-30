@@ -3,9 +3,8 @@ set -e
 
 mkdir -p build
 
-echo "=================================================="
-echo "  Cco v12 SELF-HOSTED LEXER COMPARISON HARNESS   "
-echo "=================================================="
+echo "Cco Self-Hosted Lexer Comparison Harness"
+echo "----------------------------------------"
 
 # 1. Ensure compiler is built
 make cco > /dev/null
@@ -44,9 +43,8 @@ done
 # Cleanup temporary target and output files
 rm -f target.cco build/ground_truth.txt build/selfhosted_output.txt
 
-echo "=================================================="
+echo "----------------------------------------"
 echo "Summary: ${PASSED}/${TOTAL} Passed, ${FAILED} Failed"
-echo "=================================================="
 
 if [ "$FAILED" -ne 0 ]; then
     exit 1

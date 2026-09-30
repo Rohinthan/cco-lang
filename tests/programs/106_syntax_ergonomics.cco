@@ -1,0 +1,45 @@
+# Cco Phase 10 - Python-Inspired Surface Syntax & Ergonomics
+# Test: Combined demonstration of new surface syntax features
+
+# 1. Expression-bodied function
+fn square(x: int) -> int = x * x;
+fn cube(x: int) -> int = x * square(x);
+
+# 2. Top-level statements without explicit fn main()
+let limit = 5;
+let sum_squares = 0;
+
+# 3. Range-based for loop
+for i in 0..limit {
+    sum_squares += square(i);
+}
+
+print(f"sum_squares = {sum_squares}"); # 0 + 1 + 4 + 9 + 16 = 30
+
+# 4. Optional parentheses in while loop
+let count = 0;
+let total_cubes = 0;
+while count < 4 {
+    total_cubes += cube(count);
+    count += 1;
+}
+
+print(f"total_cubes = {total_cubes}"); # 0 + 1 + 8 + 27 = 36
+
+# 5. Optional parentheses in if statement + boolean keywords and/or/not
+let flag_a = true;
+let flag_b = false;
+
+if flag_a and not flag_b {
+    print("flag_a and not flag_b is TRUE");
+}
+
+if flag_b or flag_a {
+    print("flag_b or flag_a is TRUE");
+}
+
+# 6. Combined boolean expression with comparisons
+let score = 85;
+if score >= 80 and score < 90 {
+    print("grade B");
+}

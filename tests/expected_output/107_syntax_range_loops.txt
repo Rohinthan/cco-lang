@@ -1,0 +1,5 @@
+sum 0..6 = 15
+dynamic_sum 3..8 = 25
+neg_sum -4..2 = -9
+empty range: correctly executed 0 times
+matrix_cells 3x4 = 12

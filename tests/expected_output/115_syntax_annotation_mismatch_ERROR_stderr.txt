@@ -1,0 +1,6 @@
+error: type mismatch in variable declaration — 'x' is declared with an incompatible type
+  --> tests/programs/115_syntax_annotation_mismatch_ERROR.cco:1:1
+    |
+  1 | x: int = "cannot assign string to int";
+    | ^ type mismatch
+    |

@@ -1,0 +1,30 @@
+# Test expression-bodied functions and methods
+
+fn add(a: int, b: int) -> int = a + b;
+fn sub(a: int, b: int) -> int = a - b;
+fn mul(a: int, b: int) -> int = a * b;
+fn double_val(x: int) -> int = add(x, x);
+fn quad(x: int) -> int = double_val(double_val(x));
+
+class Counter {
+    val: int;
+
+    fn get_val(self) -> int = self.val;
+    fn next_val(self) -> int = self.val + 1;
+}
+
+let sum = add(10, 20);
+print(f"add(10, 20) = {sum}");
+
+let diff = sub(50, 15);
+print(f"sub(50, 15) = {diff}");
+
+let prod = mul(6, 7);
+print(f"mul(6, 7) = {prod}");
+
+let q = quad(5);
+print(f"quad(5) = {q}"); # 5 * 2 * 2 = 20
+
+let c = Counter { val: 41 };
+print(f"counter = {c.get_val()}");
+print(f"next = {c.next_val()}");

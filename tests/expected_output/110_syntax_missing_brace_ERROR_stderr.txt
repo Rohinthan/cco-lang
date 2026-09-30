@@ -1,0 +1,6 @@
+error: syntax error: Expected '{' at 'print'
+  --> tests/programs/110_syntax_missing_brace_ERROR.cco:3:10
+    |
+  3 | if x > 5 print(x);
+    |          ^ syntax error here
+    |

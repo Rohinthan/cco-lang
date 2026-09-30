@@ -1,0 +1,41 @@
+# Test boolean operators and precedence
+
+fn log_eval(tag: string, result: bool) -> bool {
+    print(f"eval {tag}");
+    return result;
+}
+
+# 1. Precedence: 'not' > 'and' > 'or'
+# (true or false and false) -> true or (false and false) -> true
+if true or false and false {
+    print("test 1: passed (and binds tighter than or)");
+}
+
+# (not false and false) -> (not false) and false -> true and false -> false
+if not false and false {
+    print("test 2: failed");
+} else {
+    print("test 2: passed (not binds tighter than and)");
+}
+
+# 2. Short-circuit evaluation
+# In 'false and log_eval(...)', log_eval must NOT be called
+if false and log_eval("unreached_and", true) {
+    print("test 3: failed");
+} else {
+    print("test 3: passed short-circuit and");
+}
+
+# In 'true or log_eval(...)', log_eval must NOT be called
+if true or log_eval("unreached_or", false) {
+    print("test 4: passed short-circuit or");
+}
+
+# 3. Mixing keyword and legacy operators
+let a = true;
+let b = false;
+let c = true;
+
+if (a and b) || (a or not c) {
+    print("test 5: mixed operators passed");
+}

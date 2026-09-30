@@ -1,0 +1,42 @@
+# Test range loop semantics
+
+# 1. Simple range
+let sum = 0;
+for i in 0..6 {
+    sum += i;
+}
+print(f"sum 0..6 = {sum}"); # 0+1+2+3+4+5 = 15
+
+# 2. Dynamic bounds
+let start = 3;
+let end_val = 8;
+let dynamic_sum = 0;
+for i in start..end_val {
+    dynamic_sum += i;
+}
+print(f"dynamic_sum 3..8 = {dynamic_sum}"); # 3+4+5+6+7 = 25
+
+# 3. Negative bounds
+let neg_sum = 0;
+for i in -4..2 {
+    neg_sum += i;
+}
+print(f"neg_sum -4..2 = {neg_sum}"); # -4 + -3 + -2 + -1 + 0 + 1 = -9
+
+# 4. Empty range (start >= end)
+let executed = false;
+for i in 10..5 {
+    executed = true;
+}
+if not executed {
+    print("empty range: correctly executed 0 times");
+}
+
+# 5. Nested ranges
+let matrix_cells = 0;
+for r in 0..3 {
+    for c in 0..4 {
+        matrix_cells += 1;
+    }
+}
+print(f"matrix_cells 3x4 = {matrix_cells}"); # 12

@@ -1,0 +1,6 @@
+error: undefined variable 'z'
+  --> tests/programs/113_syntax_undefined_read_ERROR.cco:2:7
+    |
+  2 | print(z);
+    |       ^ undefined variable
+    |

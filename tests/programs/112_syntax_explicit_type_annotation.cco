@@ -1,0 +1,23 @@
+x: int = 100;
+y: int = 25;
+ratio: float = 3.5;
+name: string = "Cco v11";
+flag: bool = true;
+
+print(x);
+print(y);
+print(ratio);
+print(name);
+if flag {
+    print(1);
+} else {
+    print(0);
+}
+
+fn add_typed(a: int, b: int) -> int {
+    res: int = a + b;
+    return res;
+}
+
+ans: int = add_typed(x, y);
+print(ans);

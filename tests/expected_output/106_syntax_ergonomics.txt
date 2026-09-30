@@ -1,0 +1,5 @@
+sum_squares = 30
+total_cubes = 36
+flag_a and not flag_b is TRUE
+flag_b or flag_a is TRUE
+grade B

@@ -1,0 +1,12 @@
+error: type mismatch in assignment — cannot assign value of type 'string' to variable 'x' of type 'int'
+  --> tests/programs/114_syntax_type_reassign_mismatch_ERROR.cco:2:1
+    |
+  2 | x = "incompatible";
+    | ^ type mismatch in assignment
+    |
+note: variable first declared here:
+  --> tests/programs/114_syntax_type_reassign_mismatch_ERROR.cco:1:1
+    |
+  1 | x = 10;
+    | ^ first declared here
+    |
