@@ -1,0 +1,56 @@
+// bench_mandelbrot.cco - Mandelbrot set floating-point compute benchmark
+fn compute_mandelbrot(max_iters: int) -> int {
+    let width: int = 40;
+    let height: int = 30;
+    let total_escaped: int = 0;
+
+    let cy_step: float = 2.4 / 30.0;
+    let cx_step: float = 3.0 / 40.0;
+
+    let cy: float = -1.2;
+    let y: int = 0;
+    while (y < height) {
+        let cx: float = -2.0;
+        let x: int = 0;
+        while (x < width) {
+            let zx: float = 0.0;
+            let zy: float = 0.0;
+            let iter: int = 0;
+            let escaped: int = 0;
+
+            while (iter < max_iters) {
+                let zx2: float = zx * zx;
+                let zy2: float = zy * zy;
+                if (zx2 + zy2 > 4.0) {
+                    escaped = 1;
+                    iter = max_iters;
+                } else {
+                    let new_zy: float = 2.0 * zx * zy + cy;
+                    zx = zx2 - zy2 + cx;
+                    zy = new_zy;
+                    iter = iter + 1;
+                }
+            }
+
+            if (escaped == 1) {
+                total_escaped = total_escaped + 1;
+            }
+            cx = cx + cx_step;
+            x = x + 1;
+        }
+        cy = cy + cy_step;
+        y = y + 1;
+    }
+    return total_escaped;
+}
+
+fn main() -> int {
+    let repeat: int = 0;
+    let sum: int = 0;
+    while (repeat < 100) {
+        sum = sum + compute_mandelbrot(100);
+        repeat = repeat + 1;
+    }
+    print(sum);
+    return 0;
+}

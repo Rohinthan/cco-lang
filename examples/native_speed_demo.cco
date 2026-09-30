@@ -1,0 +1,45 @@
+// High-Speed Numerical Integration: Estimating Pi
+// Formula: Integral from 0 to 1 of 4 / (1 + x^2) dx = pi
+fn estimate_pi(steps: float, n_iterations: int) -> float {
+    let step_size: float = 1.0 / steps;
+    let sum: float = 0.0;
+    let x: float = 0.5 * step_size;
+    let i: int = 0;
+    while (i < n_iterations) {
+        sum = sum + 4.0 / (1.0 + x * x);
+        x = x + step_size;
+        i = i + 1;
+    }
+    return sum * step_size;
+}
+
+// Fast Fibonacci (Recursion + Call overhead benchmark)
+fn fib(n: int) -> int {
+    if (n <= 1) {
+        return n;
+    }
+    return fib(n - 1) + fib(n - 2);
+}
+
+fn main() -> int {
+    print("==================================================");
+    print("     Cco Native x86-64 High-Speed Benchmark       ");
+    print("==================================================");
+
+    // 1. Numerical Floating-Point Integration (10 million steps)
+    print("[1] Running 10,000,000 float integration steps to compute Pi...");
+    let pi: float = estimate_pi(10000000.0, 10000000);
+    print("Result (Estimated Pi):");
+    print(pi);
+
+    // 2. Recursive Function Call Performance
+    print("[2] Running recursive Fibonacci(35)...");
+    let f: int = fib(35);
+    print("Result (Fibonacci 35):");
+    print(f);
+
+    print("==================================================");
+    print("All computations completed natively at machine speed!");
+    print("==================================================");
+    return 0;
+}

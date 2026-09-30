@@ -1,0 +1,32 @@
+// bench_call.cco - Heavy small-function call throughput and inlining evaluation
+fn helper_add(a: int, b: int) -> int {
+    return a + b;
+}
+
+fn helper_clamp(x: int, low: int, high: int) -> int {
+    if (x < low) {
+        return low;
+    }
+    if (x > high) {
+        return high;
+    }
+    return x;
+}
+
+fn run_calls(iterations: int) -> int {
+    let sum: int = 0;
+    let i: int = 0;
+    while (i < iterations) {
+        let a: int = helper_add(i, 10);
+        let b: int = helper_clamp(a, 50, 500);
+        sum = (sum + b) % 10000000;
+        i = i + 1;
+    }
+    return sum;
+}
+
+fn main() -> int {
+    let res: int = run_calls(2000000);
+    print(res);
+    return 0;
+}

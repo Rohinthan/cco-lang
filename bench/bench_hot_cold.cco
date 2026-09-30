@@ -1,0 +1,35 @@
+// bench_hot_cold.cco - Biased branch paths testing profile-guided layout
+fn process_sample(x: int) -> int {
+    let r: int = 0;
+    // 99.9% taken hot path vs 0.1% cold path
+    if (x % 1000 != 0) {
+        // Hot branch
+        r = (x * 7) + 3;
+        if (r % 2 == 0) {
+            r = r / 2;
+        } else {
+            r = r * 3 + 1;
+        }
+    } else {
+        // Cold branch: expensive computation rarely executed
+        let c: int = 0;
+        let k: int = 0;
+        while (k < 50) {
+            c = c + k * k;
+            k = k + 1;
+        }
+        r = c;
+    }
+    return r;
+}
+
+fn main() -> int {
+    let acc: int = 0;
+    let i: int = 0;
+    while (i < 500000) {
+        acc = (acc + process_sample(i)) % 10000000;
+        i = i + 1;
+    }
+    print(acc);
+    return 0;
+}

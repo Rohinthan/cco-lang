@@ -1,0 +1,13 @@
+// bench_fib.cco - Recursive function calls and call-stack management
+fn fib(n: int) -> int {
+    if (n <= 1) {
+        return n;
+    }
+    return fib(n - 1) + fib(n - 2);
+}
+
+fn main() -> int {
+    let res: int = fib(32);
+    print(res);
+    return 0;
+}

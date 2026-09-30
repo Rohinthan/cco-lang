@@ -1,0 +1,33 @@
+// bench_float_expr.cco - Recursive & nested floating-point calls with reduction
+fn chebyshev(n: int, x: float) -> float {
+    if (n == 0) {
+        return 1.0;
+    }
+    if (n == 1) {
+        return x;
+    }
+    return 2.0 * x * chebyshev(n - 1, x) - chebyshev(n - 2, x);
+}
+
+fn eval_polynomial(x: float, iters: int) -> float {
+    let sum: float = 0.0;
+    let i: int = 0;
+    while (i < iters) {
+        let term: float = chebyshev(5, x);
+        sum = sum + term;
+        x = x + 0.000001;
+        i = i + 1;
+    }
+    return sum;
+}
+
+fn main() -> int {
+    let result: float = eval_polynomial(0.5, 200000);
+    let pass: bool = (result < -15000.0) && (result > -16000.0);
+    if (pass) {
+        print(1);
+    } else {
+        print(0);
+    }
+    return 0;
+}
