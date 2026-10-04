@@ -16,3 +16,5 @@ target.cco
 *.o
 /*.cco
 scripts/
+paper.md
+
