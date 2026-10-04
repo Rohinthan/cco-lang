@@ -15,12 +15,32 @@ Cco features a dual-target compilation model:
 
 ---
 
-## Quick Look
+## Quick Start: Download, Install & Run
 
-Cco eliminates syntactic boilerplate while enforcing strict compile-time types and ownership:
+Get up and running with Cco in under a minute:
+
+### 1. Download & Install
+
+```bash
+# Clone the repository
+git clone https://github.com/Rohinthan/cco-lang.git
+cd cco-lang
+
+# Build the compiler executable
+make cco
+
+# Install into ~/.local/bin and standard library into ~/.local/lib/cco
+make install
+```
+
+> [!TIP]
+> Ensure `~/.local/bin` is in your `$PATH` (typically default on modern Linux distros, or add `export PATH="$HOME/.local/bin:$PATH"` to your `~/.bashrc`).  
+> For system-wide installation across all users, run: `sudo make install PREFIX=/usr/local`
+
+### 2. Write Your First Program (`example.cco`)
 
 ```cco
-# A complete, standalone Cco program
+# example.cco
 fn square(x: int) -> int = x * x;
 
 x = 10;
@@ -36,13 +56,25 @@ for i in 0..5 {
 print(total);
 ```
 
-Compile and execute directly:
+### 3. Compile and Run
 
 ```bash
-$ ./cco program.cco -o program
-$ ./program
+# Compile to a native executable
+cco example.cco -o example
+
+# Run the binary
+./example
+```
+
+Output:
+```text
 100
 6
+```
+
+You can also execute programs directly in one step without producing a persistent binary:
+```bash
+cco example.cco --run
 ```
 
 ---
@@ -370,55 +402,90 @@ cco source.cco --dump-code-stats      # Dump instruction count statistics
 
 ---
 
-## Building the Compiler
+## Building & Installing from Source
 
-### Requirements:
-- Linux x86-64 operating system (kernel 3.2+)
-- GCC 9+ or Clang 10+
-- GNU Make
-- Optional: Valgrind 3.15+ (for running memory leak test suites)
+### System Requirements:
+- **Operating System**: Linux x86-64 (kernel 3.2+)
+- **C Compiler**: GCC 9+ or Clang 10+ (supporting ISO C11)
+- **Build System**: GNU Make
+- **Optional**: Valgrind 3.15+ (for running memory leak test suites)
 
-### Instructions:
+### 1. Build the Compiler
 
 ```bash
 # Clone the repository
 git clone https://github.com/Rohinthan/cco-lang.git
 cd cco-lang
 
-# Build the compiler executable
+# Build the compiler executable (cco)
 make cco
 
-# Verify the build
+# Verify local binary
 ./cco --help
+```
+
+### 2. Install to System
+
+#### Option A: User Installation (Recommended)
+Installs `cco`, `gcco`, and `cco-link` to `$HOME/.local/bin` and the standard library to `$HOME/.local/lib/cco/std`:
+
+```bash
+make install
+```
+
+Ensure `~/.local/bin` is in your shell `PATH` (typically default on modern Linux, or append to `~/.bashrc`):
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+#### Option B: System-Wide Installation
+Installs binaries to `/usr/local/bin` and standard libraries to `/usr/local/lib/cco/std` across all users:
+
+```bash
+sudo make install PREFIX=/usr/local
+```
+
+### 3. Uninstall
+
+To remove Cco binaries and the standard library from your system:
+
+```bash
+# For user-level installation:
+make uninstall
+
+# For system-wide installation:
+sudo make uninstall PREFIX=/usr/local
 ```
 
 ---
 
 ## Basic CLI Usage
 
+Once installed, use `cco` directly from any directory *(or `./cco` if running locally inside the cloned repository)*:
+
 ```bash
 # 1. Compile to a native binary using the default C11 pipeline
-./cco program.cco -o program
+cco program.cco -o program
 ./program
 
 # 2. Compile directly to an executable and run immediately
-./cco program.cco --run
+cco program.cco --run
 
 # 3. Compile via native x86-64 backend and external linker
-./cco program.cco --use-native -o program
+cco program.cco --use-native -o program
 
 # 4. Compile and link completely standalone without gcc or ld
-./cco program.cco --use-internal-linker -o program
+cco program.cco --use-internal-linker -o program
 
 # 5. Compile with SSA optimizations (-O2)
-./cco program.cco --ssa -O2 -o program
+cco program.cco --ssa -O2 -o program
 
 # 6. Profile-Guided Optimization (two-phase compilation)
-./cco program.cco --profile-generate -o program_instr && ./program_instr
-./cco program.cco --profile-use cco.profile -O2 -o program_opt
+cco program.cco --profile-generate -o program_instr && ./program_instr
+cco program.cco --profile-use cco.profile -O2 -o program_opt
 
 # 7. Output pure ISO C11 source code
-./cco program.cco -o output.c
+cco program.cco -o output.c
 ```
 
 ---
