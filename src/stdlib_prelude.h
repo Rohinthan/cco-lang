@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: Apache-2.0
 
 #ifndef STDLIB_PRELUDE_H
 #define STDLIB_PRELUDE_H

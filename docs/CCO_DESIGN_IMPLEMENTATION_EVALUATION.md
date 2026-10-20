@@ -3,7 +3,7 @@
 **Author**: The Cco Project Contributors  
 **Date**: September 2026  
 **Document Classification**: Technical Research Foundation & Architecture Specification  
-**License**: [GNU General Public License v3.0 or later (GPL-3.0-or-later)](file:///home/raccoon/cco-lang/LICENSE)
+**License**: [Apache License 2.0 (Apache-2.0)](file:///home/stringray/cco-lang/LICENSE)
 
 ---
 

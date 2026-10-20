@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: Apache-2.0
 
 // Test server that explicitly calls net_recv(client_fd, 512) with a small initial buffer
 

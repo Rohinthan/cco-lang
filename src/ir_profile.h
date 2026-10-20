@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: Apache-2.0
 
 #ifndef IR_PROFILE_H
 #define IR_PROFILE_H

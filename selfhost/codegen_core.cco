@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: Apache-2.0
 
 // codegen_core.cco - Standard ISO C11 Code Generator for Self-Hosted Cco Compiler
 import "ast.cco";

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: Apache-2.0
 # Minimal Standalone Linux x86-64 Runtime for Cco Linker
 # Provides: _start, exit, printf, malloc, free using pure Linux syscalls.
 

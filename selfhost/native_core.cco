@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: Apache-2.0
 
 // native_core.cco — Self-Hosted Native x86-64 Pipeline Driver
 import "ast.cco";

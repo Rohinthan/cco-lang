@@ -2,7 +2,7 @@
 
 A statically typed, natively compiled programming language designed to combine Python-inspired programming ergonomics with systems-level execution and compile-time memory safety.
 
-[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Linux%20x86--64-brightgreen.svg)]()
 [![Build](https://img.shields.io/badge/Build-ISO%20C11%20%7C%20Native%20x86--64-blue.svg)]()
 [![Memory Safety](https://img.shields.io/badge/Memory%20Verification-Valgrind%200%20Leaks-success.svg)]()
@@ -652,5 +652,5 @@ Contributions to the Cco compiler are welcome.
 
 ## License
 
-Cco is open source software licensed under the **GNU General Public License v3.0 or later** (GPL-3.0-or-later).  
-See the [`LICENSE`](LICENSE) file for the full license text.
+Cco is open source software distributed under the terms of the **Apache License 2.0** (`Apache-2.0`).
+See the [`LICENSE`](LICENSE) file for details.

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: Apache-2.0
 
 #ifndef X86_64_CODEGEN_H
 #define X86_64_CODEGEN_H

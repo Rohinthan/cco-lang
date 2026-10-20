@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: Apache-2.0
 
 // ir_opt.cco — Self-Hosted Optimization Pipeline & IR Verifier in pure Cco
 import "ast.cco";

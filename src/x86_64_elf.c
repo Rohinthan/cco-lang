@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: Apache-2.0
 
 #define _POSIX_C_SOURCE 200809L
 #include "x86_64_elf.h"

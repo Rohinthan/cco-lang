@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: Apache-2.0
 
 // elf_core.cco — Pure Cco ELF64 Relocatable Object (ET_REL) Generator
 import "x86_64_core.cco";
