@@ -504,13 +504,17 @@ fn make_let_stmt(name: string, type_name: string, has_type: bool, init: Expr, li
 }
 
 fn make_assign_stmt(target: Expr, val: Expr, line: int, col: int) -> Stmt {
+    let vname: string = "";
+    if (target.kind == 6) {
+        vname = concat(target.callee, "");
+    }
     let targets = list_new(Expr);
     targets = push(targets, target);
     let vals = list_new(Expr);
     vals = push(vals, val);
     return Stmt {
         kind: 2, // STMT_ASSIGN
-        var_name: concat("", ""),
+        var_name: vname,
         var_type: concat("", ""),
         has_explicit_type: false,
         op: concat("=", ""),

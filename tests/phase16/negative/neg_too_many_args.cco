@@ -1,0 +1,7 @@
+fn dummy(a: int) -> int {
+    return a;
+}
+
+fn main() -> int {
+    return dummy(1, 2, 3, 4, 5, 6, 7);
+}

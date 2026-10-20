@@ -1,0 +1,13 @@
+fn add(a: int, b: int) -> int {
+    return a + b;
+}
+
+fn calculate(x: int) -> int {
+    let saved: int = x + 10;
+    let result: int = add(x, 20);
+    return saved + result;
+}
+
+fn main() -> int {
+    return calculate(5); // 15 + 25 = 40
+}

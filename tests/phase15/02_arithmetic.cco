@@ -1,0 +1,6 @@
+fn main() -> int {
+    let a: int = 10 + 20 * 3 - 5;
+    let b: int = (30 - 10) * 2;
+    let c: int = -15 + 40;
+    return (a - b) + c;
+}

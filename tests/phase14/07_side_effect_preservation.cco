@@ -1,0 +1,12 @@
+// Phase 14 Test 07: Side Effect Preservation
+fn side_effect_fn(msg: string) -> int {
+    print(msg);
+    return 42;
+}
+
+fn main() -> int {
+    let r1: int = side_effect_fn("side_effect_1");
+    let r2: int = side_effect_fn("side_effect_2");
+    print(r1 + r2);
+    return 0;
+}

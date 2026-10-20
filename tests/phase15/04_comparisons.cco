@@ -1,0 +1,10 @@
+fn main() -> int {
+    let score: int = 0;
+    if (10 == 10) { score = score + 1; }
+    if (10 != 20) { score = score + 2; }
+    if (5 < 10)   { score = score + 4; }
+    if (10 <= 10) { score = score + 8; }
+    if (15 > 10)  { score = score + 16; }
+    if (10 >= 10) { score = score + 32; }
+    return score;
+}

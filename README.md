@@ -284,6 +284,40 @@ s = Shape.Rect { width: 4.0, height: 5.0 };
 print(area(&s));          # 20.0
 ```
 
+### 7. Interactive Input & Multi-Argument Print
+
+Cco provides built-in Python-inspired interactive input and flexible console output ergonomics:
+
+#### Example 1: Read User Input
+```cco
+name = input("Enter your name: ");
+print("Hello", name);
+```
+
+Example interaction:
+```text
+Enter your name: Rohinthan
+Hello Rohinthan
+```
+
+#### Example 2: Multiple Print Arguments
+```cco
+language = "Cco";
+print("Welcome to", language);
+```
+
+Expected output:
+```text
+Welcome to Cco
+```
+
+#### Key Characteristics & Semantics:
+- **`input([prompt])`**: Reads a line of user input from standard input and returns a heap-allocated managed `string`. If an optional prompt string is provided, it is printed and standard output is flushed (`fflush(stdout)`) immediately before awaiting user input.
+- **Affine Ownership of Input**: The returned string is governed by Cco's affine single-ownership model; it is automatically freed upon scope exit with 0 leaks under Valgrind.
+- **Multi-Argument `print(arg1, arg2, ...)`**: Accepts multiple comma-separated expressions of any supported type (`string`, `int`, `float`, `bool`, `char`). Arguments are formatted sequentially separated by single spaces and terminated by a trailing newline.
+- **Backward Compatibility**: Existing single-argument `print(value);` invocations retain 100% backward compatibility.
+- *Note*: These ergonomics provide convenient I/O primitives (`input()` and multi-argument `print()`), not full Python runtime compatibility or dynamic f-string expressions.
+
 ---
 
 ## Memory Safety & Ownership Model
@@ -356,6 +390,9 @@ The Cco compiler operates as an integrated multi-pass pipeline supporting two di
     Host Linker              Standalone Linux Executable
    (gcc / GNU ld)             (No external dependencies)
 ```
+
+> [!NOTE] Architecture & Portability
+> Cco retains its standard ISO C11 transpilation backend as a dependable portability route while the direct native x86-64 machine-code backend and register allocator continue to evolve. Not all CPU architectures are natively supported; the C11 backend guarantees cross-platform compilation wherever an ISO C11 compiler (such as GCC, Clang, or TCC) is present.
 
 ---
 
@@ -578,12 +615,13 @@ Detailed architectural specifications and engineering reports are available in [
 
 ## Companion Repository: `cco-examples`
 
-Application examples, algorithm implementations, and benchmarks are curated in the companion repository [**Rohinthan/cco-examples**](https://github.com/Rohinthan/cco-examples):
+Standalone tests, practical application examples, algorithm implementations, and benchmark artifacts are curated in the companion repository [**Rohinthan/cco-examples**](https://github.com/Rohinthan/cco-examples):
 
 - **`codebase/`**: 251+ comprehensive example programs demonstrating language features from basics to advanced server architectures.
+- **`examples/`**: Tutorial programs, interactive I/O demos (`input()`, multi-argument `print()`), and multi-file module imports.
+- **`tests/`**: Standalone regression test cases and phase validation suites.
 - **`algorithms/`**: 65 machine learning and scientific computing implementations (linear regression, k-means, MLP, DBSCAN, decision trees, A* search, etc.) verified against NumPy and scikit-learn.
-- **`bench/`**: Multi-language performance benchmark suite and automated statistical measurement harness.
-- **`examples/`**: Tutorial programs and multi-file module imports.
+- **`bench/`**: Multi-language performance benchmark suite, measurement harness, and empirical execution reports.
 
 ---
 

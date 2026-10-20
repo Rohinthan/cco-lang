@@ -36,6 +36,8 @@ static const char *deps_is_int[] = { "try_parse_int", NULL };
 static const char *deps_to_int[] = { "try_parse_int", NULL };
 static const char *deps_is_float[] = { "try_parse_float", NULL };
 static const char *deps_to_float[] = { "try_parse_float", NULL };
+static const char *deps_write_bytes[] = { "arr_len", "arr_len_raw", "arr_header", NULL };
+static const char *deps_input[] = { "read_line", NULL };
 
 static const PreludeChunk PRELUDE_CHUNKS[] = {
     {
@@ -282,6 +284,30 @@ static const PreludeChunk PRELUDE_CHUNKS[] = {
         "    }\n"
         "}\n\n",
         deps_bounds_check
+    },
+    {
+        "write_bytes",
+        "static inline bool __cco_write_bytes(const char *path, const int *bytes) {\n"
+        "    if (!path || !bytes) return false;\n"
+        "    FILE *f = fopen(path, \"wb\");\n"
+        "    if (!f) return false;\n"
+        "    size_t count = (size_t)__cco_arr_len((void *)bytes);\n"
+        "    for (size_t i = 0; i < count; i++) {\n"
+        "        unsigned char b = (unsigned char)(bytes[i] & 0xFF);\n"
+        "        fputc((int)b, f);\n"
+        "    }\n"
+        "    fclose(f);\n"
+        "    return true;\n"
+        "}\n\n",
+        deps_write_bytes
+    },
+    {
+        "execute_cmd",
+        "static inline int __cco_execute_cmd(const char *cmd) {\n"
+        "    if (!cmd) return -1;\n"
+        "    return system(cmd);\n"
+        "}\n\n",
+        NULL
     },
     {
         "map_bucket",
@@ -741,6 +767,17 @@ static const PreludeChunk PRELUDE_CHUNKS[] = {
         NULL
     },
     {
+        "input",
+        "static inline char *__cco_input(const char *prompt) {\n"
+        "    if (prompt) {\n"
+        "        fputs(prompt, stdout);\n"
+        "        fflush(stdout);\n"
+        "    }\n"
+        "    return __cco_read_line();\n"
+        "}\n\n",
+        deps_input
+    },
+    {
         "concat_free",
         "static inline char *__cco_concat_free(const char *a, const char *b, bool free_a, bool free_b) {\n"
         "    if (!a) a = \"\";\n"
@@ -933,6 +970,48 @@ static const PreludeChunk PRELUDE_CHUNKS[] = {
         "        ts.tv_nsec = (ms % 1000) * 1000000L;\n"
         "        nanosleep(&ts, NULL);\n"
         "    }\n"
+        "}\n\n",
+        NULL
+    },
+    {
+        "char_to_string",
+        "static inline char *__cco_char_to_string(char c) {\n"
+        "    char *s = (char *)malloc(2);\n"
+        "    if (!s) { fprintf(stderr, \"Out of memory in char_to_string()\\n\"); exit(1); }\n"
+        "    s[0] = c;\n"
+        "    s[1] = '\\0';\n"
+        "    return s;\n"
+        "}\n\n",
+        NULL
+    },
+    {
+        "to_string",
+        "static inline char *__cco_to_string(long n) {\n"
+        "    char buf[64];\n"
+        "    snprintf(buf, sizeof(buf), \"%ld\", n);\n"
+        "    char *s = strdup(buf);\n"
+        "    if (!s) { fprintf(stderr, \"Out of memory in to_string()\\n\"); exit(1); }\n"
+        "    return s;\n"
+        "}\n\n",
+        NULL
+    },
+    {
+        "cco_exit",
+        "static inline void __cco_exit(long code) {\n"
+        "    exit((int)code);\n"
+        "}\n\n",
+        NULL
+    },
+    {
+        "file_exists",
+        "static inline bool __cco_file_exists(const char *path) {\n"
+        "    if (!path) return false;\n"
+        "    FILE *f = fopen(path, \"rb\");\n"
+        "    if (f) {\n"
+        "        fclose(f);\n"
+        "        return true;\n"
+        "    }\n"
+        "    return false;\n"
         "}\n\n",
         NULL
     }

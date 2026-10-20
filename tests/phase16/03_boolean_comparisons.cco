@@ -1,0 +1,13 @@
+fn main() -> int {
+    let a: int = 10;
+    let b: int = 20;
+    let c: int = 10;
+    let count: int = 0;
+    if (a < b) { count = count + 1; }
+    if (b > a) { count = count + 2; }
+    if (a <= c) { count = count + 4; }
+    if (a >= c) { count = count + 8; }
+    if (a == c) { count = count + 16; }
+    if (a != b) { count = count + 32; }
+    return count; // 1 + 2 + 4 + 8 + 16 + 32 = 63
+}

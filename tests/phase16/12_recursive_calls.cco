@@ -1,0 +1,18 @@
+fn factorial(n: int) -> int {
+    if (n <= 1) {
+        return 1;
+    }
+    return n * factorial(n - 1);
+}
+
+fn fibonacci(n: int) -> int {
+    if (n <= 0) { return 0; }
+    if (n == 1) { return 1; }
+    return fibonacci(n - 1) + fibonacci(n - 2);
+}
+
+fn main() -> int {
+    let fact5: int = factorial(5); // 120
+    let fib7: int = fibonacci(7);  // 13
+    return fact5 - fib7; // 120 - 13 = 107
+}

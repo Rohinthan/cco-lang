@@ -1,0 +1,7 @@
+fn main() -> int {
+    let acc: int = 0;
+    for (let i: int = 0; i < 8; i++) {
+        acc += (i * 2);
+    }
+    return acc; // 2 * 28 = 56
+}

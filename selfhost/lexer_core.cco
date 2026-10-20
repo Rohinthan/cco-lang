@@ -348,6 +348,7 @@ fn lex(source: string) -> Token[] {
                 else if (esc == 'r') { ch_val = '\r'; }
                 else if (esc == '\\') { ch_val = '\\'; }
                 else if (esc == '\'') { ch_val = '\''; }
+                else if (esc == '0') { ch_val = '\0'; }
                 else { ch_val = esc; }
                 i = i + 1;
                 col = col + 1;

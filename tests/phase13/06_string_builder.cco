@@ -1,0 +1,12 @@
+import "std/string.cco";
+
+fn main() -> int {
+    let sb: StringBuilder = sb_new();
+    sb.append("Hello");
+    sb.append(", ");
+    sb.append("World!");
+
+    let res: string = sb.to_string();
+    print(res);
+    return 0;
+}

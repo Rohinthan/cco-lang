@@ -267,7 +267,22 @@ static AstNode *clone_node(AstNode *node, AstArena *arena) {
         case NODE_CONTINUE:
             break;
         case NODE_PRINT:
-            c->as.print_stmt.value = clone_node(node->as.print_stmt.value, arena);
+            c->as.print_stmt.value_count = node->as.print_stmt.value_count;
+            if (node->as.print_stmt.values) {
+                c->as.print_stmt.values = (AstNode **)arena_alloc_array(arena, node->as.print_stmt.value_count, sizeof(AstNode *));
+                for (int i = 0; i < node->as.print_stmt.value_count; i++) {
+                    c->as.print_stmt.values[i] = clone_node(node->as.print_stmt.values[i], arena);
+                }
+                c->as.print_stmt.value = (c->as.print_stmt.value_count > 0) ? c->as.print_stmt.values[0] : NULL;
+            } else if (node->as.print_stmt.value) {
+                c->as.print_stmt.value = clone_node(node->as.print_stmt.value, arena);
+                c->as.print_stmt.values = NULL;
+                c->as.print_stmt.value_count = 1;
+            } else {
+                c->as.print_stmt.value = NULL;
+                c->as.print_stmt.values = NULL;
+                c->as.print_stmt.value_count = 0;
+            }
             break;
         case NODE_EXPR_STMT:
             c->as.expr_stmt.expr = clone_node(node->as.expr_stmt.expr, arena);
@@ -514,7 +529,13 @@ static void validate_template_body(AstNode *fn, AstNode *node, AstNode *iface, c
             validate_template_body(fn, node->as.return_stmt.value, iface, param_name, iface_name);
             break;
         case NODE_PRINT:
-            validate_template_body(fn, node->as.print_stmt.value, iface, param_name, iface_name);
+            if (node->as.print_stmt.values) {
+                for (int i = 0; i < node->as.print_stmt.value_count; i++) {
+                    validate_template_body(fn, node->as.print_stmt.values[i], iface, param_name, iface_name);
+                }
+            } else if (node->as.print_stmt.value) {
+                validate_template_body(fn, node->as.print_stmt.value, iface, param_name, iface_name);
+            }
             break;
         case NODE_EXPR_STMT:
             validate_template_body(fn, node->as.expr_stmt.expr, iface, param_name, iface_name);
@@ -702,7 +723,13 @@ static void scan_and_record_calls(MonomorphCtx *mctx, AstNode *prog, AstNode *cu
             scan_and_record_calls(mctx, prog, current_fn, node->as.return_stmt.value, impl_table);
             break;
         case NODE_PRINT:
-            scan_and_record_calls(mctx, prog, current_fn, node->as.print_stmt.value, impl_table);
+            if (node->as.print_stmt.values) {
+                for (int i = 0; i < node->as.print_stmt.value_count; i++) {
+                    scan_and_record_calls(mctx, prog, current_fn, node->as.print_stmt.values[i], impl_table);
+                }
+            } else if (node->as.print_stmt.value) {
+                scan_and_record_calls(mctx, prog, current_fn, node->as.print_stmt.value, impl_table);
+            }
             break;
         case NODE_EXPR_STMT:
             scan_and_record_calls(mctx, prog, current_fn, node->as.expr_stmt.expr, impl_table);

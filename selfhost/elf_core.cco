@@ -1,0 +1,385 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+// elf_core.cco — Pure Cco ELF64 Relocatable Object (ET_REL) Generator
+import "x86_64_core.cco";
+
+fn char_code(c: char) -> int {
+    let all: string = " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~";
+    let n: int = len(all);
+    let i: int = 0;
+    while (i < n) {
+        if (char_at(all, i) == c) {
+            return 32 + i;
+        }
+        i = i + 1;
+    }
+    if (c == '\n') { return 10; }
+    if (c == '\t') { return 9; }
+    if (c == '\r') { return 13; }
+    return 0;
+}
+
+fn add_string_bytes(cb: &CodeBuf, s: string) -> int {
+    let off: int = cb_len(cb);
+    let n: int = len(s);
+    let i: int = 0;
+    while (i < n) {
+        let c: char = char_at(s, i);
+        let b: int = char_code(c);
+        cb_push(cb, b);
+        i = i + 1;
+    }
+    cb_push(cb, 0); // Null terminator
+    return off;
+}
+
+fn align_up(val: int, align: int) -> int {
+    if (align <= 1) { return val; }
+    let rem: int = val % align;
+    if (rem == 0) { return val; }
+    return val + (align - rem);
+}
+
+// Builds a complete Linux x86-64 ELF64 relocatable object file (ET_REL)
+fn build_elf64_object(source_name: string, funcs: &CompiledFunc[]) -> CodeBuf {
+    let num_funcs: int = len(funcs);
+
+    // 1. Compute function layout in .text section and resolve intra-module calls
+    let func_offsets: int[] = list_new(int);
+    let curr_text_offset: int = 0;
+    let f_idx: int = 0;
+    while (f_idx < num_funcs) {
+        func_offsets = push(func_offsets, curr_text_offset);
+        curr_text_offset = curr_text_offset + funcs[f_idx].size;
+        f_idx = f_idx + 1;
+    }
+
+    // Resolve call fixups
+    f_idx = 0;
+    while (f_idx < num_funcs) {
+        let caller_base_off: int = func_offsets[f_idx];
+        let num_calls: int = len(funcs[f_idx].call_target_names);
+        let c_idx: int = 0;
+        while (c_idx < num_calls) {
+            let target_name: string = concat(funcs[f_idx].call_target_names[c_idx], "");
+            let fixup_off: int = funcs[f_idx].call_fixup_offsets[c_idx];
+            let call_site_text_off: int = caller_base_off + fixup_off;
+
+            // Find target function offset
+            let target_off: int = 0;
+            let found: bool = false;
+            let t_idx: int = 0;
+            while (t_idx < num_funcs) {
+                if (equals(funcs[t_idx].name, target_name)) {
+                    target_off = func_offsets[t_idx];
+                    found = true;
+                }
+                t_idx = t_idx + 1;
+            }
+
+            if (found) {
+                let disp: int = target_off - (call_site_text_off + 4);
+                let b0: int = 0;
+                let b1: int = 0;
+                let b2: int = 0;
+                let b3: int = 0;
+                if (disp < 0) {
+                    let pos_m1: int = (-disp) - 1;
+                    b0 = 255 - (pos_m1 % 256); pos_m1 = pos_m1 / 256;
+                    b1 = 255 - (pos_m1 % 256); pos_m1 = pos_m1 / 256;
+                    b2 = 255 - (pos_m1 % 256); pos_m1 = pos_m1 / 256;
+                    b3 = 255 - (pos_m1 % 256);
+                } else {
+                    let v: int = disp;
+                    b0 = v % 256; v = v / 256;
+                    b1 = v % 256; v = v / 256;
+                    b2 = v % 256; v = v / 256;
+                    b3 = v % 256;
+                }
+                funcs[f_idx].code[fixup_off] = b0;
+                funcs[f_idx].code[fixup_off + 1] = b1;
+                funcs[f_idx].code[fixup_off + 2] = b2;
+                funcs[f_idx].code[fixup_off + 3] = b3;
+            }
+            c_idx = c_idx + 1;
+        }
+        f_idx = f_idx + 1;
+    }
+
+    // 2. Concatenate all function code into .text buffer
+    let text_cb: CodeBuf = cb_new();
+    f_idx = 0;
+    while (f_idx < num_funcs) {
+        let c_len: int = len(funcs[f_idx].code);
+        let b_idx: int = 0;
+        while (b_idx < c_len) {
+            cb_push(&text_cb, funcs[f_idx].code[b_idx]);
+            b_idx = b_idx + 1;
+        }
+        f_idx = f_idx + 1;
+    }
+    let text_size: int = cb_len(&text_cb);
+
+    // 3. Build .strtab
+    let strtab_cb: CodeBuf = cb_new();
+    cb_push(&strtab_cb, 0); // Offset 0 is empty string
+
+    let str_file_off: int = add_string_bytes(&strtab_cb, source_name);
+    let func_str_offs: int[] = list_new(int);
+    f_idx = 0;
+    while (f_idx < num_funcs) {
+        let s_off: int = add_string_bytes(&strtab_cb, funcs[f_idx].name);
+        func_str_offs = push(func_str_offs, s_off);
+        f_idx = f_idx + 1;
+    }
+    let strtab_size: int = cb_len(&strtab_cb);
+
+    // 4. Build .symtab
+    // Symbol 0: STN_UNDEF (24 bytes)
+    // Symbol 1: STT_FILE (24 bytes)
+    // Symbol 2..N+1: STT_FUNC for each function (24 bytes each)
+    let symtab_cb: CodeBuf = cb_new();
+
+    // Sym 0: UNDEF
+    let z: int = 0;
+    while (z < 24) {
+        cb_push(&symtab_cb, 0);
+        z = z + 1;
+    }
+
+    // Sym 1: FILE
+    // st_name (u32), st_info (u8 = 4), st_other (u8 = 0), st_shndx (u16 = SHN_ABS 0xfff1 = 65521), st_value (u64 = 0), st_size (u64 = 0)
+    cb_push_u32(&symtab_cb, str_file_off);
+    cb_push(&symtab_cb, 4); // STB_LOCAL, STT_FILE
+    cb_push(&symtab_cb, 0); // STV_DEFAULT
+    cb_push_u16(&symtab_cb, 65521); // SHN_ABS
+    cb_push_u64(&symtab_cb, 0, 0);  // st_value = 0
+    cb_push_u64(&symtab_cb, 0, 0);  // st_size = 0
+
+    // Sym 2..N+1: Functions
+    f_idx = 0;
+    while (f_idx < num_funcs) {
+        let fn_str_off: int = func_str_offs[f_idx];
+        let fn_val_off: int = func_offsets[f_idx];
+        let fn_sz: int = funcs[f_idx].size;
+
+        cb_push_u32(&symtab_cb, fn_str_off);
+        cb_push(&symtab_cb, 18); // 0x12: STB_GLOBAL, STT_FUNC
+        cb_push(&symtab_cb, 0);  // STV_DEFAULT
+        cb_push_u16(&symtab_cb, 1); // Section 1 (.text)
+        cb_push_u64(&symtab_cb, fn_val_off, 0); // st_value
+        cb_push_u64(&symtab_cb, fn_sz, 0);      // st_size
+        f_idx = f_idx + 1;
+    }
+    let symtab_size: int = cb_len(&symtab_cb);
+
+    // 5. Build .shstrtab
+    let shstrtab_cb: CodeBuf = cb_new();
+    cb_push(&shstrtab_cb, 0); // Offset 0 is empty string
+
+    let sh_off_text: int = add_string_bytes(&shstrtab_cb, ".text");
+    let sh_off_symtab: int = add_string_bytes(&shstrtab_cb, ".symtab");
+    let sh_off_strtab: int = add_string_bytes(&shstrtab_cb, ".strtab");
+    let sh_off_shstrtab: int = add_string_bytes(&shstrtab_cb, ".shstrtab");
+    let sh_off_gnustack: int = add_string_bytes(&shstrtab_cb, ".note.GNU-stack");
+    let shstrtab_size: int = cb_len(&shstrtab_cb);
+
+    // 6. Compute File Layout Offsets
+    // Ehdr: 64 bytes at offset 0
+    let off_text: int = 64;
+
+    // Pad .text to 8 bytes for .symtab
+    let pad_text: int = align_up(off_text + text_size, 8) - (off_text + text_size);
+    let off_symtab: int = off_text + text_size + pad_text;
+
+    let off_strtab: int = off_symtab + symtab_size;
+    let off_shstrtab: int = off_strtab + strtab_size;
+
+    // Pad before section header table (8-byte alignment)
+    let end_of_shstrtab: int = off_shstrtab + shstrtab_size;
+    let off_sh_table: int = align_up(end_of_shstrtab, 8);
+    let pad_sh_table: int = off_sh_table - end_of_shstrtab;
+
+    // 7. Assemble Section Headers (6 headers * 64 bytes = 384 bytes)
+    // Section Header 0: NULL (64 zero bytes)
+    // Section Header 1: .text (PROGBITS, AX)
+    // Section Header 2: .symtab (SYMTAB)
+    // Section Header 3: .strtab (STRTAB)
+    // Section Header 4: .shstrtab (STRTAB)
+    // Section Header 5: .note.GNU-stack (PROGBITS)
+    let sh_cb: CodeBuf = cb_new();
+
+    // Shdr 0: NULL
+    let s0: int = 0;
+    while (s0 < 64) {
+        cb_push(&sh_cb, 0);
+        s0 = s0 + 1;
+    }
+
+    // Shdr 1: .text
+    // sh_name (u32), sh_type (u32 = 1), sh_flags (u64 = 6: ALLOC|EXEC), sh_addr (u64 = 0),
+    // sh_offset (u64 = off_text), sh_size (u64 = text_size), sh_link (u32 = 0), sh_info (u32 = 0),
+    // sh_addralign (u64 = 16), sh_entsize (u64 = 0)
+    cb_push_u32(&sh_cb, sh_off_text);
+    cb_push_u32(&sh_cb, 1); // SHT_PROGBITS
+    cb_push_u64(&sh_cb, 6, 0); // SHF_ALLOC | SHF_EXECINSTR
+    cb_push_u64(&sh_cb, 0, 0); // sh_addr
+    cb_push_u64(&sh_cb, off_text, 0);
+    cb_push_u64(&sh_cb, text_size, 0);
+    cb_push_u32(&sh_cb, 0); // sh_link
+    cb_push_u32(&sh_cb, 0); // sh_info
+    cb_push_u64(&sh_cb, 16, 0); // sh_addralign
+    cb_push_u64(&sh_cb, 0, 0);  // sh_entsize
+
+    // Shdr 2: .symtab
+    // sh_name (u32), sh_type (u32 = 2: SYMTAB), sh_flags (u64 = 0), sh_addr (u64 = 0),
+    // sh_offset (u64 = off_symtab), sh_size (u64 = symtab_size), sh_link (u32 = 3: strtab), sh_info (u32 = 2: first global),
+    // sh_addralign (u64 = 8), sh_entsize (u64 = 24)
+    cb_push_u32(&sh_cb, sh_off_symtab);
+    cb_push_u32(&sh_cb, 2); // SHT_SYMTAB
+    cb_push_u64(&sh_cb, 0, 0);
+    cb_push_u64(&sh_cb, 0, 0);
+    cb_push_u64(&sh_cb, off_symtab, 0);
+    cb_push_u64(&sh_cb, symtab_size, 0);
+    cb_push_u32(&sh_cb, 3); // link to section 3 (.strtab)
+    cb_push_u32(&sh_cb, 2); // info = first global symbol index
+    cb_push_u64(&sh_cb, 8, 0);  // sh_addralign
+    cb_push_u64(&sh_cb, 24, 0); // sh_entsize
+
+    // Shdr 3: .strtab
+    // sh_name (u32), sh_type (u32 = 3: STRTAB), sh_flags (u64 = 0), sh_addr (u64 = 0),
+    // sh_offset (u64 = off_strtab), sh_size (u64 = strtab_size), sh_link (u32 = 0), sh_info (u32 = 0),
+    // sh_addralign (u64 = 1), sh_entsize (u64 = 0)
+    cb_push_u32(&sh_cb, sh_off_strtab);
+    cb_push_u32(&sh_cb, 3); // SHT_STRTAB
+    cb_push_u64(&sh_cb, 0, 0);
+    cb_push_u64(&sh_cb, 0, 0);
+    cb_push_u64(&sh_cb, off_strtab, 0);
+    cb_push_u64(&sh_cb, strtab_size, 0);
+    cb_push_u32(&sh_cb, 0);
+    cb_push_u32(&sh_cb, 0);
+    cb_push_u64(&sh_cb, 1, 0); // sh_addralign
+    cb_push_u64(&sh_cb, 0, 0);
+
+    // Shdr 4: .shstrtab
+    cb_push_u32(&sh_cb, sh_off_shstrtab);
+    cb_push_u32(&sh_cb, 3); // SHT_STRTAB
+    cb_push_u64(&sh_cb, 0, 0);
+    cb_push_u64(&sh_cb, 0, 0);
+    cb_push_u64(&sh_cb, off_shstrtab, 0);
+    cb_push_u64(&sh_cb, shstrtab_size, 0);
+    cb_push_u32(&sh_cb, 0);
+    cb_push_u32(&sh_cb, 0);
+    cb_push_u64(&sh_cb, 1, 0); // sh_addralign
+    cb_push_u64(&sh_cb, 0, 0);
+
+    // Shdr 5: .note.GNU-stack
+    cb_push_u32(&sh_cb, sh_off_gnustack);
+    cb_push_u32(&sh_cb, 1); // SHT_PROGBITS
+    cb_push_u64(&sh_cb, 0, 0);
+    cb_push_u64(&sh_cb, 0, 0);
+    cb_push_u64(&sh_cb, 0, 0); // offset = 0
+    cb_push_u64(&sh_cb, 0, 0); // size = 0
+    cb_push_u32(&sh_cb, 0);
+    cb_push_u32(&sh_cb, 0);
+    cb_push_u64(&sh_cb, 1, 0); // sh_addralign
+    cb_push_u64(&sh_cb, 0, 0);
+
+    // 8. Assemble Full Object File
+    let elf: CodeBuf = cb_new();
+
+    // 8.1 Ehdr (64 bytes)
+    // e_ident (16 bytes): 0x7f, 'E', 'L', 'F', ELFCLASS64=2, ELFDATA2LSB=1, EV_CURRENT=1, SYSV=0, 8 zeros
+    cb_push(&elf, 127); // 0x7f
+    cb_push(&elf, 69);  // 'E'
+    cb_push(&elf, 76);  // 'L'
+    cb_push(&elf, 70);  // 'F'
+    cb_push(&elf, 2);   // ELFCLASS64
+    cb_push(&elf, 1);   // ELFDATA2LSB
+    cb_push(&elf, 1);   // EV_CURRENT
+    cb_push(&elf, 0);   // ELFOSABI_SYSV
+    let p_zero: int = 0;
+    while (p_zero < 8) {
+        cb_push(&elf, 0);
+        p_zero = p_zero + 1;
+    }
+
+    // e_type (u16 = 1: ET_REL)
+    cb_push_u16(&elf, 1);
+    // e_machine (u16 = 62: EM_X86_64)
+    cb_push_u16(&elf, 62);
+    // e_version (u32 = 1)
+    cb_push_u32(&elf, 1);
+    // e_entry (u64 = 0)
+    cb_push_u64(&elf, 0, 0);
+    // e_phoff (u64 = 0)
+    cb_push_u64(&elf, 0, 0);
+    // e_shoff (u64 = off_sh_table)
+    cb_push_u64(&elf, off_sh_table, 0);
+    // e_flags (u32 = 0)
+    cb_push_u32(&elf, 0);
+    // e_ehsize (u16 = 64)
+    cb_push_u16(&elf, 64);
+    // e_phentsize (u16 = 0)
+    cb_push_u16(&elf, 0);
+    // e_phnum (u16 = 0)
+    cb_push_u16(&elf, 0);
+    // e_shentsize (u16 = 64)
+    cb_push_u16(&elf, 64);
+    // e_shnum (u16 = 6)
+    cb_push_u16(&elf, 6);
+    // e_shstrndx (u16 = 4)
+    cb_push_u16(&elf, 4);
+
+    // 8.2 .text bytes
+    let b_idx: int = 0;
+    while (b_idx < text_size) {
+        cb_push(&elf, text_cb.bytes[b_idx]);
+        b_idx = b_idx + 1;
+    }
+
+    // Pad .text
+    let p_idx: int = 0;
+    while (p_idx < pad_text) {
+        cb_push(&elf, 0);
+        p_idx = p_idx + 1;
+    }
+
+    // 8.3 .symtab bytes
+    b_idx = 0;
+    while (b_idx < symtab_size) {
+        cb_push(&elf, symtab_cb.bytes[b_idx]);
+        b_idx = b_idx + 1;
+    }
+
+    // 8.4 .strtab bytes
+    b_idx = 0;
+    while (b_idx < strtab_size) {
+        cb_push(&elf, strtab_cb.bytes[b_idx]);
+        b_idx = b_idx + 1;
+    }
+
+    // 8.5 .shstrtab bytes
+    b_idx = 0;
+    while (b_idx < shstrtab_size) {
+        cb_push(&elf, shstrtab_cb.bytes[b_idx]);
+        b_idx = b_idx + 1;
+    }
+
+    // Pad before section header table
+    p_idx = 0;
+    while (p_idx < pad_sh_table) {
+        cb_push(&elf, 0);
+        p_idx = p_idx + 1;
+    }
+
+    // 8.6 Section Headers
+    let sh_total: int = cb_len(&sh_cb);
+    b_idx = 0;
+    while (b_idx < sh_total) {
+        cb_push(&elf, sh_cb.bytes[b_idx]);
+        b_idx = b_idx + 1;
+    }
+
+    return elf;
+}

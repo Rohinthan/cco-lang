@@ -17,7 +17,7 @@ fn main() -> int {
     let filename: string = get_arg_or_default(&a, 0, "target.cco");
     let source: string = read_file(filename);
     let tokens: Token[] = lex(source);
-    let prog: Program = parse_program(tokens);
+    let prog: Program = parse_program_from_file(filename);
     let errs: int = typecheck_program(&prog);
     if (errs != 0) {
         print("Typecheck errors encountered.");

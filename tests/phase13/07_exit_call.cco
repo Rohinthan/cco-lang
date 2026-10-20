@@ -1,0 +1,6 @@
+fn main() -> int {
+    print("before exit");
+    exit(0);
+    print("after exit - should not be reached");
+    return 1;
+}

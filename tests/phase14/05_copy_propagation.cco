@@ -1,0 +1,14 @@
+// Phase 14 Test 05: Copy Propagation
+fn run_copies(v: int) -> int {
+    let a: int = v;
+    let b: int = a;
+    let c: int = b;
+    let d: int = c + 10;
+    return d;
+}
+
+fn main() -> int {
+    let res: int = run_copies(32);
+    print(res);
+    return 0;
+}

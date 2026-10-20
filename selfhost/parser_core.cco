@@ -57,10 +57,28 @@ fn check_symbol(p: &Parser, sym: string) -> bool {
     }
 }
 
+fn check_next_symbol(p: &Parser, sym: string) -> bool {
+    if (p.pos + 1 >= len(p.tokens)) { return false; }
+    match p.tokens[p.pos + 1].kind {
+        TokenKind.Symbol { text } => {
+            return equals(text, sym);
+        }
+        _ => { return false; }
+    }
+}
+
 fn check_ident(p: &Parser) -> bool {
     if (is_at_end(p)) { return false; }
     match p.tokens[p.pos].kind {
         TokenKind.Ident { name } => { return true; }
+        _ => { return false; }
+    }
+}
+
+fn check_ident_name(p: &Parser, nm: string) -> bool {
+    if (is_at_end(p)) { return false; }
+    match p.tokens[p.pos].kind {
+        TokenKind.Ident { name } => { return equals(name, nm); }
         _ => { return false; }
     }
 }
@@ -228,7 +246,6 @@ fn get_precedence(p: &Parser) -> int {
     if (is_at_end(p)) { return 0; }
     match p.tokens[p.pos].kind {
         TokenKind.Symbol { text } => {
-            if (equals(text, "=")) { return 1; }
             if (equals(text, "||")) { return 2; }
             if (equals(text, "&&")) { return 3; }
             if (equals(text, "==") || equals(text, "!=")) { return 4; }
@@ -250,7 +267,16 @@ fn parse_type_name(p: &Parser) -> string {
     let line: int = peek_line(p);
     let col: int = peek_col(p);
     let base: string = "";
-    if (check_ident(p)) {
+    if (check_keyword(p, "map")) {
+        advance(p);
+        consume_symbol(p, "[", "Expected '[' after 'map'");
+        let kt: string = parse_type_name(p);
+        consume_symbol(p, "]", "Expected ']' after map key type");
+        let vt: string = parse_type_name(p);
+        base = concat("map[", kt);
+        base = concat(base, "]");
+        base = concat(base, vt);
+    } else if (check_ident(p)) {
         base = peek_ident(p);
         advance(p);
     } else if (check_keyword(p, "int") || check_keyword(p, "float") || check_keyword(p, "string") || check_keyword(p, "bool") || check_keyword(p, "char") || check_keyword(p, "void")) {
@@ -349,6 +375,9 @@ fn parse_prefix(p: &Parser) -> Expr {
     if (match_keyword(p, "false")) {
         return make_bool_expr(false, line, col);
     }
+    if (match_keyword(p, "self")) {
+        return make_ident_expr("self", line, col);
+    }
     if (match_keyword(p, "alloc")) {
         consume_symbol(p, "(", "Expected '(' after 'alloc'");
         let elem_t: string = parse_type_name(p);
@@ -390,17 +419,36 @@ fn parse_prefix(p: &Parser) -> Expr {
                 if (is_var_upper) {
                     advance(p);
                     let vname: string = consume_ident(p, "Expected variant name after '.'");
-                    let full_enum_name: string = concat(type_prefix, ".");
-                    full_enum_name = concat(full_enum_name, vname);
+                    let fnames: string[] = list_new(string);
+                    let fvals: Expr[] = list_new(Expr);
                     if (check_symbol(p, "{")) {
-                        return parse_struct_or_enum_inst(p, full_enum_name, line, col);
+                        consume_symbol(p, "{", "Expected '{'");
+                        if (!check_symbol(p, "}")) {
+                            let fname: string = consume_ident(p, "Expected field name");
+                            consume_symbol(p, ":", "Expected ':' after field name");
+                            let fval: Expr = parse_expr(p, 0);
+                            fnames = push(fnames, fname);
+                            fvals = push(fvals, fval);
+                            while (match_symbol(p, ",")) {
+                                if (check_symbol(p, "}")) { break; }
+                                let fnm: string = consume_ident(p, "Expected field name");
+                                consume_symbol(p, ":", "Expected ':' after field name");
+                                let fvl: Expr = parse_expr(p, 0);
+                                fnames = push(fnames, fnm);
+                                fvals = push(fvals, fvl);
+                            }
+                        }
+                        consume_symbol(p, "}", "Expected '}' after variant fields");
                     }
-                    return make_ident_expr(full_enum_name, line, col);
+                    let res_expr: Expr = make_new_expr(type_prefix, fnames, fvals, line, col);
+                    free(res_expr.callee);
+                    res_expr.callee = concat(vname, "");
+                    return res_expr;
                 }
             }
         }
         // Check for struct instantiation: Name { ... }
-        if (check_symbol(p, "{")) {
+        if (is_type && check_symbol(p, "{")) {
             return parse_struct_or_enum_inst(p, type_prefix, line, col);
         }
         return make_ident_expr(type_prefix, line, col);
@@ -519,6 +567,17 @@ fn parse_stmt(p: &Parser) -> Stmt {
     let line: int = peek_line(p);
     let col: int = peek_col(p);
 
+    // 0. Explicit variable declaration without 'let': x: int = expr;
+    if (check_ident(p) && check_next_symbol(p, ":")) {
+        let name: string = consume_ident(p, "Expected variable name");
+        consume_symbol(p, ":", "Expected ':' in variable declaration");
+        let type_name: string = parse_type_name(p);
+        consume_symbol(p, "=", "Expected '=' in variable declaration");
+        let init: Expr = parse_expr(p, 0);
+        consume_symbol(p, ";", "Expected ';' after variable declaration");
+        return make_let_stmt(name, type_name, true, init, line, col);
+    }
+
     // 1. Let statement
     if (match_keyword(p, "let")) {
         let name: string = consume_ident(p, "Expected variable name after 'let'");
@@ -555,19 +614,61 @@ fn parse_stmt(p: &Parser) -> Stmt {
 
     // 4. For loop
     if (match_keyword(p, "for")) {
-        consume_symbol(p, "(", "Expected '(' after 'for'");
-        let init: Stmt = parse_stmt(p);
-        let cond: Expr = parse_expr(p, 0);
-        consume_symbol(p, ";", "Expected ';' after for loop condition");
+        if (match_symbol(p, "(")) {
+            let init: Stmt = parse_stmt(p);
+            let cond: Expr = parse_expr(p, 0);
+            consume_symbol(p, ";", "Expected ';' after for loop condition");
 
-        let step_target: Expr = parse_expr(p, 0);
-        let step_stmt: Stmt = parse_for_step(p, step_target, line, col);
+            let step_target: Expr = parse_expr(p, 0);
+            let step_stmt: Stmt = parse_for_step(p, step_target, line, col);
 
-        consume_symbol(p, ")", "Expected ')' after for loop clause");
-        consume_symbol(p, "{", "Expected '{' before for body");
-        let body: Stmt[] = parse_block_stmts(p);
-        consume_symbol(p, "}", "Expected '}' after for body");
-        return make_for_stmt(init, cond, step_stmt, body, line, col);
+            consume_symbol(p, ")", "Expected ')' after for loop clause");
+            consume_symbol(p, "{", "Expected '{' before for body");
+            let body: Stmt[] = parse_block_stmts(p);
+            consume_symbol(p, "}", "Expected '}' after for body");
+            return make_for_stmt(init, cond, step_stmt, body, line, col);
+        } else {
+            let var_name: string = consume_ident(p, "Expected loop variable after 'for'");
+            consume_keyword(p, "in", "Expected 'in' after loop variable");
+            let first_expr: Expr = parse_expr(p, 0);
+            if (match_symbol(p, "..")) {
+                let end_expr: Expr = parse_expr(p, 0);
+                consume_symbol(p, "{", "Expected '{' before for body");
+                let body: Stmt[] = parse_block_stmts(p);
+                consume_symbol(p, "}", "Expected '}' after for body");
+
+                let init_stmt: Stmt = make_let_stmt(var_name, "int", true, first_expr, line, col);
+                let cond_expr: Expr = make_binary_expr("<", make_ident_expr(var_name, line, col), end_expr, line, col);
+                let step_stmt: Stmt = make_inc_dec_stmt(make_ident_expr(var_name, line, col), "++", line, col);
+                return make_for_stmt(init_stmt, cond_expr, step_stmt, body, line, col);
+            } else {
+                let coll_name: string = "";
+                if (first_expr.kind == 6) {
+                    coll_name = concat(first_expr.callee, "");
+                }
+                let idx_name: string = concat("__i_", var_name);
+                let init_stmt: Stmt = make_let_stmt(idx_name, "int", true, make_int_expr(0, line, col), line, col);
+                let len_args: Expr[] = list_new(Expr);
+                len_args = push(len_args, first_expr);
+                let len_call: Expr = make_call_expr("len", len_args, line, col);
+                let cond_expr: Expr = make_binary_expr("<", make_ident_expr(idx_name, line, col), len_call, line, col);
+                let step_stmt: Stmt = make_inc_dec_stmt(make_ident_expr(idx_name, line, col), "++", line, col);
+
+                let item_coll_expr: Expr = make_ident_expr(coll_name, line, col);
+                let item_expr: Expr = make_index_expr(item_coll_expr, make_ident_expr(idx_name, line, col), line, col);
+                let item_decl: Stmt = make_let_stmt(var_name, "", false, item_expr, line, col);
+
+                consume_symbol(p, "{", "Expected '{' before for body");
+                let full_body: Stmt[] = list_new(Stmt);
+                full_body = push(full_body, item_decl);
+                while (!is_at_end(p) && !check_symbol(p, "}")) {
+                    let s: Stmt = parse_stmt(p);
+                    full_body = push(full_body, s);
+                }
+                consume_symbol(p, "}", "Expected '}' after for body");
+                return make_for_stmt(init_stmt, cond_expr, step_stmt, full_body, line, col);
+            }
+        }
     }
 
     // 5. Return
@@ -683,21 +784,25 @@ fn parse_stmt(p: &Parser) -> Stmt {
 fn parse_params(p: &Parser) -> Param[] {
     let params: Param[] = list_new(Param);
     if (!check_symbol(p, ")")) {
-        let is_borrowed: bool = false;
-        let pname: string = consume_ident(p, "Expected parameter name");
-        consume_symbol(p, ":", "Expected ':' after parameter name");
-        if (match_symbol(p, "&")) { is_borrowed = true; }
-        let ptype: string = parse_type_name(p);
-        params = push(params, make_param(pname, ptype, is_borrowed, false));
+        if (check_keyword(p, "self") || check_ident_name(p, "self")) {
+            advance(p);
+            match_symbol(p, ",");
+        }
+        if (!check_symbol(p, ")")) {
+            let pname: string = consume_ident(p, "Expected parameter name");
+            consume_symbol(p, ":", "Expected ':' after parameter name");
+            let ptype: string = parse_type_name(p);
+            let is_borrowed: bool = (len(ptype) > 0 && char_at(ptype, 0) == '&');
+            params = push(params, make_param(pname, ptype, is_borrowed, false));
 
         while (match_symbol(p, ",")) {
-            let bor: bool = false;
             let nm: string = consume_ident(p, "Expected parameter name");
             consume_symbol(p, ":", "Expected ':' after parameter name");
-            if (match_symbol(p, "&")) { bor = true; }
             let tp: string = parse_type_name(p);
+            let bor: bool = (len(tp) > 0 && char_at(tp, 0) == '&');
             params = push(params, make_param(nm, tp, bor, false));
         }
+    }
     }
     consume_symbol(p, ")", "Expected ')' after parameter list");
     return params;
@@ -746,9 +851,22 @@ fn parse_function_decl(p: &Parser) -> FunctionDecl {
         ret_type = concat(parsed_ret, "");
     }
 
-    consume_symbol(p, "{", "Expected '{' before function body");
-    let body: Stmt[] = parse_block_stmts(p);
-    consume_symbol(p, "}", "Expected '}' after function body");
+    let body: Stmt[] = list_new(Stmt);
+    if (match_symbol(p, "=")) {
+        let ret_expr: Expr = parse_expr(p, 0);
+        consume_symbol(p, ";", "Expected ';' after expression body");
+        let exprs: Expr[] = list_new(Expr);
+        exprs = push(exprs, ret_expr);
+        let ret_stmt: Stmt = make_return_stmt(exprs, line, col);
+        body = push(body, ret_stmt);
+    } else {
+        consume_symbol(p, "{", "Expected '{' before function body");
+        while (!is_at_end(p) && !check_symbol(p, "}")) {
+            let s: Stmt = parse_stmt(p);
+            body = push(body, s);
+        }
+        consume_symbol(p, "}", "Expected '}' after function body");
+    }
 
     return FunctionDecl {
         name: concat(fname, ""),
@@ -851,7 +969,6 @@ fn parse_program(tokens: Token[]) -> Program {
 
     while (!is_at_end(&p)) {
         if (match_keyword(&p, "import")) {
-            let tok_str: string = peek_string(&p);
             advance(&p);
             consume_symbol(&p, ";", "Expected ';' after import");
             continue;
@@ -883,4 +1000,93 @@ fn parse_program(tokens: Token[]) -> Program {
         enums: enums,
         functions: functions,
     };
+}
+
+class ModuleFileCollector {
+    files: string[];
+    count: int;
+}
+
+fn get_file_dir(path: string) -> string {
+    let last_slash: int = -1;
+    for (let i: int = 0; i < len(path); i++) {
+        if (char_at(path, i) == '/') {
+            last_slash = i;
+        }
+    }
+    if (last_slash >= 0) {
+        return substring(path, 0, last_slash + 1);
+    }
+    return "";
+}
+
+fn has_file_collected(mfc: &ModuleFileCollector, path: string) -> bool {
+    for (let i: int = 0; i < mfc.count; i++) {
+        if (equals(mfc.files[i], path)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+fn collect_module_files(mfc: &ModuleFileCollector, path: string) -> void {
+    if (has_file_collected(mfc, path)) {
+        return;
+    }
+    let source: string = read_file(path);
+    let tokens: Token[] = lex(source);
+    let base_dir: string = get_file_dir(path);
+
+    // First scan this file's imports to collect dependencies in topological order
+    for (let i: int = 0; i < len(tokens); i++) {
+        let is_imp: bool = false;
+        match tokens[i].kind {
+            TokenKind.Keyword { word } => {
+                if (equals(word, "import")) {
+                    is_imp = true;
+                }
+            }
+            _ => {}
+        }
+        if (is_imp && i + 1 < len(tokens)) {
+            match tokens[i + 1].kind {
+                TokenKind.StringLit { value } => {
+                    if (len(value) > 0) {
+                        let full_path: string = "";
+                        if (char_at(value, 0) != '/') {
+                            full_path = concat(base_dir, value);
+                            if (!file_exists(full_path) && file_exists(value)) {
+                                full_path = concat(value, "");
+                            }
+                        } else {
+                            full_path = concat(value, "");
+                        }
+                        collect_module_files(mfc, full_path);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    // Now append this file after its dependencies
+    mfc.files = push(mfc.files, concat(path, ""));
+    mfc.count += 1;
+}
+
+fn parse_program_from_file(entry_file: string) -> Program {
+    let mfc: ModuleFileCollector = ModuleFileCollector {
+        files: list_new(string),
+        count: 0,
+    };
+    collect_module_files(&mfc, entry_file);
+
+    let combined: string = "";
+    for (let f: int = 0; f < mfc.count; f++) {
+        let src: string = read_file(mfc.files[f]);
+        combined = concat(combined, src);
+        combined = concat(combined, "\n");
+    }
+    let tokens: Token[] = lex(combined);
+    return parse_program(tokens);
 }

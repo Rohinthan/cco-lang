@@ -1,0 +1,19 @@
+fn callee_work(n: int) -> int {
+    let local1: int = n * 3;
+    let local2: int = n + 7;
+    return local1 - local2;
+}
+
+fn caller_func(init: int) -> int {
+    let k1: int = init;
+    let k2: int = init + 10;
+    let k3: int = init + 20;
+    let w1: int = callee_work(k1);
+    let w2: int = callee_work(k2);
+    let w3: int = callee_work(k3);
+    return (k1 + k2 + k3) + (w1 + w2 + w3);
+}
+
+fn main() -> int {
+    return caller_func(5); // 45 + 69 = 114
+}

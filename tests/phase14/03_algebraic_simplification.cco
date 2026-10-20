@@ -1,0 +1,46 @@
+// Phase 14 Test 03: Algebraic Simplification
+fn test_algebraic(x: int, b: bool) -> void {
+    let a1: int = x + 0;
+    let a2: int = 0 + x;
+    let a3: int = x - 0;
+    let a4: int = x - x;
+    let a5: int = x * 1;
+    let a6: int = 1 * x;
+    let a7: int = x * 0;
+    let a8: int = 0 * x;
+    let a9: int = x / 1;
+    let a10: int = x / x;
+
+    print(a1);
+    print(a2);
+    print(a3);
+    print(a4);
+    print(a5);
+    print(a6);
+    print(a7);
+    print(a8);
+    print(a9);
+    print(a10);
+
+    let b1: bool = b && true;
+    let b2: bool = true && b;
+    let b3: bool = b || false;
+    let b4: bool = false || b;
+    let b5: bool = b && false;
+    let b6: bool = b || true;
+    let b7: bool = !(!b);
+
+    if (b1) { print(1); } else { print(0); }
+    if (b2) { print(1); } else { print(0); }
+    if (b3) { print(1); } else { print(0); }
+    if (b4) { print(1); } else { print(0); }
+    if (b5) { print(1); } else { print(0); }
+    if (b6) { print(1); } else { print(0); }
+    if (b7) { print(1); } else { print(0); }
+}
+
+fn main() -> int {
+    test_algebraic(42, true);
+    test_algebraic(7, false);
+    return 0;
+}

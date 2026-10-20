@@ -1,0 +1,9 @@
+fn main() -> int {
+    let i: int = 1;
+    let sum: int = 0;
+    while (i <= 10) {
+        sum += i;
+        i++;
+    }
+    return sum; // 55
+}

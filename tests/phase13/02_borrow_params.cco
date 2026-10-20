@@ -1,0 +1,21 @@
+struct Point {
+    x: int;
+    y: int;
+}
+
+fn print_point(p: &Point) -> void {
+    print(to_string(p.x));
+    print(to_string(p.y));
+}
+
+fn get_distance_squared(p: &Point) -> int {
+    return p.x * p.x + p.y * p.y;
+}
+
+fn main() -> int {
+    let pt: Point = Point { x: 3, y: 4 };
+    print_point(&pt);
+    let d2: int = get_distance_squared(&pt);
+    print(to_string(d2));
+    return 0;
+}

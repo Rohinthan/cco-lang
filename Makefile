@@ -90,11 +90,45 @@ test_bootstrap: cco
 	@diff -u build/bootstrap_actual.txt build/bootstrap_expected.txt
 	@echo "Bootstrap parity test: PASSED (100% match, 0 leaks, 0 errors)"
 
-test: unit_tests test_selfhost test_bootstrap
+test_selfhost_fixpoint: cco
+	@mkdir -p build
+	@echo "=== Cco Phase 13 Multi-Generation Self-Hosting Bootstrap Fixpoint ==="
+	@echo "--- Stage 0 (C compiler): Compiling selfhost/cco.cco -> build/cco_stage1.c ---"
+	./cco selfhost/cco.cco -o build/cco_stage1.c
+	@echo "--- Compiling Stage 1 executable with strict C11 flags ---"
+	$(CC) $(CFLAGS) build/cco_stage1.c -o build/cco_stage1 $(LDFLAGS)
+	@echo "--- Stage 1 (Self-hosted): Compiling selfhost/cco.cco -> build/cco_stage2.c ---"
+	./build/cco_stage1 selfhost/cco.cco -o build/cco_stage2.c
+	@echo "--- Compiling Stage 2 executable with strict C11 flags ---"
+	$(CC) $(CFLAGS) build/cco_stage2.c -o build/cco_stage2 $(LDFLAGS)
+	@echo "--- Stage 2 (Self-hosted): Compiling selfhost/cco.cco -> build/cco_stage3.c ---"
+	./build/cco_stage2 selfhost/cco.cco -o build/cco_stage3.c
+	@echo "--- Compiling Stage 3 executable with strict C11 flags ---"
+	$(CC) $(CFLAGS) build/cco_stage3.c -o build/cco_stage3 $(LDFLAGS)
+	@echo "--- Verifying Bitwise Fixpoint Convergence: Stage 2 vs Stage 3 ---"
+	cmp build/cco_stage2.c build/cco_stage3.c
+	@diff -u build/cco_stage2.c build/cco_stage3.c
+	@echo "--- SHA-256 Checksums: ---"
+	@sha256sum build/cco_stage2.c build/cco_stage3.c
+	@echo "🎉 Phase 13 Bootstrap Fixpoint Confirmed: Stage 2 == Stage 3 (Bitwise Identical)!"
+
+test_phase13: test_selfhost_fixpoint
+	@bash tests/run_phase13_tests.sh
+
+test_phase14: test_bootstrap
+	@bash tests/run_phase14_tests.sh
+
+test_phase15: test_bootstrap
+	@bash tests/run_phase15_tests.sh
+
+test_phase16: test_bootstrap
+	@bash tests/run_phase16_tests.sh
+
+test: unit_tests test_selfhost test_bootstrap test_selfhost_fixpoint test_phase13 test_phase14 test_phase15 test_phase16
 	@bash tests/run_tests.sh
 
 clean:
 	rm -rf build cco gcco selfhost/lexer_selfhosted selfhost/lexer_selfhosted.c selfhost/parser selfhost/parser.c selfhost/typechecker selfhost/typechecker.c selfhost/codegen selfhost/codegen.c selfhost/cco selfhost/cco.c
 
-.PHONY: all install uninstall unit_tests test_selfhost test_bootstrap test clean
+.PHONY: all install uninstall unit_tests test_selfhost test_bootstrap test_selfhost_fixpoint test_phase13 test_phase14 test_phase15 test_phase16 test clean
 

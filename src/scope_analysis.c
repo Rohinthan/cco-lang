@@ -117,8 +117,11 @@ static bool is_stdlib_heap_fn(const char *name) {
     if (!name) return false;
     return strcmp(name, "concat") == 0 ||
            strcmp(name, "substring") == 0 ||
+           strcmp(name, "char_to_string") == 0 ||
+           strcmp(name, "to_string") == 0 ||
            strcmp(name, "read_file") == 0 ||
            strcmp(name, "read_line") == 0 ||
+           strcmp(name, "input") == 0 ||
            strcmp(name, "net_recv") == 0 ||
            strcmp(name, "program_name") == 0 ||
            strcmp(name, "args") == 0 ||
@@ -174,7 +177,7 @@ static void analyze_block(ScopeStack *stack, AstNode *block_node, bool is_loop) 
                 stmt->free_old_on_reassign = true;
                 bool val_is_str = (stmt->as.assign.value->type == NODE_LITERAL && stmt->as.assign.value->as.literal.lit_type == TY_STRING) ||
                                   (stmt->as.assign.value->type == NODE_FSTRING) ||
-                                  (stmt->as.assign.value->type == NODE_CALL && (strcmp(stmt->as.assign.value->as.call.callee, "concat") == 0 || strcmp(stmt->as.assign.value->as.call.callee, "substring") == 0 || strcmp(stmt->as.assign.value->as.call.callee, "read_file") == 0 || strcmp(stmt->as.assign.value->as.call.callee, "read_line") == 0 || strcmp(stmt->as.assign.value->as.call.callee, "program_name") == 0));
+                                  (stmt->as.assign.value->type == NODE_CALL && (strcmp(stmt->as.assign.value->as.call.callee, "concat") == 0 || strcmp(stmt->as.assign.value->as.call.callee, "substring") == 0 || strcmp(stmt->as.assign.value->as.call.callee, "char_to_string") == 0 || strcmp(stmt->as.assign.value->as.call.callee, "to_string") == 0 || strcmp(stmt->as.assign.value->as.call.callee, "read_file") == 0 || strcmp(stmt->as.assign.value->as.call.callee, "read_line") == 0 || strcmp(stmt->as.assign.value->as.call.callee, "input") == 0 || strcmp(stmt->as.assign.value->as.call.callee, "program_name") == 0));
                 bool val_is_arr = !val_is_str;
                 add_free_to_node(stack, stmt, stmt->as.assign.name, val_is_arr);
             }
@@ -424,7 +427,13 @@ static void analyze_node(ScopeStack *stack, AstNode *node) {
             analyze_node(stack, node->as.expr_stmt.expr);
             break;
         case NODE_PRINT:
-            analyze_node(stack, node->as.print_stmt.value);
+            if (node->as.print_stmt.values) {
+                for (int i = 0; i < node->as.print_stmt.value_count; i++) {
+                    analyze_node(stack, node->as.print_stmt.values[i]);
+                }
+            } else if (node->as.print_stmt.value) {
+                analyze_node(stack, node->as.print_stmt.value);
+            }
             break;
         case NODE_INDEX_ASSIGN:
             analyze_node(stack, node->as.index_assign.index);
@@ -1813,7 +1822,13 @@ static void analyze_own_node(OwnScopeStack *stack, AstNode *node) {
             analyze_own_node(stack, node->as.expr_stmt.expr);
             break;
         case NODE_PRINT:
-            analyze_own_node(stack, node->as.print_stmt.value);
+            if (node->as.print_stmt.values) {
+                for (int i = 0; i < node->as.print_stmt.value_count; i++) {
+                    analyze_own_node(stack, node->as.print_stmt.values[i]);
+                }
+            } else if (node->as.print_stmt.value) {
+                analyze_own_node(stack, node->as.print_stmt.value);
+            }
             break;
         case NODE_BINARY:
             analyze_own_node(stack, node->as.binary.left);

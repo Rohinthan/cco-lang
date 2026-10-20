@@ -336,7 +336,64 @@ impl Printable for Point;
 
 ---
 
-## 8. Compiler CLI Reference
+## 8. Built-in Runtime Functions & Standard Library
+
+### 8.1 Runtime Utility Builtins
+The following functions are built into the Cco runtime prelude and available in any program without imports:
+
+- **`char_to_string(c: char) -> string`**:
+  Converts a single character `c` into a heap-allocated 1-character string.
+  ```cco
+  s = char_to_string('A')  # "A"
+  ```
+
+- **`to_string(n: int) -> string`**:
+  Converts an integer `n` into its base-10 heap-allocated string representation.
+  ```cco
+  val_str = to_string(12345)  # "12345"
+  ```
+
+- **`exit(code: int) -> void`**:
+  Terminates process execution immediately with the provided integer exit status.
+  ```cco
+  exit(0)
+  ```
+
+- **`file_exists(path: string) -> bool`**:
+  Checks if a file exists on the filesystem and can be opened for reading. Returns `true` if accessible, `false` otherwise.
+  ```cco
+  if file_exists("data.txt") {
+      content = read_file("data.txt")
+  }
+  ```
+
+### 8.2 Standard Library: Strings (`std/string.cco`)
+The `std/string.cco` module provides utilities for string manipulation and efficient concatenation:
+
+```cco
+import "std/string.cco";
+
+fn main() -> int {
+    # Efficient string building using StringBuilder
+    let sb: StringBuilder = sb_new()
+    sb.append("Hello")
+    sb.append(", ")
+    sb.append("World!")
+
+    result = sb.to_string()
+    print(result)  # "Hello, World!"
+    return 0
+}
+```
+
+#### `StringBuilder` API:
+- `sb_new() -> StringBuilder`: Constructs a new, empty string buffer.
+- `sb.append(s: string) -> void`: Appends a string slice to the buffer.
+- `sb.to_string() -> string`: Materializes the combined string.
+
+---
+
+## 9. Compiler CLI Reference
 
 Compile and run a Cco program:
 ```bash
@@ -359,3 +416,52 @@ cco program.cco --profile-generate -o program
 ./program
 cco program.cco --profile-use cco.profile -O2 -o program_pgo
 ```
+
+Verify self-hosted compiler bootstrap fixpoint:
+```bash
+make test_selfhost_fixpoint
+```
+
+Run Phase 14 self-hosted optimizer test suite:
+```bash
+make test_phase14
+```
+
+Run Phase 15 self-hosted native backend test suite:
+```bash
+make test_phase15
+```
+
+Self-hosted compiler invocation:
+```bash
+# Build compiler stages
+make bootstrap
+
+# Compile a program to C11 with self-hosted compiler (Stage 3)
+./build/cco_stage3 program.cco -o output.c
+
+# Compile with self-hosted optimization pipeline enabled (Phase 14)
+./build/cco_stage3 program.cco -O2 -o output_opt.c
+
+# Compile directly to standalone native Linux executable (Phase 15)
+./build/cco_stage3 program.cco --selfhost-native -o output_native
+./output_native
+```
+
+#### Optimization Flags (`-O`, `-O1`, `-O2`, `--optimize`)
+When optimization flags are passed to the self-hosted compiler (`cco_stage3`), the AST/IR optimizer (`selfhost/ir_opt.cco`) executes before C11 code generation:
+1. **Pre-optimization IR verification**: Verifies AST integrity and node invariants.
+2. **Fixed-point iterative optimization pipeline**:
+   - **Constant Folding**: Statically folds compile-time arithmetic, comparison, and boolean expressions.
+   - **Algebraic Simplification**: Simplifies algebraic identities ($x + 0$, $x - 0$, $x \times 1$, $x \times 0$, $x / 1$).
+   - **Constant & Copy Propagation**: Propagates constants and scalar variable copies through sequential basic blocks.
+   - **Branch Simplification**: Eliminates dead conditional branches when predicates fold to compile-time constants.
+   - **Dead Code Elimination (DCE)**: Conservatively prunes unused scalar local declarations with pure initializers.
+3. **Post-optimization IR verification**: Verifies invariant preservation prior to emitting ISO C11.
+
+#### Self-Hosted Native Backend Flags (`--selfhost-native`, `--native`)
+When `--selfhost-native` or `--native` is passed to the self-hosted compiler:
+1. **Validation**: Traverses and verifies that the program AST conforms to the supported native subset (integers, booleans, local variables, arithmetic, comparisons, conditionals, loops, multi-function calls).
+2. **x86-64 Machine-Code Generation** (`selfhost/x86_64_core.cco`): Lowers functions directly into x86-64 instructions complying with the System V AMD64 ABI, using 16-byte stack frame alignment and register parameter passing (`%rdi`, `%rsi`, `%rdx`, `%rcx`, `%r8`, `%r9`).
+3. **ELF64 Serialization** (`selfhost/elf_core.cco`): Assembles an `ET_REL` relocatable object directly in pure Cco with `.text`, `.symtab`, `.strtab`, `.shstrtab`, and `.note.GNU-stack` sections.
+4. **Internal Static Linking**: Automatically invokes `cco-link` to produce a standalone executable without GCC or intermediate C11 files.

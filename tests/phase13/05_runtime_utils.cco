@@ -1,0 +1,27 @@
+fn main() -> int {
+    let s_char: string = char_to_string('X');
+    print(s_char);
+
+    let s_pos: string = to_string(12345);
+    print(s_pos);
+
+    let s_zero: string = to_string(0);
+    print(s_zero);
+
+    let s_neg: string = to_string(-987);
+    print(s_neg);
+
+    if (file_exists("Makefile")) {
+        print("Makefile exists: true");
+    } else {
+        print("Makefile exists: false");
+    }
+
+    if (file_exists("this_file_does_not_exist_at_all.xyz")) {
+        print("nonexistent exists: true");
+    } else {
+        print("nonexistent exists: false");
+    }
+
+    return 0;
+}

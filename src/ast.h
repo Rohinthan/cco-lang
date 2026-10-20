@@ -341,6 +341,8 @@ struct AstNode {
 
         struct {
             AstNode *value;
+            AstNode **values;
+            int value_count;
         } print_stmt;
 
         struct {

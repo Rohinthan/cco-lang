@@ -9,15 +9,17 @@ class SymTab {
     depths: int[];
     count: int;
     depth: int;
+    max_count: int;
 }
 
 fn make_symtab() -> SymTab {
     return SymTab {
-        names: alloc(string, 128),
-        types: alloc(string, 128),
-        depths: alloc(int, 128),
+        names: alloc(string, 1024),
+        types: alloc(string, 1024),
+        depths: alloc(int, 1024),
         count: 0,
         depth: 0,
+        max_count: 0,
     };
 }
 
@@ -34,12 +36,19 @@ fn symtab_pop_scope(st: &SymTab) -> void {
 }
 
 fn symtab_add(st: &SymTab, name: string, type_name: string) -> void {
-    if (st.count < 128) {
+    if (st.count < 1024) {
         let idx: int = st.count;
+        if (idx < st.max_count) {
+            free(st.names[idx]);
+            free(st.types[idx]);
+        }
         st.names[idx] = concat(name, "");
         st.types[idx] = concat(type_name, "");
         st.depths[idx] = st.depth;
         st.count += 1;
+        if (st.count > st.max_count) {
+            st.max_count = st.count;
+        }
     }
 }
 
@@ -79,9 +88,42 @@ fn is_enum_type(p: &Program, name: string) -> bool {
     return false;
 }
 
+fn type_matches(type_name: string, nominal_name: string) -> bool {
+    let offset: int = 0;
+    if (len(type_name) > 0 && char_at(type_name, 0) == '&') {
+        offset = 1;
+    }
+    if (len(type_name) - offset != len(nominal_name)) {
+        return false;
+    }
+    for (let i: int = 0; i < len(nominal_name); i++) {
+        if (char_at(type_name, i + offset) != char_at(nominal_name, i)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+fn get_map_val_type_from_name(t: string) -> string {
+    if (len(t) >= 4 && char_at(t, 0) == 'm' && char_at(t, 1) == 'a' && char_at(t, 2) == 'p' && char_at(t, 3) == '[') {
+        let bracket_depth: int = 0;
+        for (let i: int = 3; i < len(t); i++) {
+            if (char_at(t, i) == '[') {
+                bracket_depth += 1;
+            } else if (char_at(t, i) == ']') {
+                bracket_depth -= 1;
+                if (bracket_depth == 0) {
+                    return substring(t, i + 1, len(t));
+                }
+            }
+        }
+    }
+    return "int";
+}
+
 fn find_struct_field_type(p: &Program, struct_name: string, field_name: string) -> string {
     for (let i: int = 0; i < len(p.structs); i++) {
-        if (equals(p.structs[i].name, struct_name)) {
+        if (type_matches(struct_name, p.structs[i].name)) {
             for (let j: int = 0; j < len(p.structs[i].fields); j++) {
                 if (equals(p.structs[i].fields[j].name, field_name)) {
                     return concat(p.structs[i].fields[j].type_name, "");
@@ -94,7 +136,7 @@ fn find_struct_field_type(p: &Program, struct_name: string, field_name: string) 
 
 fn find_class_field_type(p: &Program, class_name: string, field_name: string) -> string {
     for (let i: int = 0; i < len(p.classes); i++) {
-        if (equals(p.classes[i].name, class_name)) {
+        if (type_matches(class_name, p.classes[i].name)) {
             for (let j: int = 0; j < len(p.classes[i].fields); j++) {
                 if (equals(p.classes[i].fields[j].name, field_name)) {
                     return concat(p.classes[i].fields[j].type_name, "");
@@ -171,25 +213,25 @@ fn infer_expr_type(p: &Program, st: &SymTab, e: &Expr) -> string {
 
     // 9: EXPR_CALL
     if (e.kind == 9) {
-        if (equals(e.callee, "concat") || equals(e.callee, "substring") || equals(e.callee, "read_file") || equals(e.callee, "read_line") || equals(e.callee, "program_name") || equals(e.callee, "net_recv")) {
+        if (equals(e.callee, "concat") || equals(e.callee, "substring") || equals(e.callee, "read_file") || equals(e.callee, "read_line") || equals(e.callee, "input") || equals(e.callee, "char_to_string") || equals(e.callee, "to_string") || equals(e.callee, "program_name") || equals(e.callee, "net_recv")) {
             return "string";
         }
         if (equals(e.callee, "sqrt") || equals(e.callee, "exp") || equals(e.callee, "log") || equals(e.callee, "sin") || equals(e.callee, "cos") || equals(e.callee, "tan") || equals(e.callee, "pow") || equals(e.callee, "abs_float") || equals(e.callee, "floor") || equals(e.callee, "ceil") || equals(e.callee, "min_float") || equals(e.callee, "max_float") || equals(e.callee, "to_float")) {
             return "float";
         }
-        if (equals(e.callee, "equals") || equals(e.callee, "is_int") || equals(e.callee, "is_float") || equals(e.callee, "has") || equals(e.callee, "write_file")) {
+        if (equals(e.callee, "equals") || equals(e.callee, "is_int") || equals(e.callee, "is_float") || equals(e.callee, "has") || equals(e.callee, "write_file") || equals(e.callee, "file_exists") || equals(e.callee, "write_bytes")) {
             return "bool";
         }
         if (equals(e.callee, "char_at")) {
             return "char";
         }
-        if (equals(e.callee, "to_int") || equals(e.callee, "len") || equals(e.callee, "abs_int") || equals(e.callee, "min_int") || equals(e.callee, "max_int") || equals(e.callee, "arg_count") || equals(e.callee, "random_int") || equals(e.callee, "net_listen") || equals(e.callee, "net_accept") || equals(e.callee, "net_send")) {
+        if (equals(e.callee, "to_int") || equals(e.callee, "len") || equals(e.callee, "abs_int") || equals(e.callee, "min_int") || equals(e.callee, "max_int") || equals(e.callee, "arg_count") || equals(e.callee, "random_int") || equals(e.callee, "net_listen") || equals(e.callee, "net_accept") || equals(e.callee, "net_send") || equals(e.callee, "execute_cmd") || equals(e.callee, "system")) {
             return "int";
         }
         if (equals(e.callee, "args")) {
             return "string[]";
         }
-        if (equals(e.callee, "net_close") || equals(e.callee, "sleep_ms") || equals(e.callee, "random_seed")) {
+        if (equals(e.callee, "net_close") || equals(e.callee, "sleep_ms") || equals(e.callee, "random_seed") || equals(e.callee, "exit")) {
             return "void";
         }
         if (equals(e.callee, "pop") && len(e.args) > 0) {
@@ -197,6 +239,10 @@ fn infer_expr_type(p: &Program, st: &SymTab, e: &Expr) -> string {
             if (len(arr_t) > 2 && char_at(arr_t, len(arr_t) - 2) == '[' && char_at(arr_t, len(arr_t) - 1) == ']') {
                 return substring(arr_t, 0, len(arr_t) - 2);
             }
+        }
+        if (equals(e.callee, "get") && len(e.args) > 0) {
+            let mt: string = infer_expr_type(p, st, e.args[0]);
+            return get_map_val_type_from_name(mt);
         }
         let fn_ret: string = find_function_return_type(p, e.callee);
         if (len(fn_ret) > 0) {
@@ -259,6 +305,13 @@ fn typecheck_stmt(p: &Program, st: &SymTab, s: &Stmt) -> void {
 
     // 2: STMT_ASSIGN
     if (s.kind == 2) {
+        if (len(s.var_name) > 0) {
+            let existing: string = symtab_lookup(st, s.var_name);
+            if (len(existing) == 0) {
+                let vt: string = infer_expr_type(p, st, s.expr[0]);
+                symtab_add(st, s.var_name, vt);
+            }
+        }
         return;
     }
 

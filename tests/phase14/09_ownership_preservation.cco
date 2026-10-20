@@ -1,0 +1,31 @@
+// Phase 14 Test 09: Ownership & Resource Management Preservation
+class Point {
+    x: int;
+    y: int;
+}
+
+fn add_points(p1: &Point, p2: &Point) -> int {
+    return p1.x + p2.x + p1.y + p2.y;
+}
+
+class Segment {
+    p1: Point;
+    p2: Point;
+}
+
+fn main() -> int {
+    let pt1: Point = Point { x: 10, y: 20 };
+    let pt2: Point = Point { x: 30, y: 40 };
+
+    let res: int = add_points(&pt1, &pt2);
+    print(res);
+
+    let seg: Segment = Segment {
+        p1: Point { x: 1, y: 2 },
+        p2: Point { x: 3, y: 4 },
+    };
+    print(seg.p1.x + seg.p2.x);
+    print(seg.p1.y + seg.p2.y);
+
+    return 0;
+}

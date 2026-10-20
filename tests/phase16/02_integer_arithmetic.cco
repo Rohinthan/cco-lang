@@ -1,0 +1,9 @@
+fn main() -> int {
+    let a: int = 15;
+    let b: int = 4;
+    let sum: int = a + b;
+    let diff: int = a - b;
+    let prod: int = a * b;
+    let neg: int = -diff;
+    return sum + prod + neg; // 19 + 60 - 11 = 68
+}

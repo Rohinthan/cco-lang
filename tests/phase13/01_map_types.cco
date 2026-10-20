@@ -1,0 +1,18 @@
+fn main() -> int {
+    let m: map[string]int = map_new(string, int);
+    m = put(m, "apple", 10);
+    m = put(m, "banana", 20);
+    m = put(m, "cherry", 30);
+
+    if (has(m, "banana")) {
+        print("has banana");
+    }
+    if (!has(m, "grape")) {
+        print("no grape");
+    }
+
+    let b_val: int = get(m, "banana");
+    print(to_string(b_val));
+    print(to_string(len(m)));
+    return 0;
+}

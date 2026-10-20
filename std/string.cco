@@ -15,19 +15,16 @@ fn string_char_at(s: string, i: int) -> char {
 }
 
 fn to_str_int(n: int) -> string {
-    return f"{n}";
-}
-
-fn to_str_float(f: float) -> string {
-    return f"{f}";
+    return to_string(n);
 }
 
 fn to_str_bool(b: bool) -> string {
-    return f"{b}";
+    if (b) { return "true"; }
+    return "false";
 }
 
 fn to_str_char(c: char) -> string {
-    return f"{c}";
+    return char_to_string(c);
 }
 
 fn parse_int(s: string) -> int {
@@ -44,4 +41,37 @@ fn is_valid_int(s: string) -> bool {
 
 fn is_valid_float(s: string) -> bool {
     return is_float(s);
+}
+
+fn char_to_str(c: char) -> string {
+    return char_to_string(c);
+}
+
+fn int_to_str(n: int) -> string {
+    return to_string(n);
+}
+
+class StringBuilder {
+    chunks: string[];
+    count: int;
+
+    fn append(self, s: string) -> void {
+        self.chunks = push(self.chunks, concat(s, ""));
+        self.count += 1;
+    }
+
+    fn to_string(self) -> string {
+        let res: string = "";
+        for (let i: int = 0; i < self.count; i++) {
+            res = concat(res, self.chunks[i]);
+        }
+        return res;
+    }
+}
+
+fn sb_new() -> StringBuilder {
+    return StringBuilder {
+        chunks: list_new(string),
+        count: 0,
+    };
 }

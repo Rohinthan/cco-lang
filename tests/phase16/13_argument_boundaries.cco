@@ -1,0 +1,13 @@
+fn sum6(a: int, b: int, c: int, d: int, e: int, f: int) -> int {
+    return a + b + c + d + e + f;
+}
+
+fn sub5(a: int, b: int, c: int, d: int, e: int) -> int {
+    return a - b - c - d - e;
+}
+
+fn main() -> int {
+    let s: int = sum6(10, 20, 30, 40, 50, 60); // 210
+    let d: int = sub5(100, 10, 20, 15, 5);      // 50
+    return s - d; // 210 - 50 = 160
+}

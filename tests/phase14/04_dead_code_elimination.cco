@@ -1,0 +1,15 @@
+// Phase 14 Test 04: Dead Code Elimination
+fn compute(n: int) -> int {
+    let dead1: int = 123 + 456;
+    let dead2: bool = dead1 > 0;
+    let result: int = n * 2;
+    let dead3: int = dead1 * 2;
+    return result;
+}
+
+fn main() -> int {
+    let dead_main: int = 999;
+    let val: int = compute(21);
+    print(val);
+    return 0;
+}

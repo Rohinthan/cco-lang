@@ -271,9 +271,18 @@ static void lower_stmt(LowerCtx *ctx, AstNode *stmt) {
         }
 
         case NODE_PRINT: {
-            IrValue *val = lower_expr(ctx, stmt->as.print_stmt.value);
-            if (val) {
-                ir_emit_print(&ctx->builder, val);
+            if (stmt->as.print_stmt.values && stmt->as.print_stmt.value_count > 0) {
+                for (int i = 0; i < stmt->as.print_stmt.value_count; i++) {
+                    IrValue *val = lower_expr(ctx, stmt->as.print_stmt.values[i]);
+                    if (val) {
+                        ir_emit_print(&ctx->builder, val);
+                    }
+                }
+            } else if (stmt->as.print_stmt.value) {
+                IrValue *val = lower_expr(ctx, stmt->as.print_stmt.value);
+                if (val) {
+                    ir_emit_print(&ctx->builder, val);
+                }
             }
             break;
         }

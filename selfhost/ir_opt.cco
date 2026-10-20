@@ -1,0 +1,906 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+// ir_opt.cco — Self-Hosted Optimization Pipeline & IR Verifier in pure Cco
+import "ast.cco";
+
+class OptStats {
+    folds: int;
+    propagations: int;
+    simplifications: int;
+    dce_eliminations: int;
+    branch_simplifications: int;
+}
+
+fn make_opt_stats() -> OptStats {
+    return OptStats {
+        folds: 0,
+        propagations: 0,
+        simplifications: 0,
+        dce_eliminations: 0,
+        branch_simplifications: 0,
+    };
+}
+
+fn opt_stats_total(stats: &OptStats) -> int {
+    return stats.folds + stats.propagations + stats.simplifications + stats.dce_eliminations + stats.branch_simplifications;
+}
+
+// ------------------------------------------------------------
+// 1. IR Verification Pass
+// ------------------------------------------------------------
+
+fn verify_expr(e: &Expr) -> int {
+    let errs: int = 0;
+    if (e.kind == 0) {
+        return 0;
+    }
+    if (e.kind < 1 || e.kind > 16) {
+        print("IR Verify Error: Invalid Expr kind");
+        errs += 1;
+    }
+    if (e.kind == 7) {
+        // EXPR_BINARY
+        if (len(e.children) < 2) {
+            print("IR Verify Error: EXPR_BINARY has fewer than 2 children");
+            errs += 1;
+        }
+        if (len(e.op) == 0) {
+            print("IR Verify Error: EXPR_BINARY has empty operator");
+            errs += 1;
+        }
+    }
+    if (e.kind == 8) {
+        // EXPR_UNARY
+        if (len(e.children) < 1) {
+            print("IR Verify Error: EXPR_UNARY has no operand");
+            errs += 1;
+        }
+    }
+    for (let i: int = 0; i < len(e.children); i++) {
+        errs += verify_expr(e.children[i]);
+    }
+    for (let i: int = 0; i < len(e.args); i++) {
+        errs += verify_expr(e.args[i]);
+    }
+    for (let i: int = 0; i < len(e.field_values); i++) {
+        errs += verify_expr(e.field_values[i]);
+    }
+    return errs;
+}
+
+fn verify_stmt(s: &Stmt) -> int {
+    let errs: int = 0;
+    // kind 0 is STMT_NOP (eliminated by DCE / branch simplification)
+    if (s.kind == 0) {
+        return 0;
+    }
+    if (s.kind < 1 || s.kind > 15) {
+        print("IR Verify Error: Invalid Stmt kind");
+        errs += 1;
+    }
+    for (let i: int = 0; i < len(s.expr); i++) {
+        errs += verify_expr(s.expr[i]);
+    }
+    for (let i: int = 0; i < len(s.init_expr); i++) {
+        errs += verify_expr(s.init_expr[i]);
+    }
+    for (let i: int = 0; i < len(s.cond_expr); i++) {
+        errs += verify_expr(s.cond_expr[i]);
+    }
+    for (let i: int = 0; i < len(s.target_expr); i++) {
+        errs += verify_expr(s.target_expr[i]);
+    }
+    for (let i: int = 0; i < len(s.step_stmt); i++) {
+        errs += verify_stmt(s.step_stmt[i]);
+    }
+    for (let i: int = 0; i < len(s.then_block); i++) {
+        errs += verify_stmt(s.then_block[i]);
+    }
+    for (let i: int = 0; i < len(s.else_block); i++) {
+        errs += verify_stmt(s.else_block[i]);
+    }
+    for (let i: int = 0; i < len(s.body); i++) {
+        errs += verify_stmt(s.body[i]);
+    }
+    return errs;
+}
+
+fn verify_function(f: &FunctionDecl) -> int {
+    let errs: int = 0;
+    for (let i: int = 0; i < len(f.body); i++) {
+        errs += verify_stmt(f.body[i]);
+    }
+    return errs;
+}
+
+fn verify_program(prog: &Program) -> int {
+    let errs: int = 0;
+    for (let i: int = 0; i < len(prog.functions); i++) {
+        errs += verify_function(prog.functions[i]);
+    }
+    for (let c: int = 0; c < len(prog.classes); c++) {
+        for (let m: int = 0; m < len(prog.classes[c].methods); m++) {
+            errs += verify_function(prog.classes[c].methods[m]);
+        }
+    }
+    return errs;
+}
+
+// ------------------------------------------------------------
+// 2. Pure Expression Safety Predicate
+// ------------------------------------------------------------
+
+fn is_pure_expr(e: &Expr) -> bool {
+    // 1: INT, 2: FLOAT, 3: STRING, 4: BOOL, 5: CHAR, 6: IDENT are pure
+    if (e.kind >= 1 && e.kind <= 6) {
+        return true;
+    }
+    // 7: EXPR_BINARY
+    if (e.kind == 7) {
+        if (len(e.children) >= 2) {
+            return is_pure_expr(e.children[0]) && is_pure_expr(e.children[1]);
+        }
+        return false;
+    }
+    // 8: EXPR_UNARY
+    if (e.kind == 8) {
+        if (len(e.children) >= 1) {
+            return is_pure_expr(e.children[0]);
+        }
+        return false;
+    }
+    return false;
+}
+
+// ------------------------------------------------------------
+// 3. Constant Folding Pass
+// ------------------------------------------------------------
+
+fn constant_fold_expr(e: &Expr, stats: &OptStats) -> void {
+    // Recursively fold children first
+    for (let i: int = 0; i < len(e.children); i++) {
+        constant_fold_expr(e.children[i], stats);
+    }
+    for (let i: int = 0; i < len(e.args); i++) {
+        constant_fold_expr(e.args[i], stats);
+    }
+    for (let i: int = 0; i < len(e.field_values); i++) {
+        constant_fold_expr(e.field_values[i], stats);
+    }
+
+    // 7: EXPR_BINARY
+    if (e.kind == 7 && len(e.children) >= 2) {
+        // Integer binary operations
+        if (e.children[0].kind == 1 && e.children[1].kind == 1) {
+            let a: int = e.children[0].int_val;
+            let b: int = e.children[1].int_val;
+            if (equals(e.op, "+")) {
+                e.kind = 1; e.int_val = a + b; stats.folds += 1; return;
+            }
+            if (equals(e.op, "-")) {
+                e.kind = 1; e.int_val = a - b; stats.folds += 1; return;
+            }
+            if (equals(e.op, "*")) {
+                e.kind = 1; e.int_val = a * b; stats.folds += 1; return;
+            }
+            if (equals(e.op, "/")) {
+                if (b != 0) {
+                    e.kind = 1; e.int_val = a / b; stats.folds += 1; return;
+                }
+            }
+            if (equals(e.op, "%")) {
+                if (b != 0) {
+                    e.kind = 1; e.int_val = a % b; stats.folds += 1; return;
+                }
+            }
+            if (equals(e.op, "==")) {
+                e.kind = 4; e.bool_val = (a == b); stats.folds += 1; return;
+            }
+            if (equals(e.op, "!=")) {
+                e.kind = 4; e.bool_val = (a != b); stats.folds += 1; return;
+            }
+            if (equals(e.op, "<")) {
+                e.kind = 4; e.bool_val = (a < b); stats.folds += 1; return;
+            }
+            if (equals(e.op, "<=")) {
+                e.kind = 4; e.bool_val = (a <= b); stats.folds += 1; return;
+            }
+            if (equals(e.op, ">")) {
+                e.kind = 4; e.bool_val = (a > b); stats.folds += 1; return;
+            }
+            if (equals(e.op, ">=")) {
+                e.kind = 4; e.bool_val = (a >= b); stats.folds += 1; return;
+            }
+        }
+
+        // Boolean binary operations
+        if (e.children[0].kind == 4 && e.children[1].kind == 4) {
+            let a: bool = e.children[0].bool_val;
+            let b: bool = e.children[1].bool_val;
+            if (equals(e.op, "==")) {
+                e.kind = 4; e.bool_val = (a == b); stats.folds += 1; return;
+            }
+            if (equals(e.op, "!=")) {
+                e.kind = 4; e.bool_val = (a != b); stats.folds += 1; return;
+            }
+            if (equals(e.op, "&&") || equals(e.op, "and")) {
+                e.kind = 4; e.bool_val = (a && b); stats.folds += 1; return;
+            }
+            if (equals(e.op, "||") || equals(e.op, "or")) {
+                e.kind = 4; e.bool_val = (a || b); stats.folds += 1; return;
+            }
+        }
+
+        // String equality comparisons
+        if (e.children[0].kind == 3 && e.children[1].kind == 3) {
+            let a: string = e.children[0].str_val;
+            let b: string = e.children[1].str_val;
+            if (equals(e.op, "==")) {
+                e.kind = 4; e.bool_val = equals(a, b); stats.folds += 1; return;
+            }
+            if (equals(e.op, "!=")) {
+                e.kind = 4; e.bool_val = !equals(a, b); stats.folds += 1; return;
+            }
+        }
+
+        // Char comparisons
+        if (e.children[0].kind == 5 && e.children[1].kind == 5) {
+            let a: char = e.children[0].char_val;
+            let b: char = e.children[1].char_val;
+            if (equals(e.op, "==")) {
+                e.kind = 4; e.bool_val = (a == b); stats.folds += 1; return;
+            }
+            if (equals(e.op, "!=")) {
+                e.kind = 4; e.bool_val = (a != b); stats.folds += 1; return;
+            }
+            if (equals(e.op, "<")) {
+                e.kind = 4; e.bool_val = (a < b); stats.folds += 1; return;
+            }
+            if (equals(e.op, "<=")) {
+                e.kind = 4; e.bool_val = (a <= b); stats.folds += 1; return;
+            }
+            if (equals(e.op, ">")) {
+                e.kind = 4; e.bool_val = (a > b); stats.folds += 1; return;
+            }
+            if (equals(e.op, ">=")) {
+                e.kind = 4; e.bool_val = (a >= b); stats.folds += 1; return;
+            }
+        }
+    }
+
+    // 8: EXPR_UNARY
+    if (e.kind == 8 && len(e.children) >= 1) {
+        if (equals(e.op, "-") && e.children[0].kind == 1) {
+            e.kind = 1; e.int_val = 0 - e.children[0].int_val; stats.folds += 1; return;
+        }
+        if ((equals(e.op, "!") || equals(e.op, "not")) && e.children[0].kind == 4) {
+            e.kind = 4; e.bool_val = !e.children[0].bool_val; stats.folds += 1; return;
+        }
+    }
+}
+
+// ------------------------------------------------------------
+// 4. Algebraic Simplification Pass
+// ------------------------------------------------------------
+
+fn simplify_algebra_expr(e: &Expr, stats: &OptStats) -> void {
+    // Recursively simplify children first
+    for (let i: int = 0; i < len(e.children); i++) {
+        simplify_algebra_expr(e.children[i], stats);
+    }
+    for (let i: int = 0; i < len(e.args); i++) {
+        simplify_algebra_expr(e.args[i], stats);
+    }
+    for (let i: int = 0; i < len(e.field_values); i++) {
+        simplify_algebra_expr(e.field_values[i], stats);
+    }
+
+    // 7: EXPR_BINARY
+    if (e.kind == 7 && len(e.children) >= 2) {
+        let is_left_int: bool = (e.children[0].kind == 1);
+        let left_int: int = e.children[0].int_val;
+        let is_right_int: bool = (e.children[1].kind == 1);
+        let right_int: int = e.children[1].int_val;
+
+        let is_left_bool: bool = (e.children[0].kind == 4);
+        let left_bool: bool = e.children[0].bool_val;
+        let is_right_bool: bool = (e.children[1].kind == 4);
+        let right_bool: bool = e.children[1].bool_val;
+
+        // Addition: x + 0 -> x, 0 + x -> x
+        if (equals(e.op, "+")) {
+            if (is_right_int && right_int == 0) {
+                if (e.children[0].kind == 6) {
+                    e.kind = 6; e.callee = concat(e.children[0].callee, ""); stats.simplifications += 1; return;
+                }
+                if (e.children[0].kind == 1) {
+                    e.kind = 1; e.int_val = e.children[0].int_val; stats.simplifications += 1; return;
+                }
+            }
+            if (is_left_int && left_int == 0) {
+                if (e.children[1].kind == 6) {
+                    e.kind = 6; e.callee = concat(e.children[1].callee, ""); stats.simplifications += 1; return;
+                }
+                if (e.children[1].kind == 1) {
+                    e.kind = 1; e.int_val = e.children[1].int_val; stats.simplifications += 1; return;
+                }
+            }
+        }
+
+        // Subtraction: x - 0 -> x, x - x -> 0
+        if (equals(e.op, "-")) {
+            if (is_right_int && right_int == 0) {
+                if (e.children[0].kind == 6) {
+                    e.kind = 6; e.callee = concat(e.children[0].callee, ""); stats.simplifications += 1; return;
+                }
+                if (e.children[0].kind == 1) {
+                    e.kind = 1; e.int_val = e.children[0].int_val; stats.simplifications += 1; return;
+                }
+            }
+            if (e.children[0].kind == 6 && e.children[1].kind == 6 && equals(e.children[0].callee, e.children[1].callee)) {
+                e.kind = 1; e.int_val = 0; stats.simplifications += 1; return;
+            }
+        }
+
+        // Multiplication: x * 1 -> x, 1 * x -> x, x * 0 -> 0, 0 * x -> 0
+        if (equals(e.op, "*")) {
+            if (is_right_int && right_int == 1) {
+                if (e.children[0].kind == 6) {
+                    e.kind = 6; e.callee = concat(e.children[0].callee, ""); stats.simplifications += 1; return;
+                }
+                if (e.children[0].kind == 1) {
+                    e.kind = 1; e.int_val = e.children[0].int_val; stats.simplifications += 1; return;
+                }
+            }
+            if (is_left_int && left_int == 1) {
+                if (e.children[1].kind == 6) {
+                    e.kind = 6; e.callee = concat(e.children[1].callee, ""); stats.simplifications += 1; return;
+                }
+                if (e.children[1].kind == 1) {
+                    e.kind = 1; e.int_val = e.children[1].int_val; stats.simplifications += 1; return;
+                }
+            }
+            if (is_right_int && right_int == 0 && is_pure_expr(e.children[0])) {
+                e.kind = 1; e.int_val = 0; stats.simplifications += 1; return;
+            }
+            if (is_left_int && left_int == 0 && is_pure_expr(e.children[1])) {
+                e.kind = 1; e.int_val = 0; stats.simplifications += 1; return;
+            }
+        }
+
+        // Division: x / 1 -> x, x / x -> 1
+        if (equals(e.op, "/")) {
+            if (is_right_int && right_int == 1) {
+                if (e.children[0].kind == 6) {
+                    e.kind = 6; e.callee = concat(e.children[0].callee, ""); stats.simplifications += 1; return;
+                }
+                if (e.children[0].kind == 1) {
+                    e.kind = 1; e.int_val = e.children[0].int_val; stats.simplifications += 1; return;
+                }
+            }
+            if (e.children[0].kind == 6 && e.children[1].kind == 6 && equals(e.children[0].callee, e.children[1].callee)) {
+                e.kind = 1; e.int_val = 1; stats.simplifications += 1; return;
+            }
+        }
+
+        // Boolean 'and' / '&&': x and true -> x, true and x -> x, x and false -> false, false and x -> false
+        if (equals(e.op, "and") || equals(e.op, "&&")) {
+            if (is_right_bool && right_bool == true) {
+                if (e.children[0].kind == 6) {
+                    e.kind = 6; e.callee = concat(e.children[0].callee, ""); stats.simplifications += 1; return;
+                }
+                if (e.children[0].kind == 4) {
+                    e.kind = 4; e.bool_val = e.children[0].bool_val; stats.simplifications += 1; return;
+                }
+            }
+            if (is_left_bool && left_bool == true) {
+                if (e.children[1].kind == 6) {
+                    e.kind = 6; e.callee = concat(e.children[1].callee, ""); stats.simplifications += 1; return;
+                }
+                if (e.children[1].kind == 4) {
+                    e.kind = 4; e.bool_val = e.children[1].bool_val; stats.simplifications += 1; return;
+                }
+            }
+            if (is_right_bool && right_bool == false && is_pure_expr(e.children[0])) {
+                e.kind = 4; e.bool_val = false; stats.simplifications += 1; return;
+            }
+            if (is_left_bool && left_bool == false && is_pure_expr(e.children[1])) {
+                e.kind = 4; e.bool_val = false; stats.simplifications += 1; return;
+            }
+        }
+
+        // Boolean 'or' / '||': x or false -> x, false or x -> x, x or true -> true, true or x -> true
+        if (equals(e.op, "or") || equals(e.op, "||")) {
+            if (is_right_bool && right_bool == false) {
+                if (e.children[0].kind == 6) {
+                    e.kind = 6; e.callee = concat(e.children[0].callee, ""); stats.simplifications += 1; return;
+                }
+                if (e.children[0].kind == 4) {
+                    e.kind = 4; e.bool_val = e.children[0].bool_val; stats.simplifications += 1; return;
+                }
+            }
+            if (is_left_bool && left_bool == false) {
+                if (e.children[1].kind == 6) {
+                    e.kind = 6; e.callee = concat(e.children[1].callee, ""); stats.simplifications += 1; return;
+                }
+                if (e.children[1].kind == 4) {
+                    e.kind = 4; e.bool_val = e.children[1].bool_val; stats.simplifications += 1; return;
+                }
+            }
+            if (is_right_bool && right_bool == true && is_pure_expr(e.children[0])) {
+                e.kind = 4; e.bool_val = true; stats.simplifications += 1; return;
+            }
+            if (is_left_bool && left_bool == true && is_pure_expr(e.children[1])) {
+                e.kind = 4; e.bool_val = true; stats.simplifications += 1; return;
+            }
+        }
+    }
+
+    // 8: EXPR_UNARY (Double negation: !(!x) -> x, -(-x) -> x)
+    if (e.kind == 8 && len(e.children) >= 1) {
+        if ((equals(e.op, "!") || equals(e.op, "not")) && e.children[0].kind == 8 && (equals(e.children[0].op, "!") || equals(e.children[0].op, "not"))) {
+            if (len(e.children[0].children) >= 1) {
+                if (e.children[0].children[0].kind == 6) {
+                    e.kind = 6; e.callee = concat(e.children[0].children[0].callee, ""); stats.simplifications += 1; return;
+                }
+                if (e.children[0].children[0].kind == 4) {
+                    e.kind = 4; e.bool_val = e.children[0].children[0].bool_val; stats.simplifications += 1; return;
+                }
+            }
+        }
+        if (equals(e.op, "-") && e.children[0].kind == 8 && equals(e.children[0].op, "-")) {
+            if (len(e.children[0].children) >= 1) {
+                if (e.children[0].children[0].kind == 6) {
+                    e.kind = 6; e.callee = concat(e.children[0].children[0].callee, ""); stats.simplifications += 1; return;
+                }
+                if (e.children[0].children[0].kind == 1) {
+                    e.kind = 1; e.int_val = e.children[0].children[0].int_val; stats.simplifications += 1; return;
+                }
+            }
+        }
+    }
+}
+
+// ------------------------------------------------------------
+// 5. Constant & Copy Propagation Environment (List-Backed)
+// ------------------------------------------------------------
+
+class PropEnv {
+    names: string[];
+    int_vals: int[];
+    is_int: bool[];
+    bool_vals: bool[];
+    is_bool: bool[];
+    copy_targets: string[];
+    is_copy: bool[];
+    count: int;
+}
+
+fn make_prop_env() -> PropEnv {
+    return PropEnv {
+        names: list_new(string),
+        int_vals: list_new(int),
+        is_int: list_new(bool),
+        bool_vals: list_new(bool),
+        is_bool: list_new(bool),
+        copy_targets: list_new(string),
+        is_copy: list_new(bool),
+        count: 0,
+    };
+}
+
+fn env_clear(env: &PropEnv) -> void {
+    env.count = 0;
+}
+
+fn env_find(env: &PropEnv, name: string) -> int {
+    for (let i: int = 0; i < env.count; i++) {
+        if (equals(env.names[i], name)) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+fn env_remove(env: &PropEnv, name: string) -> void {
+    let idx: int = env_find(env, name);
+    if (idx >= 0) {
+        env.is_int[idx] = false;
+        env.is_bool[idx] = false;
+        env.is_copy[idx] = false;
+    }
+}
+
+fn env_set_int(env: &PropEnv, name: string, val: int) -> void {
+    let idx: int = env_find(env, name);
+    if (idx >= 0) {
+        env.is_int[idx] = true;
+        env.int_vals[idx] = val;
+        env.is_bool[idx] = false;
+        env.is_copy[idx] = false;
+    } else {
+        env.names = push(env.names, concat(name, ""));
+        env.int_vals = push(env.int_vals, val);
+        env.is_int = push(env.is_int, true);
+        env.bool_vals = push(env.bool_vals, false);
+        env.is_bool = push(env.is_bool, false);
+        env.copy_targets = push(env.copy_targets, concat("", ""));
+        env.is_copy = push(env.is_copy, false);
+        env.count += 1;
+    }
+}
+
+fn env_set_bool(env: &PropEnv, name: string, val: bool) -> void {
+    let idx: int = env_find(env, name);
+    if (idx >= 0) {
+        env.is_bool[idx] = true;
+        env.bool_vals[idx] = val;
+        env.is_int[idx] = false;
+        env.is_copy[idx] = false;
+    } else {
+        env.names = push(env.names, concat(name, ""));
+        env.int_vals = push(env.int_vals, 0);
+        env.is_int = push(env.is_int, false);
+        env.bool_vals = push(env.bool_vals, val);
+        env.is_bool = push(env.is_bool, true);
+        env.copy_targets = push(env.copy_targets, concat("", ""));
+        env.is_copy = push(env.is_copy, false);
+        env.count += 1;
+    }
+}
+
+fn env_set_copy(env: &PropEnv, name: string, target: string) -> void {
+    let idx: int = env_find(env, name);
+    if (idx >= 0) {
+        env.is_copy[idx] = true;
+        env.copy_targets[idx] = concat(target, "");
+        env.is_int[idx] = false;
+        env.is_bool[idx] = false;
+    } else {
+        env.names = push(env.names, concat(name, ""));
+        env.int_vals = push(env.int_vals, 0);
+        env.is_int = push(env.is_int, false);
+        env.bool_vals = push(env.bool_vals, false);
+        env.is_bool = push(env.is_bool, false);
+        env.copy_targets = push(env.copy_targets, concat(target, ""));
+        env.is_copy = push(env.is_copy, true);
+        env.count += 1;
+    }
+}
+
+fn substitute_in_expr(e: &Expr, env: &PropEnv, stats: &OptStats) -> void {
+    if (e.kind == 6) {
+        let idx: int = env_find(env, e.callee);
+        if (idx >= 0) {
+            if (env.is_int[idx]) {
+                e.kind = 1;
+                e.int_val = env.int_vals[idx];
+                stats.propagations += 1;
+                return;
+            }
+            if (env.is_bool[idx]) {
+                e.kind = 4;
+                e.bool_val = env.bool_vals[idx];
+                stats.propagations += 1;
+                return;
+            }
+            if (env.is_copy[idx]) {
+                e.callee = concat(env.copy_targets[idx], "");
+                stats.propagations += 1;
+                return;
+            }
+        }
+        return;
+    }
+
+    for (let i: int = 0; i < len(e.children); i++) {
+        substitute_in_expr(e.children[i], env, stats);
+    }
+    for (let i: int = 0; i < len(e.args); i++) {
+        substitute_in_expr(e.args[i], env, stats);
+    }
+    for (let i: int = 0; i < len(e.field_values); i++) {
+        substitute_in_expr(e.field_values[i], env, stats);
+    }
+}
+
+// ------------------------------------------------------------
+// 6. In-Place Dead Code Elimination Read Counter
+// ------------------------------------------------------------
+
+fn count_ident_reads_in_expr(e: &Expr, name: string) -> int {
+    let c: int = 0;
+    if (e.kind == 6 && equals(e.callee, name)) {
+        c += 1;
+    }
+    for (let i: int = 0; i < len(e.children); i++) {
+        c += count_ident_reads_in_expr(e.children[i], name);
+    }
+    for (let i: int = 0; i < len(e.args); i++) {
+        c += count_ident_reads_in_expr(e.args[i], name);
+    }
+    for (let i: int = 0; i < len(e.field_values); i++) {
+        c += count_ident_reads_in_expr(e.field_values[i], name);
+    }
+    return c;
+}
+
+fn count_ident_reads_in_stmt(s: &Stmt, name: string) -> int {
+    if (s.kind == 0) {
+        return 0;
+    }
+    let c: int = 0;
+    for (let i: int = 0; i < len(s.expr); i++) {
+        c += count_ident_reads_in_expr(s.expr[i], name);
+    }
+    for (let i: int = 0; i < len(s.init_expr); i++) {
+        c += count_ident_reads_in_expr(s.init_expr[i], name);
+    }
+    for (let i: int = 0; i < len(s.cond_expr); i++) {
+        c += count_ident_reads_in_expr(s.cond_expr[i], name);
+    }
+    for (let i: int = 0; i < len(s.target_expr); i++) {
+        c += count_ident_reads_in_expr(s.target_expr[i], name);
+    }
+    for (let i: int = 0; i < len(s.step_stmt); i++) {
+        c += count_ident_reads_in_stmt(s.step_stmt[i], name);
+    }
+    for (let i: int = 0; i < len(s.then_block); i++) {
+        c += count_ident_reads_in_stmt(s.then_block[i], name);
+    }
+    for (let i: int = 0; i < len(s.else_block); i++) {
+        c += count_ident_reads_in_stmt(s.else_block[i], name);
+    }
+    for (let i: int = 0; i < len(s.body); i++) {
+        c += count_ident_reads_in_stmt(s.body[i], name);
+    }
+    return c;
+}
+
+fn count_ident_reads_body(body: &Stmt[], start_idx: int, name: string) -> int {
+    let total: int = 0;
+    for (let i: int = start_idx; i < len(body); i++) {
+        total += count_ident_reads_in_stmt(body[i], name);
+    }
+    return total;
+}
+
+fn is_primitive_pure_type(t: string) -> bool {
+    if (len(t) == 0) { return true; }
+    if (equals(t, "int") || equals(t, "bool") || equals(t, "char") || equals(t, "float")) {
+        return true;
+    }
+    return false;
+}
+
+// ------------------------------------------------------------
+// 7. Statement Body Optimization Runner
+// ------------------------------------------------------------
+
+fn optimize_body(body: &Stmt[], stats: &OptStats) -> void {
+    let env: PropEnv = make_prop_env();
+
+    // Pass 1 & 2: Propagation, Folding, Simplification
+    for (let i: int = 0; i < len(body); i++) {
+        if (body[i].kind == 0) {
+            continue;
+        }
+
+        // 1: STMT_LET
+        if (body[i].kind == 1) {
+            if (len(body[i].init_expr) > 0) {
+                substitute_in_expr(body[i].init_expr[0], &env, stats);
+                constant_fold_expr(body[i].init_expr[0], stats);
+                simplify_algebra_expr(body[i].init_expr[0], stats);
+
+                if (body[i].init_expr[0].kind == 1) {
+                    env_set_int(&env, body[i].var_name, body[i].init_expr[0].int_val);
+                } else if (body[i].init_expr[0].kind == 4) {
+                    env_set_bool(&env, body[i].var_name, body[i].init_expr[0].bool_val);
+                } else if (body[i].init_expr[0].kind == 6 && is_primitive_pure_type(body[i].var_type)) {
+                    env_set_copy(&env, body[i].var_name, body[i].init_expr[0].callee);
+                } else {
+                    env_remove(&env, body[i].var_name);
+                }
+            } else {
+                env_remove(&env, body[i].var_name);
+            }
+            continue;
+        }
+
+        // 2: STMT_ASSIGN
+        if (body[i].kind == 2) {
+            if (len(body[i].expr) > 0) {
+                substitute_in_expr(body[i].expr[0], &env, stats);
+                constant_fold_expr(body[i].expr[0], stats);
+                simplify_algebra_expr(body[i].expr[0], stats);
+
+                if (len(body[i].var_name) > 0) {
+                    if (body[i].expr[0].kind == 1) {
+                        env_set_int(&env, body[i].var_name, body[i].expr[0].int_val);
+                    } else if (body[i].expr[0].kind == 4) {
+                        env_set_bool(&env, body[i].var_name, body[i].expr[0].bool_val);
+                    } else if (body[i].expr[0].kind == 6 && is_primitive_pure_type(body[i].var_type)) {
+                        env_set_copy(&env, body[i].var_name, body[i].expr[0].callee);
+                    } else {
+                        env_remove(&env, body[i].var_name);
+                    }
+                } else if (len(body[i].target_expr) > 0) {
+                    env_clear(&env);
+                }
+            }
+            continue;
+        }
+
+        // 3: STMT_COMPOUND_ASSIGN or 4: STMT_INDEX_ASSIGN
+        if (body[i].kind == 3 || body[i].kind == 4) {
+            if (len(body[i].target_expr) > 0 && body[i].target_expr[0].kind == 6) {
+                env_remove(&env, body[i].target_expr[0].callee);
+            } else {
+                env_clear(&env);
+            }
+            if (len(body[i].expr) > 0) {
+                substitute_in_expr(body[i].expr[0], &env, stats);
+                constant_fold_expr(body[i].expr[0], stats);
+                simplify_algebra_expr(body[i].expr[0], stats);
+            }
+            continue;
+        }
+
+        // 5: STMT_IF
+        if (body[i].kind == 5) {
+            if (len(body[i].cond_expr) > 0) {
+                substitute_in_expr(body[i].cond_expr[0], &env, stats);
+                constant_fold_expr(body[i].cond_expr[0], stats);
+                simplify_algebra_expr(body[i].cond_expr[0], stats);
+
+                // Branch Simplification
+                if (body[i].cond_expr[0].kind == 4) {
+                    if (body[i].cond_expr[0].bool_val == true) {
+                        body[i].cond_expr[0].kind = 0;
+                        stats.branch_simplifications += 1;
+                        optimize_body(&body[i].then_block, stats);
+                        for (let e_idx: int = 0; e_idx < len(body[i].else_block); e_idx++) {
+                            body[i].else_block[e_idx].kind = 0;
+                        }
+                        env_clear(&env);
+                        continue;
+                    } else {
+                        stats.branch_simplifications += 1;
+                        if (len(body[i].else_block) == 0) {
+                            body[i].kind = 0; // STMT_NOP
+                        } else {
+                            body[i].cond_expr[0].kind = 0;
+                            body[i].cond_expr[0].bool_val = false;
+                            optimize_body(&body[i].else_block, stats);
+                            for (let t_idx: int = 0; t_idx < len(body[i].then_block); t_idx++) {
+                                body[i].then_block[t_idx].kind = 0;
+                            }
+                        }
+                        env_clear(&env);
+                        continue;
+                    }
+                }
+            }
+            optimize_body(&body[i].then_block, stats);
+            optimize_body(&body[i].else_block, stats);
+            env_clear(&env);
+            continue;
+        }
+
+        // 6: STMT_WHILE or 7: STMT_FOR or 8: STMT_FOR_EACH
+        if (body[i].kind == 6 || body[i].kind == 7 || body[i].kind == 8) {
+            env_clear(&env);
+            if (len(body[i].cond_expr) > 0) {
+                substitute_in_expr(body[i].cond_expr[0], &env, stats);
+                constant_fold_expr(body[i].cond_expr[0], stats);
+                simplify_algebra_expr(body[i].cond_expr[0], stats);
+            }
+            optimize_body(&body[i].body, stats);
+            env_clear(&env);
+            continue;
+        }
+
+        // 9: STMT_RETURN
+        if (body[i].kind == 9) {
+            if (len(body[i].expr) > 0) {
+                substitute_in_expr(body[i].expr[0], &env, stats);
+                constant_fold_expr(body[i].expr[0], stats);
+                simplify_algebra_expr(body[i].expr[0], stats);
+            }
+            continue;
+        }
+
+        // 12: STMT_EXPR
+        if (body[i].kind == 12) {
+            if (len(body[i].expr) > 0) {
+                substitute_in_expr(body[i].expr[0], &env, stats);
+                constant_fold_expr(body[i].expr[0], stats);
+                simplify_algebra_expr(body[i].expr[0], stats);
+                if (!is_pure_expr(body[i].expr[0])) {
+                    env_clear(&env);
+                }
+            }
+            continue;
+        }
+
+        // 13: STMT_BLOCK
+        if (body[i].kind == 13) {
+            optimize_body(&body[i].body, stats);
+            continue;
+        }
+
+        // 14: STMT_MATCH
+        if (body[i].kind == 14) {
+            env_clear(&env);
+            if (len(body[i].expr) > 0) {
+                substitute_in_expr(body[i].expr[0], &env, stats);
+                constant_fold_expr(body[i].expr[0], stats);
+                simplify_algebra_expr(body[i].expr[0], stats);
+            }
+            for (let a: int = 0; a < len(body[i].body); a++) {
+                optimize_body(&body[i].body[a].body, stats);
+            }
+            env_clear(&env);
+            continue;
+        }
+    }
+
+    // Pass 3: In-Place Dead Code Elimination (Eliminate unused pure local lets)
+    for (let i: int = 0; i < len(body); i++) {
+        if (body[i].kind == 1 && len(body[i].var_name) > 0 && len(body[i].init_expr) > 0) {
+            // STMT_LET
+            if (is_primitive_pure_type(body[i].var_type) && is_pure_expr(body[i].init_expr[0])) {
+                let reads: int = count_ident_reads_body(body, i + 1, body[i].var_name);
+                if (reads == 0) {
+                    body[i].kind = 0; // STMT_NOP
+                    stats.dce_eliminations += 1;
+                }
+            }
+        }
+    }
+}
+
+// ------------------------------------------------------------
+// 8. Fixed-Point Optimization Pipeline
+// ------------------------------------------------------------
+
+fn optimize_function_fixed_point(f: &FunctionDecl, stats: &OptStats) -> void {
+    let iter: int = 0;
+    while (iter < 10) {
+        let total_before: int = opt_stats_total(stats);
+        optimize_body(&f.body, stats);
+        let total_after: int = opt_stats_total(stats);
+        if (total_after == total_before) {
+            break;
+        }
+        iter += 1;
+    }
+}
+
+fn optimize_program(prog: &Program, stats: &OptStats) -> void {
+    // 1. Verify IR prior to optimization
+    let pre_errs: int = verify_program(prog);
+    if (pre_errs > 0) {
+        print("IR Verification failed prior to optimization. Skipping passes.");
+        return;
+    }
+
+    // 2. Optimize standalone functions
+    for (let i: int = 0; i < len(prog.functions); i++) {
+        optimize_function_fixed_point(prog.functions[i], stats);
+    }
+
+    // 3. Optimize class methods
+    for (let c: int = 0; c < len(prog.classes); c++) {
+        for (let m: int = 0; m < len(prog.classes[c].methods); m++) {
+            optimize_function_fixed_point(prog.classes[c].methods[m], stats);
+        }
+    }
+
+    // 4. Verify IR after optimization
+    let post_errs: int = verify_program(prog);
+    if (post_errs > 0) {
+        print("IR Verification failed after optimization!");
+    }
+}

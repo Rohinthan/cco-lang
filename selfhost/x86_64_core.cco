@@ -1,0 +1,935 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+// x86_64_core.cco — Self-Hosted x86-64 Machine-Code Encoder & Instruction Selector
+import "ast.cco";
+
+class CodeBuf {
+    bytes: int[];
+}
+
+fn cb_new() -> CodeBuf {
+    return CodeBuf {
+        bytes: list_new(int),
+    };
+}
+
+fn cb_push(cb: &CodeBuf, byte_val: int) -> void {
+    let b: int = byte_val % 256;
+    if (b < 0) { b = b + 256; }
+    cb.bytes = push(cb.bytes, b);
+}
+
+fn cb_push_u16(cb: &CodeBuf, val: int) -> void {
+    let v: int = val;
+    if (v < 0) { v = 65536 + v; }
+    cb_push(cb, v % 256);
+    cb_push(cb, (v / 256) % 256);
+}
+
+fn cb_push_u32(cb: &CodeBuf, val: int) -> void {
+    if (val < 0) {
+        let pos_m1: int = (-val) - 1;
+        let b0: int = 255 - (pos_m1 % 256); pos_m1 = pos_m1 / 256;
+        let b1: int = 255 - (pos_m1 % 256); pos_m1 = pos_m1 / 256;
+        let b2: int = 255 - (pos_m1 % 256); pos_m1 = pos_m1 / 256;
+        let b3: int = 255 - (pos_m1 % 256);
+        cb_push(cb, b0);
+        cb_push(cb, b1);
+        cb_push(cb, b2);
+        cb_push(cb, b3);
+    } else {
+        let v: int = val;
+        let i: int = 0;
+        while (i < 4) {
+            cb_push(cb, v % 256);
+            v = v / 256;
+            i = i + 1;
+        }
+    }
+}
+
+fn cb_push_u64(cb: &CodeBuf, low32: int, high32: int) -> void {
+    cb_push_u32(cb, low32);
+    cb_push_u32(cb, high32);
+}
+
+fn cb_len(cb: &CodeBuf) -> int {
+    return len(cb.bytes);
+}
+
+fn cb_patch_u32(cb: &CodeBuf, offset: int, val: int) -> void {
+    if (val < 0) {
+        let pos_m1: int = (-val) - 1;
+        let b0: int = 255 - (pos_m1 % 256); pos_m1 = pos_m1 / 256;
+        let b1: int = 255 - (pos_m1 % 256); pos_m1 = pos_m1 / 256;
+        let b2: int = 255 - (pos_m1 % 256); pos_m1 = pos_m1 / 256;
+        let b3: int = 255 - (pos_m1 % 256);
+        cb.bytes[offset] = b0;
+        cb.bytes[offset + 1] = b1;
+        cb.bytes[offset + 2] = b2;
+        cb.bytes[offset + 3] = b3;
+    } else {
+        let v: int = val;
+        let i: int = 0;
+        while (i < 4) {
+            cb.bytes[offset + i] = v % 256;
+            v = v / 256;
+            i = i + 1;
+        }
+    }
+}
+
+// Low-level Instruction Emission Helpers
+
+fn emit_push_rbp(cb: &CodeBuf) -> void {
+    cb_push(cb, 85); // 0x55
+}
+
+fn emit_mov_rsp_rbp(cb: &CodeBuf) -> void {
+    cb_push(cb, 72);  // 0x48
+    cb_push(cb, 137); // 0x89
+    cb_push(cb, 229); // 0xe5
+}
+
+fn emit_sub_rsp_imm32(cb: &CodeBuf, imm: int) -> void {
+    cb_push(cb, 72);  // 0x48
+    cb_push(cb, 129); // 0x81
+    cb_push(cb, 236); // 0xec
+    cb_push_u32(cb, imm);
+}
+
+fn emit_mov_rbp_rsp(cb: &CodeBuf) -> void {
+    cb_push(cb, 72);  // 0x48
+    cb_push(cb, 137); // 0x89
+    cb_push(cb, 236); // 0xec
+}
+
+fn emit_pop_rbp(cb: &CodeBuf) -> void {
+    cb_push(cb, 93); // 0x5d
+}
+
+fn emit_ret(cb: &CodeBuf) -> void {
+    cb_push(cb, 195); // 0xc3
+}
+
+fn emit_mov_imm32_rax(cb: &CodeBuf, imm: int) -> void {
+    cb_push(cb, 72);  // 0x48
+    cb_push(cb, 199); // 0xc7
+    cb_push(cb, 192); // 0xc0
+    cb_push_u32(cb, imm);
+}
+
+fn emit_push_rax(cb: &CodeBuf) -> void {
+    cb_push(cb, 80); // 0x50
+}
+
+fn emit_pop_rax(cb: &CodeBuf) -> void {
+    cb_push(cb, 88); // 0x58
+}
+
+fn emit_pop_rcx(cb: &CodeBuf) -> void {
+    cb_push(cb, 89); // 0x59
+}
+
+fn emit_pop_reg_by_index(cb: &CodeBuf, reg_idx: int) -> void {
+    if (reg_idx == 0) {
+        cb_push(cb, 95); // 0x5f: pop %rdi
+    } else if (reg_idx == 1) {
+        cb_push(cb, 94); // 0x5e: pop %rsi
+    } else if (reg_idx == 2) {
+        cb_push(cb, 90); // 0x5a: pop %rdx
+    } else if (reg_idx == 3) {
+        cb_push(cb, 89); // 0x59: pop %rcx
+    } else if (reg_idx == 4) {
+        cb_push(cb, 65); cb_push(cb, 88); // 0x41, 0x58: pop %r8
+    } else if (reg_idx == 5) {
+        cb_push(cb, 65); cb_push(cb, 89); // 0x41, 0x59: pop %r9
+    }
+}
+
+fn emit_store_incoming_param(cb: &CodeBuf, param_idx: int, disp: int) -> void {
+    if (param_idx == 0) {
+        // mov %rdi, disp32(%rbp): 0x48, 0x89, 0xbd, disp32
+        cb_push(cb, 72); cb_push(cb, 137); cb_push(cb, 189);
+        cb_push_u32(cb, disp);
+    } else if (param_idx == 1) {
+        // mov %rsi, disp32(%rbp): 0x48, 0x89, 0xb5, disp32
+        cb_push(cb, 72); cb_push(cb, 137); cb_push(cb, 181);
+        cb_push_u32(cb, disp);
+    } else if (param_idx == 2) {
+        // mov %rdx, disp32(%rbp): 0x48, 0x89, 0x95, disp32
+        cb_push(cb, 72); cb_push(cb, 137); cb_push(cb, 149);
+        cb_push_u32(cb, disp);
+    } else if (param_idx == 3) {
+        // mov %rcx, disp32(%rbp): 0x48, 0x89, 0x8d, disp32
+        cb_push(cb, 72); cb_push(cb, 137); cb_push(cb, 141);
+        cb_push_u32(cb, disp);
+    } else if (param_idx == 4) {
+        // mov %r8, disp32(%rbp): 0x4c, 0x89, 0x85, disp32
+        cb_push(cb, 76); cb_push(cb, 137); cb_push(cb, 133);
+        cb_push_u32(cb, disp);
+    } else if (param_idx == 5) {
+        // mov %r9, disp32(%rbp): 0x4c, 0x89, 0x8d, disp32
+        cb_push(cb, 76); cb_push(cb, 137); cb_push(cb, 141);
+        cb_push_u32(cb, disp);
+    }
+}
+
+fn emit_mov_rax_disp_rbp(cb: &CodeBuf, disp: int) -> void {
+    // mov %rax, disp32(%rbp): 0x48, 0x89, 0x85, disp32
+    cb_push(cb, 72);  // 0x48
+    cb_push(cb, 137); // 0x89
+    cb_push(cb, 133); // 0x85
+    cb_push_u32(cb, disp);
+}
+
+fn emit_mov_disp_rbp_rax(cb: &CodeBuf, disp: int) -> void {
+    // mov disp32(%rbp), %rax: 0x48, 0x8b, 0x85, disp32
+    cb_push(cb, 72);  // 0x48
+    cb_push(cb, 139); // 0x8b
+    cb_push(cb, 133); // 0x85
+    cb_push_u32(cb, disp);
+}
+
+fn emit_mov_rax_rcx(cb: &CodeBuf) -> void {
+    cb_push(cb, 72);  // 0x48
+    cb_push(cb, 137); // 0x89
+    cb_push(cb, 193); // 0xc1
+}
+
+fn emit_mov_imm32_rcx(cb: &CodeBuf, imm: int) -> void {
+    // mov $imm32, %rcx: 0x48, 0xc7, 0xc1, imm32
+    cb_push(cb, 72);  // 0x48
+    cb_push(cb, 199); // 0xc7
+    cb_push(cb, 193); // 0xc1
+    cb_push_u32(cb, imm);
+}
+
+fn emit_mov_disp_rbp_rcx(cb: &CodeBuf, disp: int) -> void {
+    // mov disp32(%rbp), %rcx: 0x48, 0x8b, 0x8d, disp32
+    cb_push(cb, 72);  // 0x48
+    cb_push(cb, 139); // 0x8b
+    cb_push(cb, 141); // 0x8d
+    cb_push_u32(cb, disp);
+}
+
+fn emit_mov_rax_r10(cb: &CodeBuf) -> void {
+    // mov %rax, %r10: 0x49, 0x89, 0xc2
+    cb_push(cb, 73);  // 0x49
+    cb_push(cb, 137); // 0x89
+    cb_push(cb, 194); // 0xc2
+}
+
+fn emit_mov_r10_rax(cb: &CodeBuf) -> void {
+    // mov %r10, %rax: 0x4c, 0x89, 0xd0
+    cb_push(cb, 76);  // 0x4c
+    cb_push(cb, 137); // 0x89
+    cb_push(cb, 208); // 0xd0
+}
+
+fn emit_sub_rsp_8(cb: &CodeBuf) -> void {
+    // sub $8, %rsp: 0x48, 0x83, 0xec, 0x08
+    cb_push(cb, 72);  // 0x48
+    cb_push(cb, 131); // 0x83
+    cb_push(cb, 236); // 0xec
+    cb_push(cb, 8);   // 0x08
+}
+
+fn emit_add_rsp_8(cb: &CodeBuf) -> void {
+    // add $8, %rsp: 0x48, 0x83, 0xc4, 0x08
+    cb_push(cb, 72);  // 0x48
+    cb_push(cb, 131); // 0x83
+    cb_push(cb, 196); // 0xc4
+    cb_push(cb, 8);   // 0x08
+}
+
+fn emit_add_rcx_rax(cb: &CodeBuf) -> void {
+    cb_push(cb, 72); // 0x48
+    cb_push(cb, 1);  // 0x01
+    cb_push(cb, 200); // 0xc8
+}
+
+fn emit_sub_rcx_rax(cb: &CodeBuf) -> void {
+    cb_push(cb, 72); // 0x48
+    cb_push(cb, 41); // 0x29
+    cb_push(cb, 200); // 0xc8
+}
+
+fn emit_imul_rcx_rax(cb: &CodeBuf) -> void {
+    cb_push(cb, 72);  // 0x48
+    cb_push(cb, 15);  // 0x0f
+    cb_push(cb, 175); // 0xaf
+    cb_push(cb, 193); // 0xc1
+}
+
+fn emit_neg_rax(cb: &CodeBuf) -> void {
+    cb_push(cb, 72);  // 0x48
+    cb_push(cb, 247); // 0xf7
+    cb_push(cb, 216); // 0xd8
+}
+
+fn emit_cmp_rcx_rax(cb: &CodeBuf) -> void {
+    cb_push(cb, 72); // 0x48
+    cb_push(cb, 57); // 0x39
+    cb_push(cb, 200); // 0xc8
+}
+
+fn emit_cmp_zero_rax(cb: &CodeBuf) -> void {
+    // cmpq $0, %rax: 0x48, 0x83, 0xf8, 0x00
+    cb_push(cb, 72);  // 0x48
+    cb_push(cb, 131); // 0x83
+    cb_push(cb, 248); // 0xf8
+    cb_push(cb, 0);   // 0x00
+}
+
+fn emit_setcc_rax(cb: &CodeBuf, op: string) -> void {
+    cb_push(cb, 15); // 0x0f
+    if (equals(op, "==")) {
+        cb_push(cb, 148); // 0x94: sete
+    } else if (equals(op, "!=")) {
+        cb_push(cb, 149); // 0x95: setne
+    } else if (equals(op, "<")) {
+        cb_push(cb, 156); // 0x9c: setl
+    } else if (equals(op, "<=")) {
+        cb_push(cb, 158); // 0x9e: setle
+    } else if (equals(op, ">")) {
+        cb_push(cb, 159); // 0x9f: setg
+    } else if (equals(op, ">=")) {
+        cb_push(cb, 157); // 0x9d: setge
+    } else {
+        cb_push(cb, 148);
+    }
+    cb_push(cb, 192); // 0xc0: %al
+
+    // movzbq %al, %rax: 0x48, 0x0f, 0xb6, 0xc0
+    cb_push(cb, 72);  // 0x48
+    cb_push(cb, 15);  // 0x0f
+    cb_push(cb, 182); // 0xb6
+    cb_push(cb, 192); // 0xc0
+}
+
+fn emit_jmp_rel32(cb: &CodeBuf) -> int {
+    cb_push(cb, 233); // 0xe9
+    let fixup: int = cb_len(cb);
+    cb_push_u32(cb, 0);
+    return fixup;
+}
+
+fn emit_je_rel32(cb: &CodeBuf) -> int {
+    cb_push(cb, 15);  // 0x0f
+    cb_push(cb, 132); // 0x84
+    let fixup: int = cb_len(cb);
+    cb_push_u32(cb, 0);
+    return fixup;
+}
+
+fn emit_jne_rel32(cb: &CodeBuf) -> int {
+    cb_push(cb, 15);  // 0x0f
+    cb_push(cb, 133); // 0x85
+    let fixup: int = cb_len(cb);
+    cb_push_u32(cb, 0);
+    return fixup;
+}
+
+fn emit_call_rel32(cb: &CodeBuf) -> int {
+    cb_push(cb, 232); // 0xe8
+    let fixup: int = cb_len(cb);
+    cb_push_u32(cb, 0);
+    return fixup;
+}
+
+// Function Compilation Context
+
+class FuncContext {
+    fn_name: string;
+    var_names: string[];
+    var_offsets: int[];
+    next_offset: int;
+    epilogue_fixups: int[];
+    call_target_names: string[];
+    call_fixup_offsets: int[];
+    error_msg: string;
+    has_error: bool;
+    stack_depth: int;
+    scratch_depth: int;
+}
+
+fn make_func_context(name: string) -> FuncContext {
+    return FuncContext {
+        fn_name: concat(name, ""),
+        var_names: list_new(string),
+        var_offsets: list_new(int),
+        next_offset: -8,
+        epilogue_fixups: list_new(int),
+        call_target_names: list_new(string),
+        call_fixup_offsets: list_new(int),
+        error_msg: concat("", ""),
+        has_error: false,
+        stack_depth: 0,
+        scratch_depth: 0,
+    };
+}
+
+fn set_func_error(ctx: &FuncContext, msg: string) -> void {
+    ctx.has_error = true;
+    free(ctx.error_msg);
+    ctx.error_msg = concat(msg, "");
+}
+
+fn find_var_offset(ctx: &FuncContext, name: string) -> int {
+    let n: int = len(ctx.var_names);
+    let i: int = 0;
+    while (i < n) {
+        if (equals(ctx.var_names[i], name)) {
+            return ctx.var_offsets[i];
+        }
+        i = i + 1;
+    }
+    return 0; // Not found
+}
+
+fn alloc_var_offset(ctx: &FuncContext, name: string) -> int {
+    let existing: int = find_var_offset(ctx, name);
+    if (existing != 0) {
+        return existing;
+    }
+    let off: int = ctx.next_offset;
+    ctx.next_offset = ctx.next_offset - 8;
+    ctx.var_names = push(ctx.var_names, concat(name, ""));
+    ctx.var_offsets = push(ctx.var_offsets, off);
+    return off;
+}
+
+fn scan_vars_in_stmts(ctx: &FuncContext, stmts: &Stmt[]) -> void {
+    let n: int = len(stmts);
+    let i: int = 0;
+    while (i < n) {
+        if (stmts[i].kind == 1) { // STMT_LET
+            alloc_var_offset(ctx, stmts[i].var_name);
+        } else if (stmts[i].kind == 5) { // STMT_IF
+            scan_vars_in_stmts(ctx, &stmts[i].then_block);
+            scan_vars_in_stmts(ctx, &stmts[i].else_block);
+        } else if (stmts[i].kind == 6) { // STMT_WHILE
+            scan_vars_in_stmts(ctx, &stmts[i].body);
+        } else if (stmts[i].kind == 7) { // STMT_FOR
+            if (len(stmts[i].then_block) > 0) {
+                if (stmts[i].then_block[0].kind == 1) {
+                    alloc_var_offset(ctx, stmts[i].then_block[0].var_name);
+                }
+            }
+            scan_vars_in_stmts(ctx, &stmts[i].body);
+        }
+        i = i + 1;
+    }
+}
+
+fn expr_has_call(e: &Expr) -> bool {
+    if (e.kind == 9) { // EXPR_CALL
+        return true;
+    }
+    let i: int = 0;
+    let n_ch: int = len(e.children);
+    while (i < n_ch) {
+        if (expr_has_call(e.children[i])) { return true; }
+        i = i + 1;
+    }
+    i = 0;
+    let n_args: int = len(e.args);
+    while (i < n_args) {
+        if (expr_has_call(e.args[i])) { return true; }
+        i = i + 1;
+    }
+    return false;
+}
+
+fn is_leaf_expr(e: &Expr) -> bool {
+    if (e.kind == 1) { // EXPR_INT
+        return true;
+    }
+    if (e.kind == 4) { // EXPR_BOOL
+        return true;
+    }
+    if (e.kind == 6) { // EXPR_IDENT
+        return true;
+    }
+    return false;
+}
+
+fn compile_leaf_to_rcx(ctx: &FuncContext, e: &Expr, cb: &CodeBuf) -> bool {
+    if (e.kind == 1) { // EXPR_INT
+        emit_mov_imm32_rcx(cb, e.int_val);
+        return true;
+    }
+    if (e.kind == 4) { // EXPR_BOOL
+        let val: int = 0;
+        if (e.bool_val) { val = 1; }
+        emit_mov_imm32_rcx(cb, val);
+        return true;
+    }
+    if (e.kind == 6) { // EXPR_IDENT
+        let off: int = find_var_offset(ctx, e.callee);
+        if (off == 0) {
+            set_func_error(ctx, concat("Undefined variable: ", e.callee));
+            return false;
+        }
+        emit_mov_disp_rbp_rcx(cb, off);
+        return true;
+    }
+    return false;
+}
+
+// Expression Compiler
+
+fn compile_expr(ctx: &FuncContext, e: &Expr, cb: &CodeBuf) -> bool {
+    if (e.kind == 1) { // EXPR_INT
+        emit_mov_imm32_rax(cb, e.int_val);
+        return true;
+    }
+
+    if (e.kind == 4) { // EXPR_BOOL
+        let val: int = 0;
+        if (e.bool_val) { val = 1; }
+        emit_mov_imm32_rax(cb, val);
+        return true;
+    }
+
+    if (e.kind == 6) { // EXPR_IDENT
+        let off: int = find_var_offset(ctx, e.callee);
+        if (off == 0) {
+            set_func_error(ctx, concat("Undefined variable: ", e.callee));
+            return false;
+        }
+        emit_mov_disp_rbp_rax(cb, off);
+        return true;
+    }
+
+    if (e.kind == 8) { // EXPR_UNARY
+        if (len(e.children) < 1) {
+            set_func_error(ctx, "Malformed unary expression");
+            return false;
+        }
+        if (!compile_expr(ctx, e.children[0], cb)) { return false; }
+        if (equals(e.op, "-")) {
+            emit_neg_rax(cb);
+        } else if (equals(e.op, "!") || equals(e.op, "not")) {
+            emit_cmp_zero_rax(cb);
+            cb_push(cb, 15);  // 0x0f
+            cb_push(cb, 148); // 0x94: sete
+            cb_push(cb, 192); // 0xc0: %al
+            // movzbq %al, %rax
+            cb_push(cb, 72); cb_push(cb, 15); cb_push(cb, 182); cb_push(cb, 192);
+        } else {
+            set_func_error(ctx, concat("Unsupported native unary operator: ", e.op));
+            return false;
+        }
+        return true;
+    }
+
+    if (e.kind == 7) { // EXPR_BINARY
+        if (len(e.children) < 2) {
+            set_func_error(ctx, "Malformed binary expression");
+            return false;
+        }
+        if (is_leaf_expr(e.children[1])) {
+            // Leaf RHS: evaluate LHS into %rax, load RHS directly into %rcx (0 push, 0 pop)
+            if (!compile_expr(ctx, e.children[0], cb)) { return false; }
+            if (!compile_leaf_to_rcx(ctx, e.children[1], cb)) { return false; }
+        } else if (ctx.scratch_depth == 0 && !expr_has_call(e.children[1])) {
+            // Complex RHS without calls: evaluate LHS, preserve in scratch %r10
+            if (!compile_expr(ctx, e.children[0], cb)) { return false; }
+            emit_mov_rax_r10(cb);
+            ctx.scratch_depth = ctx.scratch_depth + 1;
+            if (!compile_expr(ctx, e.children[1], cb)) { return false; }
+            ctx.scratch_depth = ctx.scratch_depth - 1;
+            emit_mov_rax_rcx(cb);
+            emit_mov_r10_rax(cb);
+        } else {
+            // General fallback: spill LHS to stack
+            if (!compile_expr(ctx, e.children[0], cb)) { return false; }
+            emit_push_rax(cb);
+            ctx.stack_depth = ctx.stack_depth + 1;
+            if (!compile_expr(ctx, e.children[1], cb)) { return false; }
+            emit_mov_rax_rcx(cb);
+            emit_pop_rax(cb);
+            ctx.stack_depth = ctx.stack_depth - 1;
+        }
+
+        if (equals(e.op, "+")) {
+            emit_add_rcx_rax(cb);
+        } else if (equals(e.op, "-")) {
+            emit_sub_rcx_rax(cb);
+        } else if (equals(e.op, "*")) {
+            emit_imul_rcx_rax(cb);
+        } else if (equals(e.op, "==") || equals(e.op, "!=") || equals(e.op, "<") || equals(e.op, "<=") || equals(e.op, ">") || equals(e.op, ">=")) {
+            emit_cmp_rcx_rax(cb);
+            emit_setcc_rax(cb, e.op);
+        } else {
+            set_func_error(ctx, concat("Unsupported native binary operator: ", e.op));
+            return false;
+        }
+        return true;
+    }
+
+    if (e.kind == 9) { // EXPR_CALL
+        let num_args: int = len(e.args);
+        if (num_args > 6) {
+            set_func_error(ctx, "Native backend currently supports at most 6 arguments");
+            return false;
+        }
+
+        // Evaluate arguments left-to-right and push to stack
+        let i: int = 0;
+        while (i < num_args) {
+            if (!compile_expr(ctx, e.args[i], cb)) { return false; }
+            emit_push_rax(cb);
+            ctx.stack_depth = ctx.stack_depth + 1;
+            i = i + 1;
+        }
+
+        // Pop arguments into ABI registers in reverse order
+        let pop_idx: int = num_args - 1;
+        while (pop_idx >= 0) {
+            emit_pop_reg_by_index(cb, pop_idx);
+            ctx.stack_depth = ctx.stack_depth - 1;
+            pop_idx = pop_idx - 1;
+        }
+
+        // ABI Stack Alignment Hardening:
+        // System V AMD64 ABI requires (%rsp) % 16 == 0 immediately before CALL.
+        // If ctx.stack_depth % 2 != 0, %rsp is currently 8 mod 16, so pad by 8 bytes.
+        let needs_pad: bool = (ctx.stack_depth % 2 != 0);
+        if (needs_pad) {
+            emit_sub_rsp_8(cb);
+        }
+
+        // Emit call and record fixup
+        let fixup: int = emit_call_rel32(cb);
+        ctx.call_target_names = push(ctx.call_target_names, concat(e.callee, ""));
+        ctx.call_fixup_offsets = push(ctx.call_fixup_offsets, fixup);
+
+        if (needs_pad) {
+            emit_add_rsp_8(cb);
+        }
+        return true;
+    }
+
+    set_func_error(ctx, concat("Unsupported expression kind in native backend: ", to_string(e.kind)));
+    return false;
+}
+
+// Statement Compiler
+
+fn compile_stmt(ctx: &FuncContext, s: &Stmt, cb: &CodeBuf) -> bool {
+    if (s.kind == 1) { // STMT_LET
+        let off: int = find_var_offset(ctx, s.var_name);
+        if (off == 0) {
+            off = alloc_var_offset(ctx, s.var_name);
+        }
+        if (len(s.init_expr) > 0) {
+            if (!compile_expr(ctx, s.init_expr[0], cb)) { return false; }
+            emit_mov_rax_disp_rbp(cb, off);
+        }
+        return true;
+    }
+
+    if (s.kind == 2) { // STMT_ASSIGN
+        let target_name: string = concat(s.var_name, "");
+        if (len(target_name) == 0 && len(s.target_expr) > 0) {
+            if (s.target_expr[0].kind == 6) {
+                target_name = concat(s.target_expr[0].callee, "");
+            }
+        }
+        let off: int = find_var_offset(ctx, target_name);
+        if (off == 0) {
+            set_func_error(ctx, concat("Assignment to undeclared variable: ", target_name));
+            return false;
+        }
+        if (len(s.expr) < 1) {
+            set_func_error(ctx, "Missing expression in assignment");
+            return false;
+        }
+        if (!compile_expr(ctx, s.expr[0], cb)) { return false; }
+        emit_mov_rax_disp_rbp(cb, off);
+        return true;
+    }
+
+    if (s.kind == 3) { // STMT_COMPOUND_ASSIGN
+        let target_name: string = concat(s.var_name, "");
+        if (len(target_name) == 0 && len(s.target_expr) > 0) {
+            if (s.target_expr[0].kind == 6) {
+                target_name = concat(s.target_expr[0].callee, "");
+            }
+        }
+        let off: int = find_var_offset(ctx, target_name);
+        if (off == 0) {
+            set_func_error(ctx, concat("Compound assignment to undeclared variable: ", target_name));
+            return false;
+        }
+        if (len(s.expr) < 1) {
+            set_func_error(ctx, "Missing expression in assignment");
+            return false;
+        }
+        if (is_leaf_expr(s.expr[0])) {
+            emit_mov_disp_rbp_rax(cb, off);
+            if (!compile_leaf_to_rcx(ctx, s.expr[0], cb)) { return false; }
+        } else {
+            // Compile RHS first into %rax, move to %rcx, then load target var
+            if (!compile_expr(ctx, s.expr[0], cb)) { return false; }
+            emit_mov_rax_rcx(cb);
+            emit_mov_disp_rbp_rax(cb, off);
+        }
+
+        if (equals(s.op, "+=")) {
+            emit_add_rcx_rax(cb);
+        } else if (equals(s.op, "-=")) {
+            emit_sub_rcx_rax(cb);
+        } else if (equals(s.op, "*=")) {
+            emit_imul_rcx_rax(cb);
+        } else {
+            set_func_error(ctx, concat("Unsupported compound assign operator: ", s.op));
+            return false;
+        }
+        emit_mov_rax_disp_rbp(cb, off);
+        return true;
+    }
+
+    if (s.kind == 4) { // STMT_INC_DEC
+        let target_name: string = concat(s.var_name, "");
+        if (len(target_name) == 0 && len(s.target_expr) > 0) {
+            if (s.target_expr[0].kind == 6) {
+                target_name = concat(s.target_expr[0].callee, "");
+            }
+        }
+        let off: int = find_var_offset(ctx, target_name);
+        if (off == 0) {
+            set_func_error(ctx, concat("Inc/dec on undeclared variable: ", target_name));
+            return false;
+        }
+        emit_mov_disp_rbp_rax(cb, off);
+        emit_mov_imm32_rcx(cb, 1);
+        if (equals(s.op, "++")) {
+            emit_add_rcx_rax(cb);
+        } else {
+            emit_sub_rcx_rax(cb);
+        }
+        emit_mov_rax_disp_rbp(cb, off);
+        return true;
+    }
+
+    if (s.kind == 8) { // STMT_RETURN
+        if (len(s.expr) > 0) {
+            if (!compile_expr(ctx, s.expr[0], cb)) { return false; }
+        } else {
+            emit_mov_imm32_rax(cb, 0);
+        }
+        let fixup: int = emit_jmp_rel32(cb);
+        ctx.epilogue_fixups = push(ctx.epilogue_fixups, fixup);
+        return true;
+    }
+
+    if (s.kind == 5) { // STMT_IF
+        if (len(s.cond_expr) < 1) {
+            set_func_error(ctx, "If statement missing condition");
+            return false;
+        }
+        if (!compile_expr(ctx, s.cond_expr[0], cb)) { return false; }
+        emit_cmp_zero_rax(cb);
+        let else_fixup: int = emit_je_rel32(cb);
+
+        // Compile then_block
+        let i: int = 0;
+        let num_then: int = len(s.then_block);
+        while (i < num_then) {
+            if (!compile_stmt(ctx, s.then_block[i], cb)) { return false; }
+            i = i + 1;
+        }
+
+        let end_fixup: int = emit_jmp_rel32(cb);
+
+        let else_pos: int = cb_len(cb);
+        cb_patch_u32(cb, else_fixup, else_pos - (else_fixup + 4));
+
+        // Compile else_block if present
+        let j: int = 0;
+        let num_else: int = len(s.else_block);
+        while (j < num_else) {
+            if (!compile_stmt(ctx, s.else_block[j], cb)) { return false; }
+            j = j + 1;
+        }
+
+        let end_pos: int = cb_len(cb);
+        cb_patch_u32(cb, end_fixup, end_pos - (end_fixup + 4));
+        return true;
+    }
+
+    if (s.kind == 6) { // STMT_WHILE
+        if (len(s.cond_expr) < 1) {
+            set_func_error(ctx, "While statement missing condition");
+            return false;
+        }
+        let loop_start: int = cb_len(cb);
+        if (!compile_expr(ctx, s.cond_expr[0], cb)) { return false; }
+        emit_cmp_zero_rax(cb);
+        let exit_fixup: int = emit_je_rel32(cb);
+
+        let i: int = 0;
+        let num_body: int = len(s.body);
+        while (i < num_body) {
+            if (!compile_stmt(ctx, s.body[i], cb)) { return false; }
+            i = i + 1;
+        }
+
+        // Jump back to loop start
+        cb_push(cb, 233); // jmp rel32
+        let jmp_fixup: int = cb_len(cb);
+        cb_push_u32(cb, loop_start - (jmp_fixup + 4));
+
+        let exit_pos: int = cb_len(cb);
+        cb_patch_u32(cb, exit_fixup, exit_pos - (exit_fixup + 4));
+        return true;
+    }
+
+    if (s.kind == 7) { // STMT_FOR
+        // For loop: then_block[0] is init, cond_expr[0] is cond, step_stmt[0] is step
+        if (len(s.then_block) > 0) {
+            if (!compile_stmt(ctx, s.then_block[0], cb)) { return false; }
+        }
+        let loop_start: int = cb_len(cb);
+        let exit_fixup: int = -1;
+        if (len(s.cond_expr) > 0) {
+            if (!compile_expr(ctx, s.cond_expr[0], cb)) { return false; }
+            emit_cmp_zero_rax(cb);
+            exit_fixup = emit_je_rel32(cb);
+        }
+
+        let i: int = 0;
+        let num_body: int = len(s.body);
+        while (i < num_body) {
+            if (!compile_stmt(ctx, s.body[i], cb)) { return false; }
+            i = i + 1;
+        }
+
+        if (len(s.step_stmt) > 0) {
+            if (!compile_stmt(ctx, s.step_stmt[0], cb)) { return false; }
+        }
+
+        cb_push(cb, 233); // jmp rel32
+        let jmp_fixup: int = cb_len(cb);
+        cb_push_u32(cb, loop_start - (jmp_fixup + 4));
+
+        if (exit_fixup != -1) {
+            let exit_pos: int = cb_len(cb);
+            cb_patch_u32(cb, exit_fixup, exit_pos - (exit_fixup + 4));
+        }
+        return true;
+    }
+
+    if (s.kind == 12) { // STMT_EXPR
+        if (len(s.expr) > 0) {
+            if (!compile_expr(ctx, s.expr[0], cb)) { return false; }
+        }
+        return true;
+    }
+
+    set_func_error(ctx, concat("Unsupported statement kind in native backend: ", to_string(s.kind)));
+    return false;
+}
+
+// Function Compilation
+
+class CompiledFunc {
+    name: string;
+    code: int[];
+    size: int;
+    is_main: bool;
+    call_target_names: string[];
+    call_fixup_offsets: int[];
+}
+
+fn compile_function_decl(f: &FunctionDecl, out_func: &CompiledFunc) -> string {
+    let ctx: FuncContext = make_func_context(f.name);
+    let cb: CodeBuf = cb_new();
+
+    // 1. Scan parameters and allocate slots
+    let num_params: int = len(f.params);
+    if (num_params > 6) {
+        return concat("Native backend currently supports at most 6 parameters in function: ", f.name);
+    }
+    let p_idx: int = 0;
+    while (p_idx < num_params) {
+        alloc_var_offset(&ctx, f.params[p_idx].name);
+        p_idx = p_idx + 1;
+    }
+
+    // 2. Scan function body for all local variables
+    scan_vars_in_stmts(&ctx, &f.body);
+
+    // 3. Compute stack frame size (multiple of 16)
+    let num_vars: int = len(ctx.var_names);
+    let frame_bytes: int = num_vars * 8;
+    if (frame_bytes < 16) {
+        frame_bytes = 16;
+    } else if (frame_bytes % 16 != 0) {
+        frame_bytes = frame_bytes + (16 - (frame_bytes % 16));
+    }
+
+    // 4. Emit function prologue
+    emit_push_rbp(&cb);
+    emit_mov_rsp_rbp(&cb);
+    emit_sub_rsp_imm32(&cb, frame_bytes);
+
+    // 5. Store incoming parameter registers to their local stack slots
+    p_idx = 0;
+    while (p_idx < num_params) {
+        let p_off: int = find_var_offset(&ctx, f.params[p_idx].name);
+        emit_store_incoming_param(&cb, p_idx, p_off);
+        p_idx = p_idx + 1;
+    }
+
+    // 6. Compile body statements
+    let s_idx: int = 0;
+    let num_stmts: int = len(f.body);
+    while (s_idx < num_stmts) {
+        if (!compile_stmt(&ctx, f.body[s_idx], &cb)) {
+            return concat(ctx.error_msg, "");
+        }
+        s_idx = s_idx + 1;
+    }
+
+    // 7. Default return 0 if no explicit return hit
+    emit_mov_imm32_rax(&cb, 0);
+
+    // 8. Patch all return jumps to epilogue
+    let epilogue_pos: int = cb_len(&cb);
+    let fix_idx: int = 0;
+    let num_fixups: int = len(ctx.epilogue_fixups);
+    while (fix_idx < num_fixups) {
+        let f_pos: int = ctx.epilogue_fixups[fix_idx];
+        cb_patch_u32(&cb, f_pos, epilogue_pos - (f_pos + 4));
+        fix_idx = fix_idx + 1;
+    }
+
+    // 9. Emit epilogue
+    emit_mov_rbp_rsp(&cb);
+    emit_pop_rbp(&cb);
+    emit_ret(&cb);
+
+    free(out_func.name);
+    out_func.name = concat(f.name, "");
+    let code_len: int = cb_len(&cb);
+    let c_i: int = 0;
+    while (c_i < code_len) {
+        out_func.code = push(out_func.code, cb.bytes[c_i]);
+        c_i = c_i + 1;
+    }
+    out_func.size = code_len;
+    out_func.is_main = equals(f.name, "main");
+    let num_calls: int = len(ctx.call_target_names);
+    c_i = 0;
+    while (c_i < num_calls) {
+        out_func.call_target_names = push(out_func.call_target_names, concat(ctx.call_target_names[c_i], ""));
+        out_func.call_fixup_offsets = push(out_func.call_fixup_offsets, ctx.call_fixup_offsets[c_i]);
+        c_i = c_i + 1;
+    }
+    return concat("", "");
+}

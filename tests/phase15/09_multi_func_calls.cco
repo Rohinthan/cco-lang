@@ -1,0 +1,17 @@
+fn multiply(x: int, y: int) -> int {
+    return x * y;
+}
+
+fn add_three(a: int, b: int, c: int) -> int {
+    return a + b + c;
+}
+
+fn compute(val: int) -> int {
+    let m: int = multiply(val, 3);
+    let res: int = add_three(m, 5, 2);
+    return res;
+}
+
+fn main() -> int {
+    return compute(10);
+}

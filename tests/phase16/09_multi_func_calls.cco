@@ -1,0 +1,11 @@
+fn f1(x: int) -> int { return x + 1; }
+fn f2(x: int) -> int { return x * 2; }
+fn f3(x: int) -> int { return x - 3; }
+
+fn main() -> int {
+    let a: int = f1(5);        // 6
+    let b: int = f2(a);        // 12
+    let c: int = f3(b);        // 9
+    let d: int = f1(f2(f3(8))); // f3(8)=5, f2(5)=10, f1(10)=11
+    return c + d; // 9 + 11 = 20
+}

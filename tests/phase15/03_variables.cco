@@ -1,0 +1,9 @@
+fn main() -> int {
+    let x: int = 5;
+    let y: int = 12;
+    let z: int = x + y;
+    x = 10;
+    y = z + x;
+    z = y - 7;
+    return z + x;
+}

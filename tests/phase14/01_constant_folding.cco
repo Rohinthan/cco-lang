@@ -1,0 +1,37 @@
+// Phase 14 Test 01: Constant Folding Parity
+fn main() -> int {
+    let a: int = 10 + 20;
+    let b: int = 50 - 15;
+    let c: int = 6 * 7;
+    let d: int = 100 / 4;
+    let e: int = 23 % 5;
+    let f: int = -(-42);
+
+    print(a);
+    print(b);
+    print(c);
+    print(d);
+    print(e);
+    print(f);
+
+    let b1: bool = true && false;
+    let b2: bool = false || true;
+    let b3: bool = !false;
+    let b4: bool = 10 < 20;
+    let b5: bool = 30 == 30;
+    let b6: bool = 5 >= 10;
+
+    if (b1) { print(1); } else { print(0); }
+    if (b2) { print(1); } else { print(0); }
+    if (b3) { print(1); } else { print(0); }
+    if (b4) { print(1); } else { print(0); }
+    if (b5) { print(1); } else { print(0); }
+    if (b6) { print(1); } else { print(0); }
+
+    let c1: bool = 'a' < 'b';
+    let c2: bool = 'z' == 'z';
+    if (c1) { print(1); } else { print(0); }
+    if (c2) { print(1); } else { print(0); }
+
+    return 0;
+}

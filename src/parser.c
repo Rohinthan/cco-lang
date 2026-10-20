@@ -1082,12 +1082,32 @@ static AstNode *parse_continue_stmt(Parser *p) {
 static AstNode *parse_print_stmt(Parser *p) {
     Token tok = consume(p, TOKEN_PRINT, "Expected 'print'");
     consume(p, TOKEN_LPAREN, "Expected '(' after 'print'");
-    AstNode *val = parse_expr(p);
+    AstNode **values = NULL;
+    int count = 0;
+    int cap = 0;
+    if (!check(p, TOKEN_RPAREN)) {
+        AstNode *first = parse_expr(p);
+        cap = 4;
+        values = (AstNode **)arena_alloc_array(p->arena, cap, sizeof(AstNode *));
+        values[count++] = first;
+        while (match(p, TOKEN_COMMA)) {
+            if (check(p, TOKEN_RPAREN)) break;
+            if (count >= cap) {
+                cap *= 2;
+                AstNode **new_vals = (AstNode **)arena_alloc_array(p->arena, cap, sizeof(AstNode *));
+                memcpy(new_vals, values, sizeof(AstNode *) * count);
+                values = new_vals;
+            }
+            values[count++] = parse_expr(p);
+        }
+    }
     consume(p, TOKEN_RPAREN, "Expected ')' after print argument");
     consume(p, TOKEN_SEMICOLON, "Expected ';' after print statement");
 
     AstNode *node = arena_alloc_node(p->arena, NODE_PRINT, tok.line, tok.col);
-    node->as.print_stmt.value = val;
+    node->as.print_stmt.values = values;
+    node->as.print_stmt.value_count = count;
+    node->as.print_stmt.value = count > 0 ? values[0] : NULL;
     return node;
 }
 
@@ -2185,9 +2205,17 @@ static bool is_known_builtin_fn(const char *name) {
            strcmp(name, "println") == 0 ||
            strcmp(name, "concat") == 0 ||
            strcmp(name, "substring") == 0 ||
+           strcmp(name, "char_to_string") == 0 ||
+           strcmp(name, "to_string") == 0 ||
+           strcmp(name, "exit") == 0 ||
+           strcmp(name, "file_exists") == 0 ||
            strcmp(name, "read_file") == 0 ||
            strcmp(name, "read_line") == 0 ||
+           strcmp(name, "input") == 0 ||
            strcmp(name, "write_file") == 0 ||
+           strcmp(name, "write_bytes") == 0 ||
+           strcmp(name, "execute_cmd") == 0 ||
+           strcmp(name, "system") == 0 ||
            strcmp(name, "program_name") == 0 ||
            strcmp(name, "arg_count") == 0 ||
            strcmp(name, "args") == 0 ||
@@ -2481,11 +2509,11 @@ static bool infer_ast_expr_type(AstArena *arena, AstNode *program, AstNode *fn, 
     }
     if (expr->type == NODE_CALL) {
         const char *callee = expr->as.call.callee;
-        if (strcmp(callee, "concat") == 0 || strcmp(callee, "substring") == 0 || strcmp(callee, "read_file") == 0 || strcmp(callee, "read_line") == 0 || strcmp(callee, "program_name") == 0 || strcmp(callee, "net_recv") == 0) {
+        if (strcmp(callee, "concat") == 0 || strcmp(callee, "substring") == 0 || strcmp(callee, "char_to_string") == 0 || strcmp(callee, "to_string") == 0 || strcmp(callee, "read_file") == 0 || strcmp(callee, "read_line") == 0 || strcmp(callee, "input") == 0 || strcmp(callee, "program_name") == 0 || strcmp(callee, "net_recv") == 0) {
             *out_type = TY_STRING;
             return true;
         }
-        if (strcmp(callee, "net_close") == 0 || strcmp(callee, "sleep_ms") == 0 || strcmp(callee, "random_seed") == 0) {
+        if (strcmp(callee, "net_close") == 0 || strcmp(callee, "sleep_ms") == 0 || strcmp(callee, "random_seed") == 0 || strcmp(callee, "exit") == 0) {
             *out_type = TY_VOID;
             return true;
         }
@@ -2498,7 +2526,7 @@ static bool infer_ast_expr_type(AstArena *arena, AstNode *program, AstNode *fn, 
             *out_type = TY_FLOAT;
             return true;
         }
-        if (strcmp(callee, "equals") == 0 || strcmp(callee, "is_int") == 0 || strcmp(callee, "is_float") == 0 || strcmp(callee, "has") == 0 || strcmp(callee, "write_file") == 0) {
+        if (strcmp(callee, "equals") == 0 || strcmp(callee, "is_int") == 0 || strcmp(callee, "is_float") == 0 || strcmp(callee, "has") == 0 || strcmp(callee, "write_file") == 0 || strcmp(callee, "file_exists") == 0 || strcmp(callee, "write_bytes") == 0) {
             *out_type = TY_BOOL;
             return true;
         }
@@ -2506,7 +2534,7 @@ static bool infer_ast_expr_type(AstArena *arena, AstNode *program, AstNode *fn, 
             *out_type = TY_CHAR;
             return true;
         }
-        if (strcmp(callee, "to_int") == 0 || strcmp(callee, "len") == 0 || strcmp(callee, "abs_int") == 0 || strcmp(callee, "min_int") == 0 || strcmp(callee, "max_int") == 0 || strcmp(callee, "arg_count") == 0 || strcmp(callee, "random_int") == 0 || strcmp(callee, "net_listen") == 0 || strcmp(callee, "net_accept") == 0 || strcmp(callee, "net_send") == 0) {
+        if (strcmp(callee, "to_int") == 0 || strcmp(callee, "len") == 0 || strcmp(callee, "abs_int") == 0 || strcmp(callee, "min_int") == 0 || strcmp(callee, "max_int") == 0 || strcmp(callee, "arg_count") == 0 || strcmp(callee, "random_int") == 0 || strcmp(callee, "net_listen") == 0 || strcmp(callee, "net_accept") == 0 || strcmp(callee, "net_send") == 0 || strcmp(callee, "execute_cmd") == 0 || strcmp(callee, "system") == 0) {
             *out_type = TY_INT;
             return true;
         }
@@ -2884,7 +2912,13 @@ static AstNode *desugar_stmt_node(AstArena *arena, AstNode *program, AstNode *fn
     }
 
     if (stmt->type == NODE_PRINT) {
-        check_expr_variables(arena, program, fn, scope, stmt->as.print_stmt.value);
+        if (stmt->as.print_stmt.values) {
+            for (int i = 0; i < stmt->as.print_stmt.value_count; i++) {
+                check_expr_variables(arena, program, fn, scope, stmt->as.print_stmt.values[i]);
+            }
+        } else if (stmt->as.print_stmt.value) {
+            check_expr_variables(arena, program, fn, scope, stmt->as.print_stmt.value);
+        }
         return stmt;
     }
     if (stmt->type == NODE_EXPR_STMT) {

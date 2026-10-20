@@ -1,0 +1,234 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+// native_core.cco — Self-Hosted Native x86-64 Pipeline Driver
+import "ast.cco";
+import "x86_64_core.cco";
+import "elf_core.cco";
+
+class NativeCompilerResult {
+    success: bool;
+    error_msg: string;
+}
+
+class NativeCheckContext {
+    has_error: bool;
+    error_msg: string;
+}
+
+fn make_check_context() -> NativeCheckContext {
+    return NativeCheckContext {
+        has_error: false,
+        error_msg: concat("", ""),
+    };
+}
+
+fn check_supported_expr(ctx: &NativeCheckContext, e: &Expr) -> bool {
+    // Unsupported expression kinds: float, string lit, class member, array alloc, map
+    if (e.kind == 2) { // EXPR_FLOAT
+        ctx.has_error = true;
+        free(ctx.error_msg);
+        ctx.error_msg = concat("Native backend currently does not support floating-point expressions", "");
+        return false;
+    }
+    if (e.kind == 3) { // EXPR_STRING
+        ctx.has_error = true;
+        free(ctx.error_msg);
+        ctx.error_msg = concat("Native backend currently does not support string literal expressions", "");
+        return false;
+    }
+    if (e.kind == 10 || e.kind == 11 || e.kind == 12 || e.kind == 13 || e.kind == 14 || e.kind == 15) {
+        ctx.has_error = true;
+        free(ctx.error_msg);
+        ctx.error_msg = concat("Native backend currently does not support heap, array, or object operations", "");
+        return false;
+    }
+
+    // Recursively check children and args
+    let i: int = 0;
+    let n_ch: int = len(e.children);
+    while (i < n_ch) {
+        if (!check_supported_expr(ctx, e.children[i])) { return false; }
+        i = i + 1;
+    }
+
+    if (e.kind == 9 && len(e.args) > 6) {
+        ctx.has_error = true;
+        free(ctx.error_msg);
+        ctx.error_msg = concat("Native backend currently supports at most 6 arguments", "");
+        return false;
+    }
+
+    i = 0;
+    let n_args: int = len(e.args);
+    while (i < n_args) {
+        if (!check_supported_expr(ctx, e.args[i])) { return false; }
+        i = i + 1;
+    }
+    return true;
+}
+
+fn check_supported_stmts(ctx: &NativeCheckContext, stmts: &Stmt[]) -> bool {
+    let i: int = 0;
+    let n: int = len(stmts);
+    while (i < n) {
+        if (stmts[i].kind == 11) { // STMT_MATCH
+            ctx.has_error = true;
+            free(ctx.error_msg);
+            ctx.error_msg = concat("Native backend currently does not support match statements", "");
+            return false;
+        }
+
+        // Check expressions in statement
+        let k: int = 0;
+        let n_inits: int = len(stmts[i].init_expr);
+        while (k < n_inits) {
+            if (!check_supported_expr(ctx, stmts[i].init_expr[k])) { return false; }
+            k = k + 1;
+        }
+
+        k = 0;
+        let n_exprs: int = len(stmts[i].expr);
+        while (k < n_exprs) {
+            if (!check_supported_expr(ctx, stmts[i].expr[k])) { return false; }
+            k = k + 1;
+        }
+
+        k = 0;
+        let n_conds: int = len(stmts[i].cond_expr);
+        while (k < n_conds) {
+            if (!check_supported_expr(ctx, stmts[i].cond_expr[k])) { return false; }
+            k = k + 1;
+        }
+
+        if (stmts[i].kind == 5) { // STMT_IF
+            if (!check_supported_stmts(ctx, &stmts[i].then_block)) { return false; }
+            if (!check_supported_stmts(ctx, &stmts[i].else_block)) { return false; }
+        } else if (stmts[i].kind == 6) { // STMT_WHILE
+            if (!check_supported_stmts(ctx, &stmts[i].body)) { return false; }
+        } else if (stmts[i].kind == 7) { // STMT_FOR
+            if (!check_supported_stmts(ctx, &stmts[i].then_block)) { return false; }
+            if (!check_supported_stmts(ctx, &stmts[i].step_stmt)) { return false; }
+            if (!check_supported_stmts(ctx, &stmts[i].body)) { return false; }
+        }
+        i = i + 1;
+    }
+    return true;
+}
+
+fn check_supported_program(ctx: &NativeCheckContext, prog: &Program) -> bool {
+    if (len(prog.structs) > 0) {
+        ctx.has_error = true;
+        free(ctx.error_msg);
+        ctx.error_msg = concat("Native backend currently does not support struct definitions", "");
+        return false;
+    }
+    if (len(prog.classes) > 0) {
+        ctx.has_error = true;
+        free(ctx.error_msg);
+        ctx.error_msg = concat("Native backend currently does not support class definitions", "");
+        return false;
+    }
+    if (len(prog.enums) > 0) {
+        ctx.has_error = true;
+        free(ctx.error_msg);
+        ctx.error_msg = concat("Native backend currently does not support enum definitions", "");
+        return false;
+    }
+
+    let i: int = 0;
+    let n_fn: int = len(prog.functions);
+    let has_main: bool = false;
+    while (i < n_fn) {
+        if (equals(prog.functions[i].name, "main")) {
+            has_main = true;
+        }
+        if (len(prog.functions[i].params) > 6) {
+            ctx.has_error = true;
+            free(ctx.error_msg);
+            ctx.error_msg = concat("Native backend currently supports at most 6 parameters: ", prog.functions[i].name);
+            return false;
+        }
+        if (!check_supported_stmts(ctx, &prog.functions[i].body)) {
+            return false;
+        }
+        i = i + 1;
+    }
+
+    if (!has_main) {
+        ctx.has_error = true;
+        free(ctx.error_msg);
+        ctx.error_msg = concat("Native program must declare a 'main' function", "");
+        return false;
+    }
+    return true;
+}
+
+fn compile_program_native(prog: &Program, source_name: string, out_bin_path: string, out_res: &NativeCompilerResult) -> bool {
+    let check_ctx: NativeCheckContext = make_check_context();
+    let ok_prog: bool = check_supported_program(&check_ctx, prog);
+    if (!ok_prog) {
+        out_res.success = false;
+        free(out_res.error_msg);
+        out_res.error_msg = concat("Native backend error: ", check_ctx.error_msg);
+        return false;
+    }
+
+    // 1. Compile each function into machine code
+    let compiled_funcs: CompiledFunc[] = list_new(CompiledFunc);
+    let i: int = 0;
+    let num_funcs: int = len(prog.functions);
+    while (i < num_funcs) {
+        let cf: CompiledFunc = CompiledFunc {
+            name: concat("", ""),
+            code: list_new(int),
+            size: 0,
+            is_main: false,
+            call_target_names: list_new(string),
+            call_fixup_offsets: list_new(int),
+        };
+        let fn_err: string = compile_function_decl(prog.functions[i], &cf);
+        if (len(fn_err) > 0) {
+            out_res.success = false;
+            free(out_res.error_msg);
+            out_res.error_msg = concat("Function compilation error: ", fn_err);
+            return false;
+        }
+        compiled_funcs = push(compiled_funcs, cf);
+        i = i + 1;
+    }
+
+    // 2. Assemble ELF64 Relocatable Object
+    let elf: CodeBuf = build_elf64_object(source_name, &compiled_funcs);
+
+    // 3. Write object file
+    let obj_path: string = concat(out_bin_path, ".o");
+    if (!write_bytes(obj_path, elf.bytes)) {
+        out_res.success = false;
+        free(out_res.error_msg);
+        out_res.error_msg = concat("Failed to write ELF64 object file: ", obj_path);
+        return false;
+    }
+
+    // 4. Invoke Internal Linker
+    let link_cmd: string = concat("./cco-link ", obj_path);
+    link_cmd = concat(link_cmd, " -o ");
+    link_cmd = concat(link_cmd, out_bin_path);
+
+    let link_status: int = execute_cmd(link_cmd);
+    if (link_status != 0) {
+        let alt_cmd: string = concat("./cco --link-internal ", obj_path);
+        alt_cmd = concat(alt_cmd, " -o ");
+        alt_cmd = concat(alt_cmd, out_bin_path);
+        link_status = execute_cmd(alt_cmd);
+    }
+
+    if (link_status != 0) {
+        out_res.success = false;
+        free(out_res.error_msg);
+        out_res.error_msg = concat("Internal static linker failed with exit status: ", to_string(link_status));
+        return false;
+    }
+
+    out_res.success = true;
+    return true;
+}

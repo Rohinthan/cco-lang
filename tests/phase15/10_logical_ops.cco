@@ -1,0 +1,17 @@
+fn main() -> int {
+    let val: int = 0;
+    let t: bool = true;
+    let f: bool = false;
+    if (t) {
+        val = val + 10;
+    }
+    if (!f) {
+        val = val + 20;
+    }
+    if (!(val == 30)) {
+        val = 0;
+    } else {
+        val = val + 5;
+    }
+    return val;
+}

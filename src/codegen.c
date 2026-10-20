@@ -40,12 +40,18 @@ static void sb_append(StringBuffer *sb, const char *str) {
 }
 
 static void sb_appendf(StringBuffer *sb, const char *fmt, ...) {
-    va_list args;
+    va_list args, args_copy;
     va_start(args, fmt);
-    char buf[1024];
-    vsnprintf(buf, sizeof(buf), fmt, args);
+    va_copy(args_copy, args);
+    int len = vsnprintf(NULL, 0, fmt, args);
     va_end(args);
+    if (len < 0) { va_end(args_copy); return; }
+    char *buf = (char *)malloc(len + 1);
+    if (!buf) { va_end(args_copy); return; }
+    vsnprintf(buf, len + 1, fmt, args_copy);
+    va_end(args_copy);
     sb_append(sb, buf);
+    free(buf);
 }
 
 typedef struct {
@@ -592,12 +598,12 @@ static Type infer_expr_type(AstNode *program, AstNode *fn, AstNode *expr) {
         if (strcmp(name, "push") == 0 && expr->as.call.arg_count > 0) {
             return infer_expr_type(program, fn, expr->as.call.args[0]);
         }
-        if (strcmp(name, "len") == 0 || strcmp(name, "abs_int") == 0 || strcmp(name, "min_int") == 0 || strcmp(name, "max_int") == 0 || strcmp(name, "arg_count") == 0 || strcmp(name, "to_int") == 0 || strcmp(name, "random_int") == 0 || strcmp(name, "net_listen") == 0 || strcmp(name, "net_accept") == 0 || strcmp(name, "net_send") == 0) return TY_INT;
+        if (strcmp(name, "len") == 0 || strcmp(name, "abs_int") == 0 || strcmp(name, "min_int") == 0 || strcmp(name, "max_int") == 0 || strcmp(name, "arg_count") == 0 || strcmp(name, "to_int") == 0 || strcmp(name, "random_int") == 0 || strcmp(name, "net_listen") == 0 || strcmp(name, "net_accept") == 0 || strcmp(name, "net_send") == 0 || strcmp(name, "execute_cmd") == 0 || strcmp(name, "system") == 0) return TY_INT;
         if (strcmp(name, "sqrt") == 0 || strcmp(name, "exp") == 0 || strcmp(name, "log") == 0 || strcmp(name, "sin") == 0 || strcmp(name, "cos") == 0 || strcmp(name, "tan") == 0 || strcmp(name, "pow") == 0 || strcmp(name, "abs_float") == 0 || strcmp(name, "floor") == 0 || strcmp(name, "ceil") == 0 || strcmp(name, "min_float") == 0 || strcmp(name, "max_float") == 0 || strcmp(name, "to_float") == 0) return TY_FLOAT;
-        if (strcmp(name, "concat") == 0 || strcmp(name, "substring") == 0 || strcmp(name, "read_file") == 0 || strcmp(name, "program_name") == 0 || strcmp(name, "args") == 0 || strcmp(name, "read_line") == 0 || strcmp(name, "net_recv") == 0) return TY_STRING;
-        if (strcmp(name, "equals") == 0 || strcmp(name, "write_file") == 0 || strcmp(name, "is_int") == 0 || strcmp(name, "is_float") == 0) return TY_BOOL;
+        if (strcmp(name, "concat") == 0 || strcmp(name, "substring") == 0 || strcmp(name, "char_to_string") == 0 || strcmp(name, "to_string") == 0 || strcmp(name, "read_file") == 0 || strcmp(name, "program_name") == 0 || strcmp(name, "args") == 0 || strcmp(name, "read_line") == 0 || strcmp(name, "input") == 0 || strcmp(name, "net_recv") == 0) return TY_STRING;
+        if (strcmp(name, "equals") == 0 || strcmp(name, "write_file") == 0 || strcmp(name, "is_int") == 0 || strcmp(name, "is_float") == 0 || strcmp(name, "file_exists") == 0 || strcmp(name, "write_bytes") == 0) return TY_BOOL;
         if (strcmp(name, "char_at") == 0) return TY_CHAR;
-        if (strcmp(name, "random_seed") == 0 || strcmp(name, "net_close") == 0 || strcmp(name, "sleep_ms") == 0) return TY_VOID;
+        if (strcmp(name, "random_seed") == 0 || strcmp(name, "net_close") == 0 || strcmp(name, "sleep_ms") == 0 || strcmp(name, "exit") == 0) return TY_VOID;
 
         if (program && program->type == NODE_PROGRAM) {
             for (int f = 0; f < program->as.program.count; f++) {
@@ -796,6 +802,35 @@ static bool infer_expr_is_array(AstNode *program, AstNode *fn, AstNode *expr) {
                         AstNode *mn = cls->as.class_decl.methods[m];
                         if (strcmp(mn->as.method.name, mname) == 0) {
                             return mn->as.method.return_is_array;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if (expr->type == NODE_MEMBER && program && program->type == NODE_PROGRAM) {
+        const char *mname = expr->as.member.member_name;
+        const char *cname = expr->as.member.field_class_name;
+        if (!cname) {
+            cname = get_expr_class_name(program, fn, expr->as.member.object);
+        }
+        if (cname) {
+            for (int c = 0; c < program->as.program.class_count; c++) {
+                AstNode *cls = program->as.program.classes[c];
+                if (strcmp(cls->as.class_decl.name, cname) == 0) {
+                    for (int f = 0; f < cls->as.class_decl.field_count; f++) {
+                        if (strcmp(cls->as.class_decl.fields[f]->as.field.name, mname) == 0) {
+                            return cls->as.class_decl.fields[f]->as.field.is_array;
+                        }
+                    }
+                }
+            }
+            for (int s = 0; s < program->as.program.struct_count; s++) {
+                AstNode *st = program->as.program.structs[s];
+                if (strcmp(st->as.struct_decl.name, cname) == 0) {
+                    for (int f = 0; f < st->as.struct_decl.field_count; f++) {
+                        if (strcmp(st->as.struct_decl.fields[f]->as.struct_field_decl.name, mname) == 0) {
+                            return false;
                         }
                     }
                 }
@@ -1537,12 +1572,16 @@ static void gen_expr(CodegenCtx *ctx, AstNode *expr) {
                 gen_expr(ctx, arr_arg);
                 sb_appendf(&ctx->sb, ", sizeof(%s)), (", elem_c_type);
 
-                sb_appendf(&ctx->sb, "(%s)", arr_ptr_type);
+                sb_appendf(&ctx->sb, "((%s)", arr_ptr_type);
                 gen_expr(ctx, arr_arg);
-                sb_append(&ctx->sb, ")[__cco_arr_len_raw(");
+                sb_append(&ctx->sb, "))[__cco_arr_len_raw(");
                 gen_expr(ctx, arr_arg);
                 sb_append(&ctx->sb, ")] = ");
-                gen_expr(ctx, val_arg);
+                if (elem_type == TY_STRING && val_arg->type == NODE_LITERAL) {
+                    sb_appendf(&ctx->sb, "strdup(\"%s\")", val_arg->as.literal.val.s);
+                } else {
+                    gen_expr(ctx, val_arg);
+                }
                 sb_append(&ctx->sb, ", __cco_arr_incr_len(");
                 gen_expr(ctx, arr_arg);
                 sb_append(&ctx->sb, "), ");
@@ -1661,11 +1700,37 @@ static void gen_expr(CodegenCtx *ctx, AstNode *expr) {
                 sb_append(&ctx->sb, "__cco_read_file(");
                 gen_expr(ctx, expr->as.call.args[0]);
                 sb_append(&ctx->sb, ")");
+            } else if (strcmp(callee, "char_to_string") == 0) {
+                sb_append(&ctx->sb, "__cco_char_to_string(");
+                gen_expr(ctx, expr->as.call.args[0]);
+                sb_append(&ctx->sb, ")");
+            } else if (strcmp(callee, "to_string") == 0) {
+                sb_append(&ctx->sb, "__cco_to_string(");
+                gen_expr(ctx, expr->as.call.args[0]);
+                sb_append(&ctx->sb, ")");
+            } else if (strcmp(callee, "exit") == 0) {
+                sb_append(&ctx->sb, "__cco_exit(");
+                gen_expr(ctx, expr->as.call.args[0]);
+                sb_append(&ctx->sb, ")");
+            } else if (strcmp(callee, "file_exists") == 0) {
+                sb_append(&ctx->sb, "__cco_file_exists(");
+                gen_expr(ctx, expr->as.call.args[0]);
+                sb_append(&ctx->sb, ")");
             } else if (strcmp(callee, "write_file") == 0) {
                 sb_append(&ctx->sb, "__cco_write_file(");
                 gen_expr(ctx, expr->as.call.args[0]);
                 sb_append(&ctx->sb, ", ");
                 gen_expr(ctx, expr->as.call.args[1]);
+                sb_append(&ctx->sb, ")");
+            } else if (strcmp(callee, "write_bytes") == 0) {
+                sb_append(&ctx->sb, "__cco_write_bytes(");
+                gen_expr(ctx, expr->as.call.args[0]);
+                sb_append(&ctx->sb, ", ");
+                gen_expr(ctx, expr->as.call.args[1]);
+                sb_append(&ctx->sb, ")");
+            } else if (strcmp(callee, "execute_cmd") == 0 || strcmp(callee, "system") == 0) {
+                sb_append(&ctx->sb, "__cco_execute_cmd(");
+                gen_expr(ctx, expr->as.call.args[0]);
                 sb_append(&ctx->sb, ")");
             } else if (strcmp(callee, "args") == 0) {
                 sb_append(&ctx->sb, "__cco_get_args()");
@@ -1701,6 +1766,14 @@ static void gen_expr(CodegenCtx *ctx, AstNode *expr) {
                 sb_append(&ctx->sb, ")");
             } else if (strcmp(callee, "read_line") == 0) {
                 sb_append(&ctx->sb, "__cco_read_line()");
+            } else if (strcmp(callee, "input") == 0) {
+                if (expr->as.call.arg_count == 0) {
+                    sb_append(&ctx->sb, "__cco_input(NULL)");
+                } else {
+                    sb_append(&ctx->sb, "__cco_input(");
+                    gen_expr(ctx, expr->as.call.args[0]);
+                    sb_append(&ctx->sb, ")");
+                }
             } else if (strcmp(callee, "net_listen") == 0) {
                 sb_append(&ctx->sb, "__cco_net_listen(");
                 gen_expr(ctx, expr->as.call.args[0]);
@@ -1796,6 +1869,7 @@ static inline bool is_heap_string_returning_call(const char *name) {
             strcmp(name, "substring") == 0 ||
             strcmp(name, "read_file") == 0 ||
             strcmp(name, "read_line") == 0 ||
+            strcmp(name, "input") == 0 ||
             strcmp(name, "net_recv") == 0 ||
             strcmp(name, "program_name") == 0);
 }
@@ -2070,48 +2144,108 @@ static void gen_stmt(CodegenCtx *ctx, AstNode *stmt) {
             break;
 
         case NODE_PRINT: {
-            emit_indent(ctx);
-            AstNode *val = stmt->as.print_stmt.value;
-            Type t = infer_expr_type(ctx->program, ctx->current_function, val);
-            if (t == TY_STRING) {
-                if (val->type == NODE_FSTRING || (val->type == NODE_CALL && is_heap_string_returning_call(val->as.call.callee))) {
-                    static int print_tmp_counter = 0;
-                    int cur_tmp = ++print_tmp_counter;
-                    sb_appendf(&ctx->sb, "{\n");
-                    ctx->indent_level++;
-                    emit_indent(ctx);
-                    sb_appendf(&ctx->sb, "char *__print_tmp_%d = ", cur_tmp);
+            int total = stmt->as.print_stmt.value_count;
+            if (total == 0 && !stmt->as.print_stmt.value) {
+                emit_indent(ctx);
+                sb_append(&ctx->sb, "printf(\"\\n\");\n");
+                break;
+            }
+            if (total <= 1) {
+                emit_indent(ctx);
+                AstNode *val = stmt->as.print_stmt.value ? stmt->as.print_stmt.value : stmt->as.print_stmt.values[0];
+                Type t = infer_expr_type(ctx->program, ctx->current_function, val);
+                if (t == TY_STRING) {
+                    if (val->type == NODE_FSTRING || (val->type == NODE_CALL && is_heap_string_returning_call(val->as.call.callee))) {
+                        static int print_tmp_counter = 0;
+                        int cur_tmp = ++print_tmp_counter;
+                        sb_appendf(&ctx->sb, "{\n");
+                        ctx->indent_level++;
+                        emit_indent(ctx);
+                        sb_appendf(&ctx->sb, "char *__print_tmp_%d = ", cur_tmp);
+                        gen_expr(ctx, val);
+                        sb_append(&ctx->sb, ";\n");
+                        emit_indent(ctx);
+                        sb_appendf(&ctx->sb, "printf(\"%%s\\n\", __print_tmp_%d ? __print_tmp_%d : \"\");\n", cur_tmp, cur_tmp);
+                        emit_indent(ctx);
+                        sb_appendf(&ctx->sb, "free(__print_tmp_%d);\n", cur_tmp);
+                        ctx->indent_level--;
+                        emit_indent(ctx);
+                        sb_append(&ctx->sb, "}\n");
+                    } else {
+                        sb_append(&ctx->sb, "printf(\"%s\\n\", ");
+                        gen_expr(ctx, val);
+                        sb_append(&ctx->sb, ");\n");
+                    }
+                } else if (t == TY_FLOAT) {
+                    sb_append(&ctx->sb, "printf(\"%g\\n\", (double)(");
                     gen_expr(ctx, val);
-                    sb_append(&ctx->sb, ";\n");
-                    emit_indent(ctx);
-                    sb_appendf(&ctx->sb, "printf(\"%%s\\n\", __print_tmp_%d ? __print_tmp_%d : \"\");\n", cur_tmp, cur_tmp);
-                    emit_indent(ctx);
-                    sb_appendf(&ctx->sb, "free(__print_tmp_%d);\n", cur_tmp);
-                    ctx->indent_level--;
-                    emit_indent(ctx);
-                    sb_append(&ctx->sb, "}\n");
-                } else {
-                    sb_append(&ctx->sb, "printf(\"%s\\n\", ");
+                    sb_append(&ctx->sb, "));\n");
+                } else if (t == TY_BOOL) {
+                    sb_append(&ctx->sb, "printf(\"%s\\n\", (");
+                    gen_expr(ctx, val);
+                    sb_append(&ctx->sb, ") ? \"true\" : \"false\");\n");
+                } else if (t == TY_CHAR) {
+                    sb_append(&ctx->sb, "printf(\"%c\\n\", ");
                     gen_expr(ctx, val);
                     sb_append(&ctx->sb, ");\n");
+                } else {
+                    sb_append(&ctx->sb, "printf(\"%ld\\n\", (long)(");
+                    gen_expr(ctx, val);
+                    sb_append(&ctx->sb, "));\n");
                 }
-            } else if (t == TY_FLOAT) {
-                sb_append(&ctx->sb, "printf(\"%g\\n\", (double)(");
-                gen_expr(ctx, val);
-                sb_append(&ctx->sb, "));\n");
-            } else if (t == TY_BOOL) {
-                sb_append(&ctx->sb, "printf(\"%s\\n\", (");
-                gen_expr(ctx, val);
-                sb_append(&ctx->sb, ") ? \"true\" : \"false\");\n");
-            } else if (t == TY_CHAR) {
-                sb_append(&ctx->sb, "printf(\"%c\\n\", ");
-                gen_expr(ctx, val);
-                sb_append(&ctx->sb, ");\n");
-            } else {
-                sb_append(&ctx->sb, "printf(\"%ld\\n\", (long)(");
-                gen_expr(ctx, val);
-                sb_append(&ctx->sb, "));\n");
+                break;
             }
+
+            for (int i = 0; i < total; i++) {
+                emit_indent(ctx);
+                AstNode *val = stmt->as.print_stmt.values[i];
+                Type t = infer_expr_type(ctx->program, ctx->current_function, val);
+                if (t == TY_STRING) {
+                    if (val->type == NODE_FSTRING || (val->type == NODE_CALL && is_heap_string_returning_call(val->as.call.callee))) {
+                        static int print_tmp_counter = 0;
+                        int cur_tmp = ++print_tmp_counter;
+                        sb_appendf(&ctx->sb, "{\n");
+                        ctx->indent_level++;
+                        emit_indent(ctx);
+                        sb_appendf(&ctx->sb, "char *__print_tmp_%d = ", cur_tmp);
+                        gen_expr(ctx, val);
+                        sb_append(&ctx->sb, ";\n");
+                        emit_indent(ctx);
+                        sb_appendf(&ctx->sb, "printf(\"%%s\", __print_tmp_%d ? __print_tmp_%d : \"\");\n", cur_tmp, cur_tmp);
+                        emit_indent(ctx);
+                        sb_appendf(&ctx->sb, "free(__print_tmp_%d);\n", cur_tmp);
+                        ctx->indent_level--;
+                        emit_indent(ctx);
+                        sb_append(&ctx->sb, "}\n");
+                    } else {
+                        sb_append(&ctx->sb, "printf(\"%s\", ");
+                        gen_expr(ctx, val);
+                        sb_append(&ctx->sb, ");\n");
+                    }
+                } else if (t == TY_FLOAT) {
+                    sb_append(&ctx->sb, "printf(\"%g\", (double)(");
+                    gen_expr(ctx, val);
+                    sb_append(&ctx->sb, "));\n");
+                } else if (t == TY_BOOL) {
+                    sb_append(&ctx->sb, "printf(\"%s\", (");
+                    gen_expr(ctx, val);
+                    sb_append(&ctx->sb, ") ? \"true\" : \"false\");\n");
+                } else if (t == TY_CHAR) {
+                    sb_append(&ctx->sb, "printf(\"%c\", ");
+                    gen_expr(ctx, val);
+                    sb_append(&ctx->sb, ");\n");
+                } else {
+                    sb_append(&ctx->sb, "printf(\"%ld\", (long)(");
+                    gen_expr(ctx, val);
+                    sb_append(&ctx->sb, "));\n");
+                }
+                if (i < total - 1) {
+                    emit_indent(ctx);
+                    sb_append(&ctx->sb, "printf(\" \");\n");
+                }
+            }
+            emit_indent(ctx);
+            sb_append(&ctx->sb, "printf(\"\\n\");\n");
             break;
         }
 
@@ -2749,7 +2883,13 @@ static void scan_node_usage(AstNode *node, bool *used_chunks) {
             break;
 
         case NODE_PRINT:
-            scan_node_usage(node->as.print_stmt.value, used_chunks);
+            if (node->as.print_stmt.values) {
+                for (int i = 0; i < node->as.print_stmt.value_count; i++) {
+                    scan_node_usage(node->as.print_stmt.values[i], used_chunks);
+                }
+            } else if (node->as.print_stmt.value) {
+                scan_node_usage(node->as.print_stmt.value, used_chunks);
+            }
             break;
 
         case NODE_EXPR_STMT:
@@ -2797,7 +2937,13 @@ static void scan_node_usage(AstNode *node, bool *used_chunks) {
                 else if (strcmp(callee, "min_float") == 0) mark_chunk_used(used_chunks, "min_float");
                 else if (strcmp(callee, "max_float") == 0) mark_chunk_used(used_chunks, "max_float");
                 else if (strcmp(callee, "read_file") == 0) mark_chunk_used(used_chunks, "read_file");
+                else if (strcmp(callee, "char_to_string") == 0) mark_chunk_used(used_chunks, "char_to_string");
+                else if (strcmp(callee, "to_string") == 0) mark_chunk_used(used_chunks, "to_string");
+                else if (strcmp(callee, "exit") == 0) mark_chunk_used(used_chunks, "cco_exit");
+                else if (strcmp(callee, "file_exists") == 0) mark_chunk_used(used_chunks, "file_exists");
                 else if (strcmp(callee, "write_file") == 0) mark_chunk_used(used_chunks, "write_file");
+                else if (strcmp(callee, "write_bytes") == 0) mark_chunk_used(used_chunks, "write_bytes");
+                else if (strcmp(callee, "execute_cmd") == 0 || strcmp(callee, "system") == 0) mark_chunk_used(used_chunks, "execute_cmd");
                 else if (strcmp(callee, "put") == 0) mark_chunk_used(used_chunks, "map_put");
                 else if (strcmp(callee, "get") == 0) mark_chunk_used(used_chunks, "map_get");
                 else if (strcmp(callee, "has") == 0) mark_chunk_used(used_chunks, "map_has");
@@ -2845,6 +2991,9 @@ static void scan_node_usage(AstNode *node, bool *used_chunks) {
                 }
                 else if (strcmp(callee, "read_line") == 0) {
                     mark_chunk_used(used_chunks, "read_line");
+                }
+                else if (strcmp(callee, "input") == 0) {
+                    mark_chunk_used(used_chunks, "input");
                 }
                 else if (strcmp(callee, "net_listen") == 0) {
                     mark_chunk_used(used_chunks, "net_listen");

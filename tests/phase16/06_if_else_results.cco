@@ -1,0 +1,18 @@
+fn test_branch(val: int) -> int {
+    let res: int = 0;
+    let temp: int = 0;
+    if (val > 10) {
+        temp = val * 2;
+        res = temp + 5;
+    } else {
+        temp = val * 3;
+        res = temp - 2;
+    }
+    return res;
+}
+
+fn main() -> int {
+    let a: int = test_branch(12); // 24 + 5 = 29
+    let b: int = test_branch(5);  // 15 - 2 = 13
+    return a + b; // 42
+}

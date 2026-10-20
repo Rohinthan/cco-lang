@@ -4,6 +4,8 @@ import "lexer_core.cco";
 import "parser_core.cco";
 import "typechecker_core.cco";
 import "codegen_core.cco";
+import "ir_opt.cco";
+import "native_core.cco";
 
 // cco.cco — Self-Hosted Compiler Binary Driver in pure Cco
 
@@ -67,7 +69,7 @@ fn parse_input_arg(argv: &string[]) -> string {
 }
 
 fn print_usage() -> void {
-    print("Usage: cco <source.cco> [-o output.c] [--emit-c] [--dump-tokens]");
+    print("Usage: cco <source.cco> [-o output] [--emit-c] [--dump-tokens] [-O | -O1 | -O2 | --optimize] [--selfhost-native]");
 }
 
 fn main() -> int {
@@ -94,6 +96,8 @@ fn main() -> int {
     let output_path: string = parse_output_arg(&argv);
     let emit_c: bool = has_flag(&argv, "--emit-c");
     let dump_tokens: bool = has_flag(&argv, "--dump-tokens");
+    let optimize: bool = has_flag(&argv, "-O") || has_flag(&argv, "-O1") || has_flag(&argv, "-O2") || has_flag(&argv, "--optimize");
+    let selfhost_native: bool = has_flag(&argv, "--selfhost-native") || has_flag(&argv, "--native");
 
     let source: string = read_file(input_path);
     let tokens: Token[] = lex(source);
@@ -105,11 +109,30 @@ fn main() -> int {
         return 0;
     }
 
-    let prog: Program = parse_program(tokens);
+    let prog: Program = parse_program_from_file(input_path);
     let errs: int = typecheck_program(&prog);
     if (errs != 0) {
         print("Typecheck errors encountered.");
         return errs;
+    }
+
+    if (optimize) {
+        let stats: OptStats = make_opt_stats();
+        optimize_program(&prog, &stats);
+    }
+
+    if (selfhost_native) {
+        let res: NativeCompilerResult = NativeCompilerResult {
+            success: false,
+            error_msg: concat("", ""),
+        };
+        let ok: bool = compile_program_native(&prog, input_path, output_path, &res);
+        if (!ok) {
+            print(res.error_msg);
+            return 1;
+        }
+        print("Native compilation succeeded.");
+        return 0;
     }
 
     let c_code: string = codegen_program(&prog);

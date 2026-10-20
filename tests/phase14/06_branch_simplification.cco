@@ -1,0 +1,27 @@
+// Phase 14 Test 06: Branch Simplification
+fn test_branches() -> void {
+    if (true) {
+        print(1);
+    } else {
+        print(2);
+    }
+
+    if (false) {
+        print(3);
+    } else {
+        print(4);
+    }
+
+    if (10 > 5) {
+        print(5);
+    }
+
+    if (2 + 2 == 5) {
+        print(6);
+    }
+}
+
+fn main() -> int {
+    test_branches();
+    return 0;
+}

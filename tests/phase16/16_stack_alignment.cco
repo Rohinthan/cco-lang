@@ -1,0 +1,12 @@
+fn helper(x: int) -> int {
+    return x * 2;
+}
+
+fn compute_nested(a: int, b: int) -> int {
+    let r: int = (10 + helper(a)) + (20 + helper(b));
+    return r;
+}
+
+fn main() -> int {
+    return compute_nested(5, 3); // (10 + 10) + (20 + 6) = 20 + 26 = 46
+}

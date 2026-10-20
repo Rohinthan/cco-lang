@@ -1,0 +1,17 @@
+fn main() -> int {
+    x = 100;
+    print(to_string(x));
+    x = 200;
+    print(to_string(x));
+
+    name = "Cco Language";
+    print(name);
+
+    y: int = 500;
+    print(to_string(y));
+
+    let z: int = 1000;
+    print(to_string(z));
+
+    return 0;
+}

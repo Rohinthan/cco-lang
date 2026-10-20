@@ -30,6 +30,13 @@ class Usage {
     has_math: bool;
     has_array: bool;
     has_args: bool;
+    has_char_to_string: bool;
+    has_to_string: bool;
+    has_exit: bool;
+    has_file_exists: bool;
+    has_write_bytes: bool;
+    has_execute_cmd: bool;
+    has_map: bool;
 }
 
 fn make_usage() -> Usage {
@@ -47,6 +54,13 @@ fn make_usage() -> Usage {
         has_math: false,
         has_array: false,
         has_args: false,
+        has_char_to_string: false,
+        has_to_string: false,
+        has_exit: false,
+        has_file_exists: false,
+        has_write_bytes: false,
+        has_execute_cmd: false,
+        has_map: false,
     };
 }
 
@@ -63,6 +77,15 @@ fn scan_expr_usage(u: &Usage, e: &Expr) -> void {
         if (equals(e.callee, "read_file")) { u.has_read_file = true; }
         if (equals(e.callee, "write_file")) { u.has_write_file = true; }
         if (equals(e.callee, "read_line")) { u.has_read_line = true; }
+        if (equals(e.callee, "char_to_string")) { u.has_char_to_string = true; }
+        if (equals(e.callee, "to_string")) { u.has_to_string = true; }
+        if (equals(e.callee, "exit")) { u.has_exit = true; }
+        if (equals(e.callee, "file_exists")) { u.has_file_exists = true; }
+        if (equals(e.callee, "write_bytes")) {
+            u.has_write_bytes = true;
+            u.has_array = true;
+        }
+        if (equals(e.callee, "execute_cmd") || equals(e.callee, "system")) { u.has_execute_cmd = true; }
         if (equals(e.callee, "to_int")) { u.has_to_int = true; }
         if (equals(e.callee, "to_float")) { u.has_to_float = true; }
         if (equals(e.callee, "is_int")) { u.has_is_int = true; }
@@ -74,9 +97,15 @@ fn scan_expr_usage(u: &Usage, e: &Expr) -> void {
         if (equals(e.callee, "len") || equals(e.callee, "push") || equals(e.callee, "pop")) {
             u.has_array = true;
         }
+        if (equals(e.callee, "put") || equals(e.callee, "get") || equals(e.callee, "has") || equals(e.callee, "remove")) {
+            u.has_map = true;
+        }
     }
     if (e.kind == 11 || e.kind == 13 || e.kind == 14) {
         u.has_array = true;
+    }
+    if (e.kind == 15) {
+        u.has_map = true;
     }
 
     for (let i: int = 0; i < len(e.children); i++) {
@@ -94,6 +123,9 @@ fn scan_stmt_usage(u: &Usage, s: &Stmt) -> void {
     if (s.kind == 1) {
         if (has_suffix_arr(s.var_type)) {
             u.has_array = true;
+        }
+        if (len(s.var_type) >= 4 && char_at(s.var_type, 0) == 'm' && char_at(s.var_type, 1) == 'a' && char_at(s.var_type, 2) == 'p' && char_at(s.var_type, 3) == '[') {
+            u.has_map = true;
         }
     }
     for (let i: int = 0; i < len(s.expr); i++) {
@@ -138,6 +170,23 @@ fn scan_program_usage(u: &Usage, p: &Program) -> void {
 }
 
 fn gen_c_type(p: &Program, t: string) -> string {
+    if (has_prefix_borrow(t)) {
+        let base: string = substring(t, 1, len(t));
+        if (has_suffix_arr(base)) {
+            return gen_c_type(p, base);
+        }
+        if (is_class_type(p, base) || is_enum_type(p, base)) {
+            let res: string = concat(base, " *");
+            return res;
+        }
+        if (is_struct_type(p, base)) {
+            let res: string = concat(base, " *");
+            return res;
+        }
+        let base_ct: string = gen_c_type(p, base);
+        let res: string = concat(base_ct, " *");
+        return res;
+    }
     if (has_suffix_arr(t)) {
         let elem: string = substring(t, 0, len(t) - 2);
         if (is_class_type(p, elem) || is_enum_type(p, elem)) {
@@ -165,19 +214,8 @@ fn gen_c_type(p: &Program, t: string) -> string {
         }
         return "void *";
     }
-    if (has_prefix_borrow(t)) {
-        let base: string = substring(t, 1, len(t));
-        if (is_class_type(p, base) || is_enum_type(p, base)) {
-            let res: string = concat(base, " *");
-            return res;
-        }
-        if (is_struct_type(p, base)) {
-            let res: string = concat(base, " *");
-            return res;
-        }
-        let base_ct: string = gen_c_type(p, base);
-        let res: string = concat(base_ct, " *");
-        return res;
+    if (len(t) >= 4 && char_at(t, 0) == 'm' && char_at(t, 1) == 'a' && char_at(t, 2) == 'p' && char_at(t, 3) == '[') {
+        return "__cco_map *";
     }
     if (is_class_type(p, t)) {
         let res: string = concat(t, " *");
@@ -247,6 +285,39 @@ fn escape_c_string(s: string) -> string {
         }
     }
     return out;
+}
+
+fn escape_c_char(c: char) -> string {
+    let q: string = char_to_str('\'');
+    let bs: string = char_to_str('\\');
+    if (c == '\n') {
+        let n: string = concat(bs, "n");
+        return concat(q, concat(n, q));
+    }
+    if (c == '\t') {
+        let t: string = concat(bs, "t");
+        return concat(q, concat(t, q));
+    }
+    if (c == '\r') {
+        let r: string = concat(bs, "r");
+        return concat(q, concat(r, q));
+    }
+    if (c == '\0') {
+        let z: string = concat(bs, "0");
+        return concat(q, concat(z, q));
+    }
+    if (c == '\\') {
+        let b: string = concat(bs, bs);
+        return concat(q, concat(b, q));
+    }
+    if (c == '\'') {
+        let sq: string = concat(bs, q);
+        return concat(q, concat(sq, q));
+    }
+    let ch_s: string = char_to_str(c);
+    let res: string = concat(q, ch_s);
+    res = concat(res, q);
+    return res;
 }
 
 fn gen_struct_def(p: &Program, s: &StructDecl) -> string {
@@ -344,12 +415,31 @@ fn gen_class_def(p: &Program, c: &ClassDecl) -> string {
     return out;
 }
 
+fn str_to_upper(s: string) -> string {
+    let out: string = "";
+    let uppers: string = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    for (let i: int = 0; i < len(s); i++) {
+        let c: char = char_at(s, i);
+        if (c >= 'a' && c <= 'z') {
+            let diff: int = (c - 'a');
+            let uc: char = char_at(uppers, diff);
+            let piece: string = char_to_str(uc);
+            out = concat(out, piece);
+        } else {
+            let piece: string = char_to_str(c);
+            out = concat(out, piece);
+        }
+    }
+    return out;
+}
+
 fn gen_enum_def(p: &Program, e: &EnumDecl) -> string {
+    let upper_ename: string = str_to_upper(e.name);
     let out: string = "typedef enum {\n";
     for (let i: int = 0; i < len(e.variants); i++) {
         if (i > 0) { out = concat(out, ",\n"); }
         out = concat(out, "    ");
-        out = concat(out, e.name);
+        out = concat(out, upper_ename);
         out = concat(out, "_TAG_");
         out = concat(out, e.variants[i].name);
     }
@@ -387,7 +477,7 @@ fn gen_enum_def(p: &Program, e: &EnumDecl) -> string {
     out = concat(out, " *p) {\n    if (!p) return;\n    switch (p->tag) {\n");
     for (let i: int = 0; i < len(e.variants); i++) {
         out = concat(out, "        case ");
-        out = concat(out, e.name);
+        out = concat(out, upper_ename);
         out = concat(out, "_TAG_");
         out = concat(out, e.variants[i].name);
         out = concat(out, ":\n");
@@ -446,7 +536,7 @@ fn gen_enum_def(p: &Program, e: &EnumDecl) -> string {
         out = concat(out, " *)malloc(sizeof(");
         out = concat(out, e.name);
         out = concat(out, "));\n    p->tag = ");
-        out = concat(out, e.name);
+        out = concat(out, upper_ename);
         out = concat(out, "_TAG_");
         out = concat(out, e.variants[i].name);
         out = concat(out, ";\n");
@@ -477,8 +567,7 @@ fn gen_expr(p: &Program, st: &SymTab, e: &Expr) -> string {
     // 3: EXPR_STRING
     if (e.kind == 3) {
         let q: string = char_to_str('\"');
-        let s_esc: string = escape_c_string(e.str_val);
-        let res: string = concat(q, s_esc);
+        let res: string = concat(q, e.str_val);
         res = concat(res, q);
         return res;
     }
@@ -489,10 +578,7 @@ fn gen_expr(p: &Program, st: &SymTab, e: &Expr) -> string {
     }
     // 5: EXPR_CHAR
     if (e.kind == 5) {
-        let ch_s: string = char_to_str(e.char_val);
-        let res: string = concat("'", ch_s);
-        res = concat(res, "'");
-        return res;
+        return escape_c_char(e.char_val);
     }
     // 6: EXPR_IDENT
     if (e.kind == 6) {
@@ -524,6 +610,12 @@ fn gen_expr(p: &Program, st: &SymTab, e: &Expr) -> string {
     // 8: EXPR_UNARY
     if (e.kind == 8) {
         if (len(e.children) > 0) {
+            if (equals(e.op, "&")) {
+                let ot: string = infer_expr_type(p, st, e.children[0]);
+                if (is_class_type(p, ot) || is_enum_type(p, ot) || has_suffix_arr(ot)) {
+                    return gen_expr(p, st, e.children[0]);
+                }
+            }
             let child_s: string = gen_expr(p, st, e.children[0]);
             let res: string = concat("(", e.op);
             res = concat(res, child_s);
@@ -534,6 +626,42 @@ fn gen_expr(p: &Program, st: &SymTab, e: &Expr) -> string {
     }
     // 9: EXPR_CALL
     if (e.kind == 9) {
+        if (equals(e.callee, "args")) {
+            return "__cco_get_args()";
+        }
+        if (equals(e.callee, "push") && len(e.args) >= 2) {
+            let arr_s: string = gen_expr(p, st, e.args[0]);
+            let val_s: string = gen_expr(p, st, e.args[1]);
+            let arr_t: string = infer_expr_type(p, st, e.args[0]);
+            let elem_t: string = "int";
+            if (len(arr_t) > 2 && char_at(arr_t, len(arr_t) - 2) == '[' && char_at(arr_t, len(arr_t) - 1) == ']') {
+                elem_t = substring(arr_t, 0, len(arr_t) - 2);
+            }
+            let arr_c_t: string = gen_c_type(p, arr_t);
+            let elem_c_t: string = gen_c_type(p, elem_t);
+
+            let res: string = concat("(", arr_s);
+            res = concat(res, " = (");
+            res = concat(res, arr_c_t);
+            res = concat(res, ")__cco_arr_maybe_grow(");
+            res = concat(res, arr_s);
+            res = concat(res, ", sizeof(");
+            res = concat(res, elem_c_t);
+            res = concat(res, ")), ((");
+            res = concat(res, arr_c_t);
+            res = concat(res, ")");
+            res = concat(res, arr_s);
+            res = concat(res, ")[__cco_arr_len_raw(");
+            res = concat(res, arr_s);
+            res = concat(res, ")] = ");
+            res = concat(res, val_s);
+            res = concat(res, ", __cco_arr_incr_len(");
+            res = concat(res, arr_s);
+            res = concat(res, "), ");
+            res = concat(res, arr_s);
+            res = concat(res, ")");
+            return res;
+        }
         if (equals(e.callee, "concat") && len(e.args) >= 2) {
             let a0: string = gen_expr(p, st, e.args[0]);
             let a1: string = gen_expr(p, st, e.args[1]);
@@ -570,6 +698,30 @@ fn gen_expr(p: &Program, st: &SymTab, e: &Expr) -> string {
             res = concat(res, ")");
             return res;
         }
+        if (equals(e.callee, "char_to_string") && len(e.args) >= 1) {
+            let a0: string = gen_expr(p, st, e.args[0]);
+            let res: string = concat("__cco_char_to_string(", a0);
+            res = concat(res, ")");
+            return res;
+        }
+        if (equals(e.callee, "to_string") && len(e.args) >= 1) {
+            let a0: string = gen_expr(p, st, e.args[0]);
+            let res: string = concat("__cco_to_string(", a0);
+            res = concat(res, ")");
+            return res;
+        }
+        if (equals(e.callee, "exit") && len(e.args) >= 1) {
+            let a0: string = gen_expr(p, st, e.args[0]);
+            let res: string = concat("__cco_exit(", a0);
+            res = concat(res, ")");
+            return res;
+        }
+        if (equals(e.callee, "file_exists") && len(e.args) >= 1) {
+            let a0: string = gen_expr(p, st, e.args[0]);
+            let res: string = concat("__cco_file_exists(", a0);
+            res = concat(res, ")");
+            return res;
+        }
         if (equals(e.callee, "write_file") && len(e.args) >= 2) {
             let a0: string = gen_expr(p, st, e.args[0]);
             let a1: string = gen_expr(p, st, e.args[1]);
@@ -579,8 +731,117 @@ fn gen_expr(p: &Program, st: &SymTab, e: &Expr) -> string {
             res = concat(res, ")");
             return res;
         }
+        if (equals(e.callee, "write_bytes") && len(e.args) >= 2) {
+            let a0: string = gen_expr(p, st, e.args[0]);
+            let a1: string = gen_expr(p, st, e.args[1]);
+            let res: string = concat("__cco_write_bytes(", a0);
+            res = concat(res, ", ");
+            res = concat(res, a1);
+            res = concat(res, ")");
+            return res;
+        }
+        if ((equals(e.callee, "execute_cmd") || equals(e.callee, "system")) && len(e.args) >= 1) {
+            let a0: string = gen_expr(p, st, e.args[0]);
+            let res: string = concat("__cco_execute_cmd(", a0);
+            res = concat(res, ")");
+            return res;
+        }
+        if (equals(e.callee, "equals") && len(e.args) >= 2) {
+            let a0: string = gen_expr(p, st, e.args[0]);
+            let a1: string = gen_expr(p, st, e.args[1]);
+            let res: string = concat("(strcmp(", a0);
+            res = concat(res, ", ");
+            res = concat(res, a1);
+            res = concat(res, ") == 0)");
+            return res;
+        }
+        if (equals(e.callee, "put") && len(e.args) >= 3) {
+            let m_s: string = gen_expr(p, st, e.args[0]);
+            let k_s: string = gen_expr(p, st, e.args[1]);
+            let v_s: string = gen_expr(p, st, e.args[2]);
+            let kt: string = infer_expr_type(p, st, e.args[1]);
+            let vt: string = infer_expr_type(p, st, e.args[2]);
+            let res: string = concat("__cco_map_put(", m_s);
+            res = concat(res, ", ");
+            if (equals(kt, "string")) {
+                res = concat(res, "(void *)(");
+                res = concat(res, k_s);
+                res = concat(res, "), ");
+            } else {
+                res = concat(res, "(void *)(intptr_t)(");
+                res = concat(res, k_s);
+                res = concat(res, "), ");
+            }
+            if (equals(vt, "string") || is_class_type(p, vt) || is_enum_type(p, vt) || has_suffix_arr(vt)) {
+                res = concat(res, "(void *)(");
+                res = concat(res, v_s);
+                res = concat(res, "), NULL)");
+            } else {
+                res = concat(res, "(void *)(intptr_t)(");
+                res = concat(res, v_s);
+                res = concat(res, "), NULL)");
+            }
+            return res;
+        }
+        if (equals(e.callee, "has") && len(e.args) >= 2) {
+            let m_s: string = gen_expr(p, st, e.args[0]);
+            let k_s: string = gen_expr(p, st, e.args[1]);
+            let kt: string = infer_expr_type(p, st, e.args[1]);
+            let res: string = concat("__cco_map_has(", m_s);
+            res = concat(res, ", ");
+            if (equals(kt, "string")) {
+                res = concat(res, "(void *)(");
+                res = concat(res, k_s);
+                res = concat(res, "))");
+            } else {
+                res = concat(res, "(void *)(intptr_t)(");
+                res = concat(res, k_s);
+                res = concat(res, "))");
+            }
+            return res;
+        }
+        if (equals(e.callee, "get") && len(e.args) >= 2) {
+            let m_s: string = gen_expr(p, st, e.args[0]);
+            let k_s: string = gen_expr(p, st, e.args[1]);
+            let kt: string = infer_expr_type(p, st, e.args[1]);
+            let res: string = concat("__cco_map_get(", m_s);
+            res = concat(res, ", ");
+            if (equals(kt, "string")) {
+                res = concat(res, "(void *)(");
+                res = concat(res, k_s);
+                res = concat(res, "))");
+            } else {
+                res = concat(res, "(void *)(intptr_t)(");
+                res = concat(res, k_s);
+                res = concat(res, "))");
+            }
+            let vt: string = infer_expr_type(p, st, e);
+            if (equals(vt, "string")) {
+                let call_s: string = concat("(char *)", res);
+                return call_s;
+            } else if (equals(vt, "int") || equals(vt, "bool")) {
+                let call_s: string = concat("(int)(intptr_t)", res);
+                return call_s;
+            } else if (is_class_type(p, vt)) {
+                let call_s: string = concat(concat("(", vt), " *)");
+                call_s = concat(call_s, res);
+                return call_s;
+            }
+            return res;
+        }
         if (equals(e.callee, "len") && len(e.args) >= 1) {
             let a0: string = gen_expr(p, st, e.args[0]);
+            let t: string = infer_expr_type(p, st, e.args[0]);
+            if (equals(t, "string")) {
+                let res: string = concat("((int)strlen(", a0);
+                res = concat(res, "))");
+                return res;
+            }
+            if (len(t) >= 4 && char_at(t, 0) == 'm' && char_at(t, 1) == 'a' && char_at(t, 2) == 'p' && char_at(t, 3) == '[') {
+                let res: string = concat("((int)((__cco_map *)", a0);
+                res = concat(res, ")->occupied)");
+                return res;
+            }
             let res: string = concat("((int)__cco_arr_len_raw(", a0);
             res = concat(res, "))");
             return res;
@@ -708,28 +969,36 @@ fn gen_expr(p: &Program, st: &SymTab, e: &Expr) -> string {
     }
     // 13: EXPR_ALLOC
     if (e.kind == 13) {
-        let elem_t: string = gen_c_type(p, e.type_name);
+        let arr_t: string = gen_c_type(p, e.type_name);
+        let elem_t: string = gen_c_type(p, e.callee);
         let count_s: string = "0";
         if (len(e.children) > 0) {
             count_s = gen_expr(p, st, e.children[0]);
         }
-        let res: string = concat("((", elem_t);
-        res = concat(res, " *)__cco_alloc_arr(sizeof(");
+        let res: string = concat("(", arr_t);
+        res = concat(res, ")__cco_alloc_arr(sizeof(");
         res = concat(res, elem_t);
         res = concat(res, "), ");
         res = concat(res, count_s);
-        res = concat(res, "))");
+        res = concat(res, ")");
         return res;
     }
     // 14: EXPR_LIST_NEW
     if (e.kind == 14) {
-        let arr_t: string = gen_c_type(p, concat(e.type_name, "[]"));
-        let elem_t: string = gen_c_type(p, e.type_name);
-        let res: string = concat("((", arr_t);
+        let arr_t: string = gen_c_type(p, e.type_name);
+        let elem_t: string = gen_c_type(p, e.callee);
+        let res: string = concat("(", arr_t);
         res = concat(res, ")__cco_list_new(sizeof(");
         res = concat(res, elem_t);
         res = concat(res, "))");
         return res;
+    }
+    // 15: EXPR_MAP_NEW
+    if (e.kind == 15) {
+        if (equals(e.str_val, "string")) {
+            return "__cco_map_new(1)";
+        }
+        return "__cco_map_new(0)";
     }
 
     return "0";
@@ -797,6 +1066,34 @@ fn gen_for_step(p: &Program, st: &SymTab, s: &Stmt) -> string {
     return "";
 }
 
+fn find_enum_by_variant(p: &Program, variant_name: string) -> string {
+    for (let e: int = 0; e < len(p.enums); e++) {
+        for (let v: int = 0; v < len(p.enums[e].variants); v++) {
+            if (equals(p.enums[e].variants[v].name, variant_name)) {
+                return concat(p.enums[e].name, "");
+            }
+        }
+    }
+    return "";
+}
+
+fn find_enum_variant_field_type(p: &Program, enum_name: string, variant_name: string, field_name: string) -> string {
+    for (let e: int = 0; e < len(p.enums); e++) {
+        if (equals(p.enums[e].name, enum_name)) {
+            for (let v: int = 0; v < len(p.enums[e].variants); v++) {
+                if (equals(p.enums[e].variants[v].name, variant_name)) {
+                    for (let f: int = 0; f < len(p.enums[e].variants[v].fields); f++) {
+                        if (equals(p.enums[e].variants[v].fields[f].name, field_name)) {
+                            return concat(p.enums[e].variants[v].fields[f].type_name, "");
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return "int";
+}
+
 fn gen_stmt(p: &Program, st: &SymTab, s: &Stmt, indent: int, cv_names: &string[], cv_types: &string[], cv_count: &int[], is_main: bool) -> string {
     let ind: string = gen_indent(indent);
 
@@ -813,7 +1110,7 @@ fn gen_stmt(p: &Program, st: &SymTab, s: &Stmt, indent: int, cv_names: &string[]
         }
         out = concat(out, ";\n");
         symtab_add(st, s.var_name, s.var_type);
-        if (is_class_type(p, s.var_type) || is_enum_type(p, s.var_type)) {
+        if (indent == 1 && (is_class_type(p, s.var_type) || is_enum_type(p, s.var_type))) {
             let idx: int = cv_count[0];
             if (idx < 64) {
                 cv_names[idx] = concat(s.var_name, "");
@@ -827,11 +1124,43 @@ fn gen_stmt(p: &Program, st: &SymTab, s: &Stmt, indent: int, cv_names: &string[]
     // 2: STMT_ASSIGN
     if (s.kind == 2) {
         let val_s: string = gen_expr(p, st, s.expr[0]);
-        let out: string = concat(ind, s.var_name);
-        out = concat(out, " = ");
-        out = concat(out, val_s);
-        out = concat(out, ";\n");
-        return out;
+        if (len(s.var_name) > 0) {
+            let existing: string = symtab_lookup(st, s.var_name);
+            if (len(existing) == 0) {
+                let vt: string = infer_expr_type(p, st, s.expr[0]);
+                let ct: string = gen_c_type(p, vt);
+                let out: string = concat(ind, ct);
+                out = concat(out, " ");
+                out = concat(out, s.var_name);
+                out = concat(out, " = ");
+                out = concat(out, val_s);
+                out = concat(out, ";\n");
+                symtab_add(st, s.var_name, vt);
+                if (indent == 1 && (is_class_type(p, vt) || is_enum_type(p, vt))) {
+                    let idx: int = cv_count[0];
+                    if (idx < 64) {
+                        cv_names[idx] = concat(s.var_name, "");
+                        cv_types[idx] = concat(vt, "");
+                        cv_count[0] = idx + 1;
+                    }
+                }
+                return out;
+            } else {
+                let out: string = concat(ind, s.var_name);
+                out = concat(out, " = ");
+                out = concat(out, val_s);
+                out = concat(out, ";\n");
+                return out;
+            }
+        } else if (len(s.target_expr) > 0) {
+            let tgt_s: string = gen_expr(p, st, s.target_expr[0]);
+            let out: string = concat(ind, tgt_s);
+            out = concat(out, " = ");
+            out = concat(out, val_s);
+            out = concat(out, ";\n");
+            return out;
+        }
+        return "";
     }
 
     // 3: STMT_COMPOUND_ASSIGN
@@ -865,6 +1194,36 @@ fn gen_stmt(p: &Program, st: &SymTab, s: &Stmt, indent: int, cv_names: &string[]
 
     // 5: STMT_IF
     if (s.kind == 5) {
+        let is_const_true: bool = (len(s.cond_expr) > 0 && ((s.cond_expr[0].kind == 0 && s.cond_expr[0].bool_val == true) || (s.cond_expr[0].kind == 4 && s.cond_expr[0].bool_val == true)));
+        let is_const_false: bool = (len(s.cond_expr) > 0 && ((s.cond_expr[0].kind == 0 && s.cond_expr[0].bool_val == false) || (s.cond_expr[0].kind == 4 && s.cond_expr[0].bool_val == false)));
+
+        if (is_const_true) {
+            let out: string = concat(ind, "{\n");
+            symtab_push_scope(st);
+            for (let i: int = 0; i < len(s.then_block); i++) {
+                let st_s: string = gen_stmt(p, st, s.then_block[i], indent + 1, cv_names, cv_types, cv_count, is_main);
+                out = concat(out, st_s);
+            }
+            symtab_pop_scope(st);
+            out = concat(out, ind);
+            out = concat(out, "}\n");
+            return out;
+        }
+        if (is_const_false) {
+            if (len(s.else_block) > 0) {
+                let out: string = concat(ind, "{\n");
+                symtab_push_scope(st);
+                for (let i: int = 0; i < len(s.else_block); i++) {
+                    let st_s: string = gen_stmt(p, st, s.else_block[i], indent + 1, cv_names, cv_types, cv_count, is_main);
+                    out = concat(out, st_s);
+                }
+                symtab_pop_scope(st);
+                out = concat(out, ind);
+                out = concat(out, "}\n");
+                return out;
+            }
+            return "";
+        }
         let cond_s: string = gen_expr(p, st, s.cond_expr[0]);
         let out: string = concat(ind, "if (");
         out = concat(out, cond_s);
@@ -962,22 +1321,14 @@ fn gen_stmt(p: &Program, st: &SymTab, s: &Stmt, indent: int, cv_names: &string[]
             return out;
         }
 
-        let out: string = "";
-        for (let i: int = cv_count[0] - 1; i >= 0; i--) {
-            out = concat(out, ind);
-            out = concat(out, cv_types[i]);
-            out = concat(out, "_free(");
-            out = concat(out, cv_names[i]);
-            out = concat(out, ");\n");
-        }
-        out = concat(out, ind);
+        let out: string = concat(ind, "return");
         if (len(s.expr) > 0) {
             let val_s: string = gen_expr(p, st, s.expr[0]);
-            out = concat(out, "return ");
+            out = concat(out, " ");
             out = concat(out, val_s);
             out = concat(out, ";\n");
         } else {
-            out = concat(out, "return;\n");
+            out = concat(out, ";\n");
         }
         return out;
     }
@@ -1078,6 +1429,95 @@ fn gen_stmt(p: &Program, st: &SymTab, s: &Stmt, indent: int, cv_names: &string[]
             out = concat(out, st_s);
         }
         symtab_pop_scope(st);
+        out = concat(out, ind);
+        out = concat(out, "}\n");
+        return out;
+    }
+
+    // 14: STMT_MATCH
+    if (s.kind == 14) {
+        let scrut_s: string = gen_expr(p, st, s.expr[0]);
+        let enum_name: string = infer_expr_type(p, st, s.expr[0]);
+        if (!is_enum_type(p, enum_name)) {
+            for (let a: int = 0; a < len(s.body); a++) {
+                if (!s.body[a].arm_is_wildcard && len(s.body[a].arm_variant) > 0) {
+                    let en: string = find_enum_by_variant(p, s.body[a].arm_variant);
+                    if (len(en) > 0) {
+                        enum_name = en;
+                        break;
+                    }
+                }
+            }
+        }
+        let upper_ename: string = str_to_upper(enum_name);
+        let scrut_var: string = concat("__match_scrut_", int_to_str(s.line));
+        scrut_var = concat(scrut_var, "_");
+        scrut_var = concat(scrut_var, int_to_str(s.col));
+
+        let out: string = concat(ind, enum_name);
+        out = concat(out, " *");
+        out = concat(out, scrut_var);
+        out = concat(out, " = ");
+        out = concat(out, scrut_s);
+        out = concat(out, ";\n");
+
+        out = concat(out, ind);
+        out = concat(out, "switch (");
+        out = concat(out, scrut_var);
+        out = concat(out, "->tag) {\n");
+
+        let ind1: string = gen_indent(indent + 1);
+        let ind2: string = gen_indent(indent + 2);
+
+        for (let a: int = 0; a < len(s.body); a++) {
+            symtab_push_scope(st);
+            out = concat(out, ind1);
+            if (s.body[a].arm_is_wildcard) {
+                out = concat(out, "default: {\n");
+            } else {
+                out = concat(out, "case ");
+                out = concat(out, upper_ename);
+                out = concat(out, "_TAG_");
+                out = concat(out, s.body[a].arm_variant);
+                out = concat(out, ": {\n");
+
+                for (let b: int = 0; b < len(s.body[a].arm_bind_vars); b++) {
+                    let bname: string = concat(s.body[a].arm_bind_vars[b], "");
+                    let ftype: string = find_enum_variant_field_type(p, enum_name, s.body[a].arm_variant, bname);
+                    let f_ctype: string = gen_c_type(p, ftype);
+                    symtab_add(st, bname, ftype);
+
+                    out = concat(out, ind2);
+                    out = concat(out, f_ctype);
+                    out = concat(out, " ");
+                    out = concat(out, bname);
+                    out = concat(out, " = ");
+                    out = concat(out, scrut_var);
+                    out = concat(out, "->as.");
+                    out = concat(out, s.body[a].arm_variant);
+                    out = concat(out, ".");
+                    out = concat(out, bname);
+                    out = concat(out, ";\n");
+
+                    out = concat(out, ind2);
+                    out = concat(out, "(void)");
+                    out = concat(out, bname);
+                    out = concat(out, ";\n");
+                }
+            }
+
+            for (let i: int = 0; i < len(s.body[a].body); i++) {
+                let st_s: string = gen_stmt(p, st, s.body[a].body[i], indent + 2, cv_names, cv_types, cv_count, is_main);
+                out = concat(out, st_s);
+            }
+
+            out = concat(out, ind2);
+            out = concat(out, "break;\n");
+            out = concat(out, ind1);
+            out = concat(out, "}\n");
+            symtab_pop_scope(st);
+        }
+
         out = concat(out, ind);
         out = concat(out, "}\n");
         return out;
@@ -1198,7 +1638,7 @@ fn gen_method_def(p: &Program, class_name: string, m: &FunctionDecl) -> string {
 }
 
 fn emit_preludes(u: &Usage) -> string {
-    let out: string = "/* Generated by Cco (C--) Self-Hosted Compiler */\n#define _POSIX_C_SOURCE 200809L\n#include <stdio.h>\n#include <stdlib.h>\n#include <stdbool.h>\n#include <string.h>\n#include <strings.h>\n#include <signal.h>\n#include <math.h>\n#include <time.h>\n#include <errno.h>\n#include <unistd.h>\n#include <sys/types.h>\n#include <sys/socket.h>\n#include <netinet/in.h>\n#include <arpa/inet.h>\n#include <fcntl.h>\n\nstatic int __cco_argc;\nstatic char **__cco_argv;\n\n";
+    let out: string = "/* Generated by Cco (C--) Self-Hosted Compiler */\n#define _POSIX_C_SOURCE 200809L\n#include <stdio.h>\n#include <stdlib.h>\n#include <stdbool.h>\n#include <stdint.h>\n#include <string.h>\n#include <strings.h>\n#include <signal.h>\n#include <math.h>\n#include <time.h>\n#include <errno.h>\n#include <unistd.h>\n#include <sys/types.h>\n#include <sys/socket.h>\n#include <netinet/in.h>\n#include <arpa/inet.h>\n#include <fcntl.h>\n\nstatic int __cco_argc;\nstatic char **__cco_argv;\n\n";
 
     if (u.has_concat) {
         let q: string = char_to_str('\"');
@@ -1240,8 +1680,76 @@ fn emit_preludes(u: &Usage) -> string {
         out = concat(out, ");\n    if (!f) return false;\n    if (content) {\n        size_t len = strlen(content);\n        if (fwrite(content, 1, len, f) != len) {\n            fclose(f);\n            return false;\n        }\n    }\n    fclose(f);\n    return true;\n}\n\n");
     }
 
+    if (u.has_char_to_string) {
+        out = concat(out, "static inline char *__cco_char_to_string(char c) {\n    char *s = (char *)malloc(2);\n    if (!s) exit(1);\n    s[0] = c;\n    s[1] = 0;\n    return s;\n}\n\n");
+    }
+
+    if (u.has_to_string) {
+        out = concat(out, "static inline char *__cco_to_string(long n) {\n    char buf[64];\n    snprintf(buf, sizeof(buf), \"%ld\", n);\n    char *s = strdup(buf);\n    if (!s) exit(1);\n    return s;\n}\n\n");
+    }
+
+    if (u.has_exit) {
+        out = concat(out, "static inline void __cco_exit(long code) {\n    exit((int)code);\n}\n\n");
+    }
+
+    if (u.has_file_exists) {
+        let q: string = char_to_str('\"');
+        let rb: string = concat(q, "rb");
+        rb = concat(rb, q);
+        out = concat(out, "static inline bool __cco_file_exists(const char *path) {\n    if (!path) return false;\n    FILE *f = fopen(path, ");
+        out = concat(out, rb);
+        out = concat(out, ");\n    if (f) {\n        fclose(f);\n        return true;\n    }\n    return false;\n}\n\n");
+    }
+
+    if (u.has_to_int || u.has_is_int) {
+        out = concat(out, "static inline bool __cco_try_parse_int(const char *s, long *out_val) {\n    if (!s) return false;\n    while (*s == 32 || *s == 9 || *s == 10 || *s == 13) s++;\n    if (!*s) return false;\n    char *endptr = NULL;\n    errno = 0;\n    long val = strtol(s, &endptr, 10);\n    if (endptr == s || errno != 0) return false;\n    while (*endptr == 32 || *endptr == 9 || *endptr == 10 || *endptr == 13) endptr++;\n    if (*endptr != 0) return false;\n    if (out_val) *out_val = val;\n    return true;\n}\n\n");
+    }
+    if (u.has_is_int) {
+        out = concat(out, "static inline bool __cco_is_int(const char *s) {\n    return __cco_try_parse_int(s, NULL);\n}\n\n");
+    }
+    if (u.has_to_int) {
+        out = concat(out, "static inline long __cco_to_int(const char *s) {\n    long val = 0;\n    if (!__cco_try_parse_int(s, &val)) exit(1);\n    return val;\n}\n\n");
+    }
+    if (u.has_to_float || u.has_is_float) {
+        out = concat(out, "static inline bool __cco_try_parse_float(const char *s, double *out_val) {\n    if (!s) return false;\n    while (*s == 32 || *s == 9 || *s == 10 || *s == 13) s++;\n    if (!*s) return false;\n    char *endptr = NULL;\n    errno = 0;\n    double val = strtod(s, &endptr);\n    if (endptr == s || errno != 0) return false;\n    while (*endptr == 32 || *endptr == 9 || *endptr == 10 || *endptr == 13) endptr++;\n    if (*endptr != 0) return false;\n    if (out_val) *out_val = val;\n    return true;\n}\n\n");
+    }
+    if (u.has_is_float) {
+        out = concat(out, "static inline bool __cco_is_float(const char *s) {\n    return __cco_try_parse_float(s, NULL);\n}\n\n");
+    }
+    if (u.has_to_float) {
+        out = concat(out, "static inline double __cco_to_float(const char *s) {\n    double val = 0.0;\n    if (!__cco_try_parse_float(s, &val)) exit(1);\n    return val;\n}\n\n");
+    }
+
     if (u.has_array) {
-        out = concat(out, "typedef struct {\n    size_t capacity;\n    size_t length;\n} __cco_arr_header;\n\nstatic inline void __cco_free_arr(void *ptr) {\n    if (ptr) {\n        free(((__cco_arr_header *)ptr) - 1);\n    }\n}\n\nstatic inline size_t __cco_arr_len_raw(const void *ptr) {\n    if (!ptr) return 0;\n    return (((const __cco_arr_header *)ptr) - 1)->length;\n}\n\nstatic inline void *__cco_alloc_arr(size_t elem_size, size_t count) {\n    __cco_arr_header *hdr = (__cco_arr_header *)malloc(sizeof(__cco_arr_header) + elem_size * count);\n    if (!hdr) exit(1);\n    hdr->capacity = count;\n    hdr->length = count;\n    memset(hdr + 1, 0, elem_size * count);\n    return (void *)(hdr + 1);\n}\n\nstatic inline void *__cco_list_new(size_t elem_size) {\n    __cco_arr_header *hdr = (__cco_arr_header *)malloc(sizeof(__cco_arr_header) + elem_size * 4);\n    if (!hdr) exit(1);\n    hdr->capacity = 4;\n    hdr->length = 0;\n    return (void *)(hdr + 1);\n}\n\n");
+        out = concat(out, "typedef struct {\n    size_t capacity;\n    size_t length;\n} __cco_arr_header;\n\nstatic inline void __cco_free_arr(void *ptr) {\n    if (ptr) {\n        free(((__cco_arr_header *)ptr) - 1);\n    }\n}\n\n");
+        out = concat(out, "static inline size_t __cco_arr_len_raw(const void *ptr) {\n    if (!ptr) return 0;\n    return (((const __cco_arr_header *)ptr) - 1)->length;\n}\n\n");
+        out = concat(out, "static inline void *__cco_alloc_arr(size_t elem_size, size_t count) {\n    __cco_arr_header *hdr = (__cco_arr_header *)malloc(sizeof(__cco_arr_header) + elem_size * count);\n    if (!hdr) exit(1);\n    hdr->capacity = count;\n    hdr->length = count;\n    memset(hdr + 1, 0, elem_size * count);\n    return (void *)(hdr + 1);\n}\n\n");
+        out = concat(out, "static inline void *__cco_list_new(size_t elem_size) {\n    __cco_arr_header *hdr = (__cco_arr_header *)malloc(sizeof(__cco_arr_header) + elem_size * 4);\n    if (!hdr) exit(1);\n    hdr->capacity = 4;\n    hdr->length = 0;\n    return (void *)(hdr + 1);\n}\n\n");
+        out = concat(out, "static inline void *__cco_arr_maybe_grow(void *ptr, size_t elem_size) {\n    if (!ptr) return NULL;\n    __cco_arr_header *hdr = ((__cco_arr_header *)ptr) - 1;\n    if (hdr->length >= hdr->capacity) {\n        size_t new_cap = hdr->capacity == 0 ? 4 : hdr->capacity * 2;\n        __cco_arr_header *new_hdr = (__cco_arr_header *)realloc(hdr, sizeof(__cco_arr_header) + new_cap * elem_size);\n        if (!new_hdr) exit(1);\n        new_hdr->capacity = new_cap;\n        return (void *)(new_hdr + 1);\n    }\n    return ptr;\n}\n\nstatic inline void __cco_arr_incr_len(void *ptr) {\n    if (ptr) {\n        ((__cco_arr_header *)ptr)[-1].length++;\n    }\n}\n\n");
+    }
+
+    if (u.has_write_bytes) {
+        let q: string = char_to_str('\"');
+        let wb: string = concat(q, "wb");
+        wb = concat(wb, q);
+        out = concat(out, "static inline bool __cco_write_bytes(const char *path, const int *bytes) {\n    if (!path || !bytes) return false;\n    FILE *f = fopen(path, ");
+        out = concat(out, wb);
+        out = concat(out, ");\n    if (!f) return false;\n    size_t count = (size_t)__cco_arr_len_raw((void *)bytes);\n    for (size_t i = 0; i < count; i++) {\n        unsigned char b = (unsigned char)(bytes[i] & 0xFF);\n        fputc((int)b, f);\n    }\n    fclose(f);\n    return true;\n}\n\n");
+    }
+
+    if (u.has_execute_cmd) {
+        out = concat(out, "static inline int __cco_execute_cmd(const char *cmd) {\n    if (!cmd) return -1;\n    return (int)system(cmd);\n}\n\n");
+    }
+
+    if (u.has_args) {
+        out = concat(out, "static inline char **__cco_get_args(void) {\n    char **arr = (char **)__cco_list_new(sizeof(char *));\n    if (__cco_argc <= 1 || !__cco_argv) return arr;\n    for (int i = 1; i < __cco_argc; i++) {\n        arr = (char **)__cco_arr_maybe_grow(arr, sizeof(char *));\n        int len = (int)__cco_arr_len_raw(arr);\n        arr[len] = strdup(__cco_argv[i]);\n        __cco_arr_incr_len(arr);\n    }\n    return arr;\n}\n\n");
+    }
+
+    if (u.has_map) {
+        out = concat(out, "typedef enum {\n    __CCO_BUCKET_EMPTY = 0,\n    __CCO_BUCKET_OCCUPIED = 1,\n    __CCO_BUCKET_TOMBSTONE = 2\n} __cco_bucket_state;\n\ntypedef struct {\n    __cco_bucket_state state;\n    void *key;\n    void *value;\n} __cco_map_bucket;\n\ntypedef struct {\n    size_t capacity;\n    size_t occupied;\n    size_t tombstones;\n    int key_type;\n    __cco_map_bucket *buckets;\n} __cco_map;\n\ntypedef void (*__cco_val_free_fn)(void *);\n\nstatic inline uint32_t __cco_hash_str(const char *str) {\n    uint32_t hash = 2166136261u;\n    for (const char *p = str; *p; p++) {\n        hash ^= (uint8_t)*p;\n        hash *= 16777619u;\n    }\n    return hash;\n}\n\nstatic inline uint32_t __cco_hash_int(int key) {\n    uint32_t x = (uint32_t)key;\n    x = ((x >> 16) ^ x) * 0x45d9f3b;\n    x = ((x >> 16) ^ x) * 0x45d9f3b;\n    x = (x >> 16) ^ x;\n    return x;\n}\n\nstatic inline bool __cco_key_eq(int key_type, void *k1, void *k2) {\n    if (key_type == 1) {\n        if (!k1 || !k2) return k1 == k2;\n        return strcmp((const char *)k1, (const char *)k2) == 0;\n    } else {\n        return (intptr_t)k1 == (intptr_t)k2;\n    }\n}\n\nstatic inline uint32_t __cco_hash_key(int key_type, void *key) {\n    if (key_type == 1) return __cco_hash_str((const char *)key);\n    else return __cco_hash_int((int)(intptr_t)key);\n}\n\n");
+        out = concat(out, "static inline __cco_map *__cco_map_new(int key_type) {\n    __cco_map *m = (__cco_map *)malloc(sizeof(__cco_map));\n    if (!m) exit(1);\n    m->capacity = 8;\n    m->occupied = 0;\n    m->tombstones = 0;\n    m->key_type = key_type;\n    m->buckets = (__cco_map_bucket *)calloc(m->capacity, sizeof(__cco_map_bucket));\n    if (!m->buckets) exit(1);\n    return m;\n}\n\nstatic inline void __cco_map_rehash(__cco_map *m) {\n    size_t old_cap = m->capacity;\n    size_t new_cap = old_cap * 2;\n    __cco_map_bucket *old_buckets = m->buckets;\n    __cco_map_bucket *new_buckets = (__cco_map_bucket *)calloc(new_cap, sizeof(__cco_map_bucket));\n    if (!new_buckets) exit(1);\n    m->buckets = new_buckets;\n    m->capacity = new_cap;\n    m->occupied = 0;\n    m->tombstones = 0;\n    for (size_t i = 0; i < old_cap; i++) {\n        if (old_buckets[i].state == __CCO_BUCKET_OCCUPIED) {\n            void *key = old_buckets[i].key;\n            void *val = old_buckets[i].value;\n            uint32_t h = __cco_hash_key(m->key_type, key);\n            size_t idx = h & (new_cap - 1);\n            while (m->buckets[idx].state == __CCO_BUCKET_OCCUPIED) {\n                idx = (idx + 1) & (new_cap - 1);\n            }\n            m->buckets[idx].state = __CCO_BUCKET_OCCUPIED;\n            m->buckets[idx].key = key;\n            m->buckets[idx].value = val;\n            m->occupied++;\n        }\n    }\n    free(old_buckets);\n}\n\n");
+        out = concat(out, "static inline __cco_map *__cco_map_put(__cco_map *m, void *key, void *val, __cco_val_free_fn free_fn) {\n    if (!m) return NULL;\n    if ((m->occupied + m->tombstones + 1) * 10 >= m->capacity * 7) {\n        __cco_map_rehash(m);\n    }\n    uint32_t h = __cco_hash_key(m->key_type, key);\n    size_t cap = m->capacity;\n    size_t idx = h & (cap - 1);\n    long first_tombstone = -1;\n    while (m->buckets[idx].state != __CCO_BUCKET_EMPTY) {\n        if (m->buckets[idx].state == __CCO_BUCKET_TOMBSTONE) {\n            if (first_tombstone == -1) first_tombstone = (long)idx;\n        } else if (m->buckets[idx].state == __CCO_BUCKET_OCCUPIED) {\n            if (__cco_key_eq(m->key_type, m->buckets[idx].key, key)) {\n                if (free_fn && m->buckets[idx].value) {\n                    free_fn(m->buckets[idx].value);\n                }\n                m->buckets[idx].value = val;\n                return m;\n            }\n        }\n        idx = (idx + 1) & (cap - 1);\n    }\n    size_t insert_idx = (first_tombstone != -1) ? (size_t)first_tombstone : idx;\n    void *key_to_store;\n    if (m->key_type == 1) {\n        key_to_store = (void *)strdup((const char *)key);\n    } else {\n        key_to_store = key;\n    }\n    m->buckets[insert_idx].state = __CCO_BUCKET_OCCUPIED;\n    m->buckets[insert_idx].key = key_to_store;\n    m->buckets[insert_idx].value = val;\n    m->occupied++;\n    if (first_tombstone != -1) {\n        m->tombstones--;\n    }\n    return m;\n}\n\n");
+        out = concat(out, "static inline void *__cco_map_get(__cco_map *m, void *key) {\n    if (!m) return NULL;\n    uint32_t h = __cco_hash_key(m->key_type, key);\n    size_t cap = m->capacity;\n    size_t idx = h & (cap - 1);\n    while (m->buckets[idx].state != __CCO_BUCKET_EMPTY) {\n        if (m->buckets[idx].state == __CCO_BUCKET_OCCUPIED) {\n            if (__cco_key_eq(m->key_type, m->buckets[idx].key, key)) {\n                return m->buckets[idx].value;\n            }\n        }\n        idx = (idx + 1) & (cap - 1);\n    }\n    return NULL;\n}\n\nstatic inline bool __cco_map_has(__cco_map *m, void *key) {\n    if (!m) return false;\n    uint32_t h = __cco_hash_key(m->key_type, key);\n    size_t cap = m->capacity;\n    size_t idx = h & (cap - 1);\n    while (m->buckets[idx].state != __CCO_BUCKET_EMPTY) {\n        if (m->buckets[idx].state == __CCO_BUCKET_OCCUPIED) {\n            if (__cco_key_eq(m->key_type, m->buckets[idx].key, key)) {\n                return true;\n            }\n        }\n        idx = (idx + 1) & (cap - 1);\n    }\n    return false;\n}\n\nstatic inline void __cco_map_free(__cco_map *m, __cco_val_free_fn val_free_fn) {\n    if (!m) return;\n    if (m->buckets) {\n        for (size_t i = 0; i < m->capacity; i++) {\n            if (m->buckets[i].state == __CCO_BUCKET_OCCUPIED) {\n                if (m->key_type == 1 && m->buckets[i].key) {\n                    free(m->buckets[i].key);\n                }\n                if (val_free_fn && m->buckets[i].value) {\n                    val_free_fn(m->buckets[i].value);\n                }\n            }\n        }\n        free(m->buckets);\n    }\n    free(m);\n}\n\n");
     }
 
     return out;

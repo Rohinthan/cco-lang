@@ -1,0 +1,27 @@
+fn main() -> int {
+    let words: string[] = list_new(string);
+    words = push(words, "alpha");
+    words = push(words, "beta");
+    words = push(words, "gamma");
+
+    for w in words {
+        print(w);
+    }
+
+    let nums: int[] = list_new(int);
+    nums = push(nums, 10);
+    nums = push(nums, 20);
+    nums = push(nums, 30);
+
+    let sum: int = 0;
+    for n in nums {
+        sum += n;
+    }
+    print(to_string(sum));
+
+    for i in 0..3 {
+        print(to_string(i));
+    }
+
+    return 0;
+}

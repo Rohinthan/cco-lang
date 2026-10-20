@@ -1,0 +1,4 @@
+fn main() -> int {
+    print(unassigned_variable_name);
+    return 0;
+}
