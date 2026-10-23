@@ -1,0 +1,101 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// std/option.cco — Standard Library Option Sum Types & Helper Patterns
+
+enum OptionInt {
+    Some { value: int },
+    None,
+}
+
+enum OptionStr {
+    Some { value: string },
+    None,
+}
+
+fn some_int(value: int) -> OptionInt {
+    return OptionInt.Some { value: value };
+}
+
+fn none_int() -> OptionInt {
+    return OptionInt.None;
+}
+
+fn some_str(value: string) -> OptionStr {
+    return OptionStr.Some { value: concat(value, "") };
+}
+
+fn none_str() -> OptionStr {
+    return OptionStr.None;
+}
+
+fn opt_int_is_some(opt: &OptionInt) -> bool {
+    match opt {
+        OptionInt.Some { value } => {
+            return true;
+        }
+        OptionInt.None => {
+            return false;
+        }
+    }
+    return false;
+}
+
+fn opt_int_is_none(opt: &OptionInt) -> bool {
+    match opt {
+        OptionInt.Some { value } => {
+            return false;
+        }
+        OptionInt.None => {
+            return true;
+        }
+    }
+    return true;
+}
+
+fn opt_int_unwrap_or(opt: &OptionInt, default_val: int) -> int {
+    match opt {
+        OptionInt.Some { value } => {
+            return value;
+        }
+        OptionInt.None => {
+            return default_val;
+        }
+    }
+    return default_val;
+}
+
+fn opt_str_is_some(opt: &OptionStr) -> bool {
+    match opt {
+        OptionStr.Some { value } => {
+            return true;
+        }
+        OptionStr.None => {
+            return false;
+        }
+    }
+    return false;
+}
+
+fn opt_str_is_none(opt: &OptionStr) -> bool {
+    match opt {
+        OptionStr.Some { value } => {
+            return false;
+        }
+        OptionStr.None => {
+            return true;
+        }
+    }
+    return true;
+}
+
+fn opt_str_unwrap_or(opt: &OptionStr, default_val: string) -> string {
+    match opt {
+        OptionStr.Some { value } => {
+            return value;
+        }
+        OptionStr.None => {
+            return default_val;
+        }
+    }
+    return default_val;
+}
