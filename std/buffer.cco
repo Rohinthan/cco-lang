@@ -1,0 +1,209 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// std/buffer.cco — Standard Library Fixed-Capacity Binary ByteBuffer
+
+import "std/option.cco";
+
+class ByteBuffer {
+    bytes: int[];
+    capacity: int;
+    writer_pos: int;
+    reader_pos: int;
+
+    // Returns the number of unread bytes currently available to read.
+    fn readable_bytes(self) -> int {
+        return self.writer_pos - self.reader_pos;
+    }
+
+    // Returns the remaining writable capacity available before the buffer is full.
+    fn writable_bytes(self) -> int {
+        return self.capacity - self.writer_pos;
+    }
+
+    // Writes an unsigned 8-bit integer [0..255] to the buffer.
+    // Returns false if value is out of range or buffer has insufficient writable capacity (< 1 byte).
+    // Does not advance writer_pos on failure.
+    fn write_u8(self, value: int) -> bool {
+        if (value < 0 || value > 255) {
+            return false;
+        }
+        if (self.writable_bytes() < 1) {
+            return false;
+        }
+        self.bytes[self.writer_pos] = value;
+        self.writer_pos += 1;
+        return true;
+    }
+
+    // Writes an unsigned 16-bit integer [0..65535] in big-endian byte order (MSB first).
+    // Returns false if value is out of range or buffer has insufficient writable capacity (< 2 bytes).
+    // Atomically writes all 2 bytes or none; writer_pos is never partially advanced.
+    fn write_u16_be(self, value: int) -> bool {
+        if (value < 0 || value > 65535) {
+            return false;
+        }
+        if (self.writable_bytes() < 2) {
+            return false;
+        }
+        let hi: int = (value / 256) % 256;
+        let lo: int = value % 256;
+        self.bytes[self.writer_pos] = hi;
+        self.bytes[self.writer_pos + 1] = lo;
+        self.writer_pos += 2;
+        return true;
+    }
+
+    // Writes an unsigned 32-bit integer [0..2147483647] in big-endian byte order (MSB first).
+    // Returns false if value is out of range or buffer has insufficient writable capacity (< 4 bytes).
+    // In Cco's signed 32-bit integer system, valid non-negative values are [0, 2147483647].
+    // Values outside this range are rejected to prevent signed integer overflow.
+    // Atomically writes all 4 bytes or none; writer_pos is never partially advanced.
+    fn write_u32_be(self, value: int) -> bool {
+        if (value < 0 || value > 2147483647) {
+            return false;
+        }
+        if (self.writable_bytes() < 4) {
+            return false;
+        }
+        let b3: int = (value / 16777216) % 256;
+        let b2: int = (value / 65536) % 256;
+        let b1: int = (value / 256) % 256;
+        let b0: int = value % 256;
+        self.bytes[self.writer_pos] = b3;
+        self.bytes[self.writer_pos + 1] = b2;
+        self.bytes[self.writer_pos + 2] = b1;
+        self.bytes[self.writer_pos + 3] = b0;
+        self.writer_pos += 4;
+        return true;
+    }
+
+    // Reads an unsigned 8-bit integer from the buffer.
+    // Returns OptionInt.None if insufficient readable bytes (< 1).
+    // Advances reader_pos by 1 on success.
+    fn read_u8_opt(self) -> OptionInt {
+        if (self.readable_bytes() < 1) {
+            return OptionInt.None;
+        }
+        let b: int = self.bytes[self.reader_pos];
+        self.reader_pos += 1;
+        return OptionInt.Some { value: b };
+    }
+
+    // Reads an unsigned 16-bit big-endian integer from the buffer.
+    // Returns OptionInt.None if insufficient readable bytes (< 2), without advancing reader_pos.
+    // Advances reader_pos by 2 on success.
+    fn read_u16_be_opt(self) -> OptionInt {
+        if (self.readable_bytes() < 2) {
+            return OptionInt.None;
+        }
+        let hi: int = self.bytes[self.reader_pos];
+        let lo: int = self.bytes[self.reader_pos + 1];
+        self.reader_pos += 2;
+        let val: int = (hi * 256) + lo;
+        return OptionInt.Some { value: val };
+    }
+
+    // Reads an unsigned 32-bit big-endian integer from the buffer.
+    // Returns OptionInt.None if insufficient readable bytes (< 4), without advancing reader_pos.
+    // Advances reader_pos by 4 on success.
+    fn read_u32_be_opt(self) -> OptionInt {
+        if (self.readable_bytes() < 4) {
+            return OptionInt.None;
+        }
+        let b3: int = self.bytes[self.reader_pos];
+        let b2: int = self.bytes[self.reader_pos + 1];
+        let b1: int = self.bytes[self.reader_pos + 2];
+        let b0: int = self.bytes[self.reader_pos + 3];
+        self.reader_pos += 4;
+        let val: int = (b3 * 16777216) + (b2 * 65536) + (b1 * 256) + b0;
+        return OptionInt.Some { value: val };
+    }
+
+    // Convenience read returning -1 on EOF (< 1 readable byte).
+    // Note: Use read_u8_opt() to safely distinguish valid byte 0 from EOF.
+    fn read_u8(self) -> int {
+        if (self.readable_bytes() < 1) {
+            return -1;
+        }
+        let b: int = self.bytes[self.reader_pos];
+        self.reader_pos += 1;
+        return b;
+    }
+
+    // Convenience read returning -1 on EOF / insufficient data (< 2 readable bytes).
+    // Does not advance reader_pos on failure.
+    fn read_u16_be(self) -> int {
+        if (self.readable_bytes() < 2) {
+            return -1;
+        }
+        let hi: int = self.bytes[self.reader_pos];
+        let lo: int = self.bytes[self.reader_pos + 1];
+        self.reader_pos += 2;
+        return (hi * 256) + lo;
+    }
+
+    // Convenience read returning -1 on EOF / insufficient data (< 4 readable bytes).
+    // Does not advance reader_pos on failure.
+    fn read_u32_be(self) -> int {
+        if (self.readable_bytes() < 4) {
+            return -1;
+        }
+        let b3: int = self.bytes[self.reader_pos];
+        let b2: int = self.bytes[self.reader_pos + 1];
+        let b1: int = self.bytes[self.reader_pos + 2];
+        let b0: int = self.bytes[self.reader_pos + 3];
+        self.reader_pos += 4;
+        return (b3 * 16777216) + (b2 * 65536) + (b1 * 256) + b0;
+    }
+
+    // Inspects next byte without advancing reader_pos. Returns -1 on EOF.
+    fn peek_u8(self) -> int {
+        if (self.readable_bytes() < 1) {
+            return -1;
+        }
+        return self.bytes[self.reader_pos];
+    }
+
+    // Inspects next byte without advancing reader_pos. Returns OptionInt.None on EOF.
+    fn peek_u8_opt(self) -> OptionInt {
+        if (self.readable_bytes() < 1) {
+            return OptionInt.None;
+        }
+        return OptionInt.Some { value: self.bytes[self.reader_pos] };
+    }
+
+    // Resets reader and writer positions to 0 without reallocating buffer.
+    fn reset(self) -> void {
+        self.reader_pos = 0;
+        self.writer_pos = 0;
+    }
+
+    // Alias for reset().
+    fn clear(self) -> void {
+        self.reset();
+    }
+}
+
+// Creates a new ByteBuffer with fixed capacity.
+// Non-positive capacities (<= 0) are safely clamped to 1.
+fn byte_buffer_new(capacity: int) -> ByteBuffer {
+    let cap: int = capacity;
+    if (cap <= 0) {
+        cap = 1;
+    }
+    let buf: int[] = alloc(int, cap);
+    for (let i: int = 0; i < cap; i++) {
+        buf[i] = 0;
+    }
+    return ByteBuffer {
+        bytes: buf,
+        capacity: cap,
+        writer_pos: 0,
+        reader_pos: 0
+    };
+}
+
+// Backward-compatible alias matching codebase example 232.
+fn create_byte_buffer(capacity: int) -> ByteBuffer {
+    return byte_buffer_new(capacity);
+}
