@@ -1,6 +1,10 @@
-# Cco Programming Language
+# Cco — C Class with Objects
 
-A statically typed, natively compiled programming language designed to combine Python-inspired programming ergonomics with systems-level execution and compile-time memory safety.
+Cco (C Class with Objects) is a statically typed, compiled programming language designed to combine readable, approachable syntax with systems-level programming capabilities.
+
+Cco's design goals include Python-inspired readability, C-like performance, C++-style classes and objects, and Rust-inspired memory-safety concepts.
+
+Cco currently provides a C11 code-generation pipeline and an evolving native x86-64 backend. Their supported features differ, and development continues toward broader language and standard-library support.
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Linux%20x86--64-brightgreen.svg)]()
@@ -10,34 +14,117 @@ A statically typed, natively compiled programming language designed to combine P
 Cco (pronounced *C-co*, historically designated *C--*) explores a distinctive middle ground in programming language design: the visual clarity and lightweight syntax of high-level scripting languages coupled with the performance, predictable resource usage, and static guarantees of compiled systems languages. 
 
 Cco features a dual-target compilation model:
-1. **Direct Native Compilation**: A native x86-64 backend that emits binary machine instructions, constructs standard ELF64 relocatable object files (`.o`), and links standalone Linux executables via an embedded static linker and freestanding syscall runtime (`_start`)—without requiring external toolchains (`gcc`, `as`, `ld`, or `libc.so`).
-2. **Standard C11 Transpilation**: A portable source-to-source backend generating clean, standard ISO C11 (`-std=c11 -pedantic-errors`) for auditing, cross-compilation, or deployment with host C compilers (`gcc`, `clang`, `tcc`).
+1. **Standard C11 Code Generation**: A portable source-to-source backend generating clean, standard ISO C11 (`-std=c11 -pedantic-errors`) for auditing, cross-compilation, or deployment with host C compilers (`gcc`, `clang`, `tcc`).
+2. **Evolving Native x86-64 Backend**: A direct machine-code backend that emits binary machine instructions, constructs standard ELF64 relocatable object files (`.o`), and links standalone Linux executables via an embedded static linker and freestanding syscall runtime (`_start`)—without requiring external toolchains (`gcc`, `as`, `ld`, or `libc.so`). Feature support between the C11 and native backends currently differs, with language evolution actively underway.
 
 ---
 
-## Quick Start: Download, Install & Run
+## Installation & Quick Start
 
-Get up and running with Cco in under a minute:
+Cco can be compiled and installed with a C11-compatible compiler (`gcc` or `clang`) and `make`.
 
-### 1. Download & Install
+### 1. Building from Source
+
+Clone the repository and build the compiler:
 
 ```bash
-# Clone the repository
 git clone https://github.com/Rohinthan/cco-lang.git
 cd cco-lang
+make
+```
 
-# Build the compiler executable
-make cco
+This compiles the `cco` compiler executable, along with companion aliases `gcco` and `cco-link`.
+*(Note: Running `make install` automatically builds the compiler first if it has not yet been built.)*
 
-# Install into ~/.local/bin and standard library into ~/.local/lib/cco
+### 2. Installing for the Current User (Recommended)
+
+To install Cco for your local user account without requiring root or `sudo` privileges:
+
+```bash
 make install
 ```
 
-> [!TIP]
-> Ensure `~/.local/bin` is in your `$PATH` (typically default on modern Linux distros, or add `export PATH="$HOME/.local/bin:$PATH"` to your `~/.bashrc`).  
-> For system-wide installation across all users, run: `sudo make install PREFIX=/usr/local`
+By default, this installs:
+- Executables (`cco`, `gcco`, `cco-link`) into `~/.local/bin/` (with executable permissions `0755`)
+- Standard library modules (`io.cco`, `net.cco`, `buffer.cco`, `result.cco`, `option.cco`, `string.cco`, `math.cco`, `deque.cco`) into `~/.local/lib/cco/std/` (with permissions `0644`)
 
-### 2. Write Your First Program (`example.cco`)
+To uninstall at any time:
+```bash
+make uninstall
+```
+
+### 3. Installing System-Wide
+
+To install Cco system-wide for all users across the system:
+
+```bash
+sudo make install PREFIX=/usr/local
+```
+
+This installs executables to `/usr/local/bin` and the standard library to `/usr/local/lib/cco/std`.
+
+For packaging workflows, `DESTDIR` staging is supported:
+```bash
+make install PREFIX=/usr/local DESTDIR=/path/to/staging/root
+```
+
+To remove a system-wide installation:
+```bash
+sudo make uninstall PREFIX=/usr/local
+```
+
+### 4. Verifying the Installation
+
+1. Verify that `cco` is accessible from your command line:
+   ```bash
+   cco
+   ```
+   *(Running `cco` without arguments prints the compiler usage help and command-line options.)*
+
+2. Create and run a minimal test program outside the source directory:
+   ```bash
+   echo 'print("Hello from Cco!");' > test_hello.cco
+   cco test_hello.cco --run
+   ```
+   Output:
+   ```text
+   Hello from Cco!
+   ```
+
+3. Verify standard library imports:
+   ```bash
+   echo 'import "std/io.cco"; print(file_exists("test_hello.cco"));' > test_io.cco
+   cco test_io.cco --run
+   ```
+   Output:
+   ```text
+   true
+   ```
+
+### 5. Troubleshooting PATH and Standard-Library Discovery
+
+- **Command not found (`cco: command not found`):**
+  If `make install` succeeded but running `cco` fails, `~/.local/bin` is not currently in your environment `$PATH`. Not all Linux distributions include `~/.local/bin` in `$PATH` by default.
+  Add it to your current session:
+  ```bash
+  export PATH="$HOME/.local/bin:$PATH"
+  ```
+  To make this permanent for Bash users, append the export to your `~/.bashrc`:
+  ```bash
+  echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+  source ~/.bashrc
+  ```
+
+- **Standard Library Resolution (`cannot find imported file 'std/...'`):**
+  The installed `cco` compiler automatically resolves standard library modules relative to its own binary location using `/proc/self/exe` (resolving to `../lib/cco/std/...`).
+  If you are running the compiler from a non-standard location or custom container layout, you can override the discovery path by setting the `CCO_STD_PATH` environment variable:
+  ```bash
+  export CCO_STD_PATH="$HOME/.local/lib/cco/std"
+  ```
+
+---
+
+## Tutorial: Writing Your First Program (`example.cco`)
 
 ```cco
 # example.cco
@@ -91,7 +178,7 @@ Cco explores an alternative balance within this design space:
 
 - **Concise, readable syntax**: First-class declaration-by-assignment, range loops, unparenthesized control flow, expression-bodied functions, and top-level scripts reduce cognitive overhead.
 - **Static type checking**: Every variable, parameter, and expression has a statically resolved type. Omitting variable keywords does not introduce dynamic typing or runtime type tags.
-- **Compile-time single ownership**: Memory safety is managed deterministically through move semantics, borrowed references (`&T`), and reverse scope-exit destructor cascades. No runtime garbage collector is used.
+- **Rust-inspired memory-safety concepts**: Explores deterministic compile-time memory safety through move semantics, borrowed references (`&T`), and reverse scope-exit destructor cascades without a runtime garbage collector, working toward memory safety without claiming full Rust-equivalent guarantees.
 - **Fast, self-contained compilation**: Direct machine-code encoding and an internal ELF64 static linker compile and link standalone executables in under 15 milliseconds.
 
 The objective is not to replace established languages, but to provide a practical systems language where programs are as concise to write as scripts while executing as bare-metal native binaries.

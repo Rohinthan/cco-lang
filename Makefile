@@ -17,20 +17,30 @@ cco-link: cco
 	@cp -f cco cco-link
 
 PREFIX ?= $(HOME)/.local
+BINDIR ?= $(PREFIX)/bin
+LIBDIR ?= $(PREFIX)/lib
+DESTDIR ?=
+
+INSTALL ?= install
+INSTALL_PROGRAM ?= $(INSTALL) -m 755
+INSTALL_DATA ?= $(INSTALL) -m 644
 
 install: cco gcco cco-link
-	@mkdir -p $(PREFIX)/bin
-	@cp -f cco $(PREFIX)/bin/cco
-	@cp -f gcco $(PREFIX)/bin/gcco
-	@cp -f cco-link $(PREFIX)/bin/cco-link
-	@mkdir -p $(PREFIX)/lib/cco/std
-	@cp -rf std/*.cco $(PREFIX)/lib/cco/std/
-	@echo "Successfully installed 'cco', 'gcco', 'cco-link', and standard library to $(PREFIX)"
+	@mkdir -p $(DESTDIR)$(BINDIR)
+	$(INSTALL_PROGRAM) cco $(DESTDIR)$(BINDIR)/cco
+	$(INSTALL_PROGRAM) gcco $(DESTDIR)$(BINDIR)/gcco
+	$(INSTALL_PROGRAM) cco-link $(DESTDIR)$(BINDIR)/cco-link
+	@mkdir -p $(DESTDIR)$(LIBDIR)/cco/std
+	$(INSTALL_DATA) std/*.cco $(DESTDIR)$(LIBDIR)/cco/std/
+	@echo "Successfully installed Cco to $(DESTDIR)$(PREFIX)"
 
 uninstall:
-	@rm -f $(PREFIX)/bin/cco $(PREFIX)/bin/gcco $(PREFIX)/bin/cco-link
-	@rm -rf $(PREFIX)/lib/cco
-	@echo "Removed 'cco', 'gcco', and standard library from $(PREFIX)"
+	@if [ -z "$(BINDIR)" ] || [ "$(BINDIR)" = "/" ] || [ -z "$(LIBDIR)" ] || [ "$(LIBDIR)" = "/" ]; then \
+		echo "Refusing to uninstall from unsafe paths"; exit 1; \
+	fi
+	@rm -f $(DESTDIR)$(BINDIR)/cco $(DESTDIR)$(BINDIR)/gcco $(DESTDIR)$(BINDIR)/cco-link
+	@rm -rf $(DESTDIR)$(LIBDIR)/cco
+	@echo "Removed Cco from $(DESTDIR)$(PREFIX)"
 
 unit_tests: cco
 	@mkdir -p build
@@ -124,11 +134,49 @@ test_phase15: test_bootstrap
 test_phase16: test_bootstrap
 	@bash tests/run_phase16_tests.sh
 
-test: unit_tests test_selfhost test_bootstrap test_selfhost_fixpoint test_phase13 test_phase14 test_phase15 test_phase16
+test_phase17: test_bootstrap
+	@bash tests/phase17/run_phase17_tests.sh
+
+test_diagnostics: cco
+	@bash tests/diagnostics/run_diagnostic_tests.sh
+
+test_phase18b: cco
+	@bash tests/test_phase18b_headers.sh
+
+test_phase18c_deque: cco
+	@bash tests/test_phase18c_deque.sh
+
+test_phase18c_buffer: cco
+	@bash tests/test_phase18c_buffer.sh
+
+test_phase18c_integration: cco
+	@bash tests/test_phase18c_integration.sh
+
+test_phase18c: cco
+	@bash tests/test_phase18c_option_result.sh
+	@bash tests/test_phase18c_deque.sh
+	@bash tests/test_phase18c_buffer.sh
+	@bash tests/test_phase18c_integration.sh
+
+test_phase18d_io: cco
+	@bash tests/test_phase18d_io.sh
+
+test_phase18d_network_io: cco
+	@bash tests/test_phase18d_network_io.sh
+
+test_phase18d_tcp_connect: cco
+	@bash tests/test_phase18d_tcp_connect.sh
+
+test_phase18d_tcp_lifecycle: cco
+	@bash tests/test_phase18d_tcp_lifecycle.sh
+
+test_phase18d: test_phase18d_io test_phase18d_network_io test_phase18d_tcp_connect test_phase18d_tcp_lifecycle
+
+test: unit_tests test_selfhost test_bootstrap test_selfhost_fixpoint test_phase13 test_phase14 test_phase15 test_phase16 test_phase17 test_diagnostics test_phase18b test_phase18c test_phase18d
 	@bash tests/run_tests.sh
 
 clean:
 	rm -rf build cco gcco selfhost/lexer_selfhosted selfhost/lexer_selfhosted.c selfhost/parser selfhost/parser.c selfhost/typechecker selfhost/typechecker.c selfhost/codegen selfhost/codegen.c selfhost/cco selfhost/cco.c
 
-.PHONY: all install uninstall unit_tests test_selfhost test_bootstrap test_selfhost_fixpoint test_phase13 test_phase14 test_phase15 test_phase16 test clean
+.PHONY: all install uninstall unit_tests test_selfhost test_bootstrap test_selfhost_fixpoint test_phase13 test_phase14 test_phase15 test_phase16 test_phase17 test_diagnostics test_phase18b test_phase18c test_phase18c_deque test_phase18c_buffer test_phase18c_integration test_phase18d_io test_phase18d_network_io test_phase18d_tcp_connect test_phase18d_tcp_lifecycle test_phase18d test clean
 
