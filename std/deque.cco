@@ -1,0 +1,164 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// std/deque.cco — Standard Library Fixed-Capacity Double-Ended Ring Queue
+
+import "std/option.cco";
+
+class RingDeque {
+    buffer: int[];
+    capacity: int;
+    head: int;
+    tail: int;
+    size: int;
+
+    // Returns true if the deque has reached maximum capacity.
+    fn is_full(self) -> bool {
+        return self.size == self.capacity;
+    }
+
+    // Returns true if the deque contains zero elements.
+    fn is_empty(self) -> bool {
+        return self.size == 0;
+    }
+
+    // Returns the current number of elements stored in the deque.
+    fn count(self) -> int {
+        return self.size;
+    }
+
+    // Pushes an integer onto the back of the deque in O(1) time.
+    // Returns true on success, or false if the deque is full.
+    fn push_back(self, val: int) -> bool {
+        if (self.is_full()) {
+            return false;
+        }
+        self.buffer[self.tail] = val;
+        self.tail = (self.tail + 1) % self.capacity;
+        self.size += 1;
+        return true;
+    }
+
+    // Pushes an integer onto the front of the deque in O(1) time.
+    // Returns true on success, or false if the deque is full.
+    fn push_front(self, val: int) -> bool {
+        if (self.is_full()) {
+            return false;
+        }
+        self.head = (self.head - 1 + self.capacity) % self.capacity;
+        self.buffer[self.head] = val;
+        self.size += 1;
+        return true;
+    }
+
+    // Removes and returns the element at the front of the deque in O(1) time.
+    // Returns -1 if the deque is empty.
+    // NOTE: Because -1 can also be a valid stored value, callers should
+    // either check !is_empty() first or use pop_front_opt() for safe handling.
+    fn pop_front(self) -> int {
+        if (self.is_empty()) {
+            return -1;
+        }
+        let val: int = self.buffer[self.head];
+        self.head = (self.head + 1) % self.capacity;
+        self.size -= 1;
+        return val;
+    }
+
+    // Type-safe pop_front returning OptionInt.Some or OptionInt.None.
+    fn pop_front_opt(self) -> OptionInt {
+        if (self.is_empty()) {
+            return OptionInt.None;
+        }
+        let val: int = self.buffer[self.head];
+        self.head = (self.head + 1) % self.capacity;
+        self.size -= 1;
+        return OptionInt.Some { value: val };
+    }
+
+    // Removes and returns the element at the back of the deque in O(1) time.
+    // Returns -1 if the deque is empty.
+    // NOTE: See pop_front() note regarding sentinel ambiguity vs pop_back_opt().
+    fn pop_back(self) -> int {
+        if (self.is_empty()) {
+            return -1;
+        }
+        self.tail = (self.tail - 1 + self.capacity) % self.capacity;
+        let val: int = self.buffer[self.tail];
+        self.size -= 1;
+        return val;
+    }
+
+    // Type-safe pop_back returning OptionInt.Some or OptionInt.None.
+    fn pop_back_opt(self) -> OptionInt {
+        if (self.is_empty()) {
+            return OptionInt.None;
+        }
+        self.tail = (self.tail - 1 + self.capacity) % self.capacity;
+        let val: int = self.buffer[self.tail];
+        self.size -= 1;
+        return OptionInt.Some { value: val };
+    }
+
+    // Inspects the element at the front without removing it.
+    // Returns -1 if the deque is empty.
+    fn peek_front(self) -> int {
+        if (self.is_empty()) {
+            return -1;
+        }
+        return self.buffer[self.head];
+    }
+
+    // Type-safe peek_front returning OptionInt.Some or OptionInt.None.
+    fn peek_front_opt(self) -> OptionInt {
+        if (self.is_empty()) {
+            return OptionInt.None;
+        }
+        return OptionInt.Some { value: self.buffer[self.head] };
+    }
+
+    // Inspects the element at the back without removing it.
+    // Returns -1 if the deque is empty.
+    fn peek_back(self) -> int {
+        if (self.is_empty()) {
+            return -1;
+        }
+        let prev_idx: int = (self.tail - 1 + self.capacity) % self.capacity;
+        return self.buffer[prev_idx];
+    }
+
+    // Type-safe peek_back returning OptionInt.Some or OptionInt.None.
+    fn peek_back_opt(self) -> OptionInt {
+        if (self.is_empty()) {
+            return OptionInt.None;
+        }
+        let prev_idx: int = (self.tail - 1 + self.capacity) % self.capacity;
+        return OptionInt.Some { value: self.buffer[prev_idx] };
+    }
+
+    // Resets the deque to an empty state without reallocating the underlying buffer.
+    fn clear(self) -> void {
+        self.head = 0;
+        self.tail = 0;
+        self.size = 0;
+    }
+}
+
+// Creates a new fixed-capacity RingDeque.
+// Non-positive capacities (<= 0) are safely clamped to 1 to avoid division by zero.
+fn deque_new(capacity: int) -> RingDeque {
+    let cap: int = capacity;
+    if (cap <= 0) {
+        cap = 1;
+    }
+    let buf: int[] = alloc(int, cap);
+    for (let i: int = 0; i < cap; i++) {
+        buf[i] = 0;
+    }
+    return RingDeque {
+        buffer: buf,
+        capacity: cap,
+        head: 0,
+        tail: 0,
+        size: 0
+    };
+}
