@@ -2,8 +2,23 @@
 
 // std/io.cco — Standard Library I/O and File Utilities
 
+import "std/result.cco";
+
 fn file_read(path: string) -> string {
     return read_file(path);
+}
+
+// Reads an entire file into a string returning a ResultStr.
+// On success, returns ResultStr.Ok { value: content }.
+// On failure (missing file, permission denied, I/O error), returns ResultStr.Err { message: error_description }
+// without terminating the host process.
+fn file_read_result(path: string) -> ResultStr {
+    let content: string = read_file_checked(path);
+    let err: string = io_last_error();
+    if (!equals(err, "")) {
+        return err_str(err);
+    }
+    return ok_str(content);
 }
 
 fn file_write(path: string, content: string) -> bool {

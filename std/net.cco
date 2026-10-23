@@ -2,36 +2,160 @@
 
 // std/net.cco — Standard Library Network & Socket Primitives
 
+import "std/buffer.cco";
+import "std/result.cco";
+
 class TcpServer {
     fd: int;
     port: int;
 
+    fn is_listening(self) -> bool {
+        return self.fd >= 0;
+    }
+
     fn accept(self) -> int {
+        if (self.fd < 0) {
+            return -1;
+        }
         return net_accept(self.fd);
     }
 
+    fn accept_client(self) -> TcpClient {
+        if (self.fd < 0) {
+            return TcpClient { fd: -1 };
+        }
+        let client_fd: int = net_accept(self.fd);
+        return TcpClient { fd: client_fd };
+    }
+
+    // Sets accept timeout on the listening socket descriptor.
+    // NOTE: This relies on Linux-specific kernel behavior (inet_csk_accept).
+    // POSIX does not guarantee that SO_RCVTIMEO applies to accept(), and macOS/BSD ignore it.
+    fn set_timeouts(self, recv_ms: int, send_ms: int) -> int {
+        if (self.fd < 0) {
+            return -1;
+        }
+        return net_set_timeouts(self.fd, recv_ms, send_ms);
+    }
+
     fn close(self) -> void {
-        net_close(self.fd);
+        if (self.fd >= 0) {
+            net_close(self.fd);
+            self.fd = -1;
+        }
     }
 }
 
 class TcpClient {
     fd: int;
 
+    fn is_connected(self) -> bool {
+        return self.fd >= 0;
+    }
+
+    // Connects (or reconnects) to an IPv4 host and port (1-65535).
+    // If previously connected, safely closes the previous descriptor first.
+    // Initializes/stores descriptor only upon successful connection.
+    fn connect(self, address: string, port: int) -> int {
+        if (self.fd >= 0) {
+            net_close(self.fd);
+            self.fd = -1;
+        }
+        let sock: int = net_connect(address, port);
+        if (sock >= 0) {
+            self.fd = sock;
+        }
+        return sock;
+    }
+
     fn send(self, msg: string) -> int {
+        if (self.fd < 0) {
+            return -1;
+        }
         return net_send(self.fd, msg);
     }
 
+    fn send_bytes(self, bytes: &int[], length: int) -> int {
+        if (self.fd < 0) {
+            return -1;
+        }
+        return net_send_bytes(self.fd, bytes, length);
+    }
+
+    // HTTP-framed receive (legacy compatibility):
+    // Accumulates bytes until \r\n\r\n and parses Content-Length if present.
     fn recv(self) -> string {
+        if (self.fd < 0) {
+            return "";
+        }
         return net_recv(self.fd, 0);
     }
 
     fn recv_buf(self, buf_size: int) -> string {
+        if (self.fd < 0) {
+            return "";
+        }
         return net_recv(self.fd, buf_size);
     }
 
+    // Raw single-attempt receive:
+    // Reads whatever bytes are immediately available up to max_len.
+    // Does not parse HTTP headers or wait for \r\n\r\n or EOF.
+    fn recv_raw(self, max_len: int) -> string {
+        if (self.fd < 0) {
+            return "";
+        }
+        return net_recv_raw(self.fd, max_len);
+    }
+
+    // Binary-safe receive into caller-supplied int[] buffer:
+    // Returns > 0 (bytes read), 0 (orderly peer EOF), or -1 (error).
+    fn recv_bytes(self, buffer: &int[], max_len: int) -> int {
+        if (self.fd < 0) {
+            return -1;
+        }
+        return net_recv_bytes(self.fd, buffer, max_len);
+    }
+
+    // Initiates shutdown on the socket connection:
+    // how: 0 = SHUT_RD (disallow further receives)
+    //      1 = SHUT_WR (disallow further sends; informs peer of EOF)
+    //      2 = SHUT_RDWR (disallow further receives and sends)
+    // Returns 0 on success, -1 on failure. Does not close descriptor.
+    fn shutdown(self, how: int) -> int {
+        if (self.fd < 0) {
+            return -1;
+        }
+        return net_shutdown(self.fd, how);
+    }
+
+    fn shutdown_read(self) -> int {
+        return self.shutdown(0);
+    }
+
+    fn shutdown_write(self) -> int {
+        return self.shutdown(1);
+    }
+
+    fn shutdown_both(self) -> int {
+        return self.shutdown(2);
+    }
+
+    // Sets accept timeout on the listening socket descriptor.
+    // NOTE: This relies on Linux-specific kernel behavior (inet_csk_accept).
+    // POSIX does not guarantee that SO_RCVTIMEO applies to accept(), and macOS/BSD ignore it.
+    fn set_timeouts(self, recv_ms: int, send_ms: int) -> int {
+        if (self.fd < 0) {
+            return -1;
+        }
+        return net_set_timeouts(self.fd, recv_ms, send_ms);
+    }
+
     fn close(self) -> void {
-        net_close(self.fd);
+        if (self.fd >= 0) {
+            net_close(self.fd);
+            self.fd = -1;
+        }
     }
 }
 
@@ -43,8 +167,78 @@ fn tcp_accept(fd: int) -> int {
     return net_accept(fd);
 }
 
+// Legacy HTTP-aware receive (waits for \r\n\r\n and Content-Length)
 fn tcp_recv(fd: int, buf_size: int) -> string {
     return net_recv(fd, buf_size);
+}
+
+// Explicit HTTP-aware receive
+fn tcp_recv_http(fd: int, initial_capacity: int) -> string {
+    return net_recv_http(fd, initial_capacity);
+}
+
+// Raw TCP receive: reads available bytes without interpreting protocol framing
+fn tcp_recv_raw(fd: int, max_len: int) -> string {
+    return net_recv_raw(fd, max_len);
+}
+
+// Binary-safe send with explicit length; does not rely on strlen() or NUL termination
+fn tcp_send_bytes(fd: int, bytes: &int[], length: int) -> int {
+    return net_send_bytes(fd, bytes, length);
+}
+
+// Binary-safe single-attempt receive into buffer:
+// Returns positive byte count on transfer, 0 on orderly peer EOF, -1 on socket error
+fn tcp_recv_bytes(fd: int, buffer: &int[], max_len: int) -> int {
+    return net_recv_bytes(fd, buffer, max_len);
+}
+
+// Result-wrapped binary receive distinguishing success from socket error
+fn tcp_recv_bytes_result(fd: int, buffer: &int[], max_len: int) -> ResultInt {
+    let n: int = net_recv_bytes(fd, buffer, max_len);
+    if (n < 0) {
+        return err_int("Socket receive error");
+    }
+    return ok_int(n);
+}
+
+// Sends unread bytes from a ByteBuffer, advancing reader_pos on success.
+// Transmits only unread bytes beginning at reader_pos (does not re-send consumed bytes).
+fn tcp_send_buffer(fd: int, buf: &ByteBuffer) -> int {
+    let avail: int = buf.readable_bytes();
+    if (avail <= 0) {
+        return 0;
+    }
+    let temp: int[] = alloc(int, avail);
+    for (let i: int = 0; i < avail; i++) {
+        temp[i] = buf.bytes[buf.reader_pos + i];
+    }
+    let sent: int = net_send_bytes(fd, temp, avail);
+    if (sent > 0) {
+        buf.reader_pos += sent;
+    }
+    return sent;
+}
+
+// Receives bytes directly into ByteBuffer's writable capacity, advancing writer_pos
+fn tcp_recv_buffer(fd: int, buf: &ByteBuffer, max_len: int) -> int {
+    let writable: int = buf.writable_bytes();
+    if (writable <= 0) {
+        return 0;
+    }
+    let to_read: int = max_len;
+    if (to_read <= 0 || to_read > writable) {
+        to_read = writable;
+    }
+    let temp: int[] = alloc(int, to_read);
+    let n: int = net_recv_bytes(fd, temp, to_read);
+    if (n > 0) {
+        for (let i: int = 0; i < n; i++) {
+            buf.bytes[buf.writer_pos + i] = temp[i];
+        }
+        buf.writer_pos += n;
+    }
+    return n;
 }
 
 fn tcp_send(fd: int, msg: string) -> int {
@@ -55,8 +249,111 @@ fn tcp_close(fd: int) -> void {
     net_close(fd);
 }
 
+// Initiates shutdown on a socket connection:
+// how: 0 = SHUT_RD (disallow further receives)
+//      1 = SHUT_WR (disallow further sends; informs peer of EOF)
+//      2 = SHUT_RDWR (disallow further receives and sends)
+// Returns 0 on success, -1 on failure. Does NOT close the descriptor.
+fn tcp_shutdown(fd: int, how: int) -> int {
+    return net_shutdown(fd, how);
+}
+
+// Result-wrapped socket shutdown returning ok_int(0) or err_int(message)
+fn tcp_shutdown_result(fd: int, how: int) -> ResultInt {
+    let rc: int = net_shutdown(fd, how);
+    if (rc < 0) {
+        let err: string = net_last_error();
+        if (equals(err, "")) {
+            return err_int("Socket shutdown failed");
+        }
+        return err_int(err);
+    }
+    return ok_int(rc);
+}
+
+// Configures receive and send timeouts in milliseconds using SO_RCVTIMEO and SO_SNDTIMEO.
+//
+// TIMEOUT SEMANTICS & PLATFORM PORTABILITY:
+// - Cco sockets are synchronous, blocking file descriptors. They are NOT non-blocking (O_NONBLOCK)
+//   and do NOT use an asynchronous event loop (epoll/kqueue).
+// - Timeouts configure the maximum blocking duration in milliseconds for socket operations.
+//   When a configured duration expires without data transferred, operations fail with EAGAIN/EWOULDBLOCK.
+// - Setting 0 for either timeout disables the timer, restoring default indefinite blocking.
+// - Linux-Specific Listening Timeout: Calling set_timeouts() on a TcpServer applies SO_RCVTIMEO
+//   to the listening socket. On Linux, inet_csk_accept() respects SO_RCVTIMEO and causes accept()
+//   to time out. This behavior is a Linux-specific extension; POSIX.1-2008 does NOT guarantee that
+//   SO_RCVTIMEO affects accept(), and on BSD-derived systems (macOS, FreeBSD), accept() ignores it.
+// - Returns 0 on success, -1 on error (with rollback of SO_RCVTIMEO if SO_SNDTIMEO fails).
+fn tcp_set_timeouts(fd: int, recv_ms: int, send_ms: int) -> int {
+    return net_set_timeouts(fd, recv_ms, send_ms);
+}
+
+// Result-wrapped timeout configuration returning ok_int(0) or err_int(message)
+fn tcp_set_timeouts_result(fd: int, recv_ms: int, send_ms: int) -> ResultInt {
+    let rc: int = net_set_timeouts(fd, recv_ms, send_ms);
+    if (rc < 0) {
+        let err: string = net_last_error();
+        if (equals(err, "")) {
+            return err_int("Socket timeout configuration failed");
+        }
+        return err_int(err);
+    }
+    return ok_int(rc);
+}
+
 fn sleep_millis(ms: int) -> void {
     sleep_ms(ms);
+}
+
+// Binds and listens on a specific numeric IPv4 address and port (1-65535).
+// Binding to "127.0.0.1" restricts connections to loopback interfaces.
+// Binding to "0.0.0.0" binds to all local IPv4 interfaces (INADDR_ANY).
+// Returns server descriptor >= 0 on success, or -1 on failure.
+fn tcp_listen_on(address: string, port: int) -> int {
+    return net_listen_on(address, port);
+}
+
+// Result-wrapped server listener setup on specific address
+fn tcp_listen_on_result(address: string, port: int) -> ResultInt {
+    let fd: int = net_listen_on(address, port);
+    if (fd < 0) {
+        let err: string = net_last_error();
+        if (equals(err, "")) {
+            return err_int("Listener setup failed");
+        }
+        return err_int(err);
+    }
+    return ok_int(fd);
+}
+
+// Result-wrapped server listener setup on 0.0.0.0
+fn tcp_listen_result(port: int) -> ResultInt {
+    return tcp_listen_on_result("0.0.0.0", port);
+}
+
+// Establishes an outbound TCP connection to a numeric IPv4 address and port (1-65535).
+// Returns descriptor >= 0 on success, or -1 on failure.
+// Numeric IPv4 addresses only (e.g., "127.0.0.1"); DNS resolution is out of scope.
+fn tcp_connect(address: string, port: int) -> int {
+    return net_connect(address, port);
+}
+
+// Result-wrapped outbound connection distinguishing success from socket error.
+fn tcp_connect_result(address: string, port: int) -> ResultInt {
+    let fd: int = net_connect(address, port);
+    if (fd < 0) {
+        let err: string = net_last_error();
+        if (equals(err, "")) {
+            return err_int("Connection failed");
+        }
+        return err_int(err);
+    }
+    return ok_int(fd);
+}
+
+// Returns the most recent system or networking error message.
+fn tcp_last_error() -> string {
+    return net_last_error();
 }
 
 fn create_server(port: int) -> TcpServer {
@@ -64,6 +361,23 @@ fn create_server(port: int) -> TcpServer {
     return TcpServer { fd: fd, port: port };
 }
 
+fn create_server_on(address: string, port: int) -> TcpServer {
+    let fd: int = net_listen_on(address, port);
+    return TcpServer { fd: fd, port: port };
+}
+
 fn create_client(fd: int) -> TcpClient {
     return TcpClient { fd: fd };
+}
+
+// Factory connecting to an IPv4 host and port.
+// Returns a TcpClient owning the connected socket descriptor on success,
+// or a TcpClient with fd == -1 on failure. Check client.is_connected().
+fn connect_client(address: string, port: int) -> TcpClient {
+    let client: TcpClient = TcpClient { fd: -1 };
+    let sock: int = net_connect(address, port);
+    if (sock >= 0) {
+        client.fd = sock;
+    }
+    return client;
 }
