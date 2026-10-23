@@ -1,0 +1,174 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// std/result.cco — Standard Library Result Sum Types & Error Handling
+
+enum ResultInt {
+    Ok { value: int },
+    Err { message: string },
+}
+
+enum ResultStr {
+    Ok { value: string },
+    Err { message: string },
+}
+
+enum ResultVoid {
+    Ok,
+    Err { message: string },
+}
+
+fn ok_int(value: int) -> ResultInt {
+    return ResultInt.Ok { value: value };
+}
+
+fn err_int(message: string) -> ResultInt {
+    return ResultInt.Err { message: concat(message, "") };
+}
+
+fn ok_str(value: string) -> ResultStr {
+    return ResultStr.Ok { value: concat(value, "") };
+}
+
+fn err_str(message: string) -> ResultStr {
+    return ResultStr.Err { message: concat(message, "") };
+}
+
+fn ok_void() -> ResultVoid {
+    return ResultVoid.Ok;
+}
+
+fn err_void(message: string) -> ResultVoid {
+    return ResultVoid.Err { message: concat(message, "") };
+}
+
+fn res_int_is_ok(res: &ResultInt) -> bool {
+    match res {
+        ResultInt.Ok { value } => {
+            return true;
+        }
+        ResultInt.Err { message } => {
+            return false;
+        }
+    }
+    return false;
+}
+
+fn res_int_is_err(res: &ResultInt) -> bool {
+    match res {
+        ResultInt.Ok { value } => {
+            return false;
+        }
+        ResultInt.Err { message } => {
+            return true;
+        }
+    }
+    return true;
+}
+
+fn res_int_unwrap_or(res: &ResultInt, default_val: int) -> int {
+    match res {
+        ResultInt.Ok { value } => {
+            return value;
+        }
+        ResultInt.Err { message } => {
+            return default_val;
+        }
+    }
+    return default_val;
+}
+
+fn res_int_error(res: &ResultInt) -> string {
+    match res {
+        ResultInt.Ok { value } => {
+            return "";
+        }
+        ResultInt.Err { message } => {
+            return message;
+        }
+    }
+    return "";
+}
+
+fn res_str_is_ok(res: &ResultStr) -> bool {
+    match res {
+        ResultStr.Ok { value } => {
+            return true;
+        }
+        ResultStr.Err { message } => {
+            return false;
+        }
+    }
+    return false;
+}
+
+fn res_str_is_err(res: &ResultStr) -> bool {
+    match res {
+        ResultStr.Ok { value } => {
+            return false;
+        }
+        ResultStr.Err { message } => {
+            return true;
+        }
+    }
+    return true;
+}
+
+fn res_str_unwrap_or(res: &ResultStr, default_val: string) -> string {
+    match res {
+        ResultStr.Ok { value } => {
+            return value;
+        }
+        ResultStr.Err { message } => {
+            return default_val;
+        }
+    }
+    return default_val;
+}
+
+fn res_str_error(res: &ResultStr) -> string {
+    match res {
+        ResultStr.Ok { value } => {
+            return "";
+        }
+        ResultStr.Err { message } => {
+            return message;
+        }
+    }
+    return "";
+}
+
+fn res_void_is_ok(res: &ResultVoid) -> bool {
+    match res {
+        ResultVoid.Ok => {
+            return true;
+        }
+        ResultVoid.Err { message } => {
+            return false;
+        }
+    }
+    return false;
+}
+
+fn res_void_is_err(res: &ResultVoid) -> bool {
+    match res {
+        ResultVoid.Ok => {
+            return false;
+        }
+        ResultVoid.Err { message } => {
+            return true;
+        }
+    }
+    return true;
+}
+
+fn res_void_error(res: &ResultVoid) -> string {
+    match res {
+        ResultVoid.Ok => {
+            return "";
+        }
+        ResultVoid.Err { message } => {
+            return message;
+        }
+    }
+    return "";
+}
