@@ -38,6 +38,20 @@ static const char *deps_is_float[] = { "try_parse_float", NULL };
 static const char *deps_to_float[] = { "try_parse_float", NULL };
 static const char *deps_write_bytes[] = { "arr_len", "arr_len_raw", "arr_header", NULL };
 static const char *deps_input[] = { "read_line", NULL };
+static const char *deps_read_file_checked[] = { "io_last_error", NULL };
+static const char *deps_read_file[] = { "read_file_checked", "io_last_error", NULL };
+static const char *deps_net_recv[] = { "net_recv_http", NULL };
+static const char *deps_net_send[] = { "net_last_error", NULL };
+static const char *deps_net_send_bytes[] = { "arr_len", "arr_len_raw", "arr_header", "net_last_error", NULL };
+static const char *deps_net_recv_raw[] = { "net_last_error", NULL };
+static const char *deps_net_recv_bytes[] = { "arr_len", "arr_len_raw", "arr_header", "net_last_error", NULL };
+static const char *deps_net_last_error[] = { NULL };
+static const char *deps_net_listen_on[] = { "net_last_error", NULL };
+static const char *deps_net_listen[] = { "net_listen_on", "net_last_error", NULL };
+static const char *deps_net_connect[] = { "net_last_error", NULL };
+static const char *deps_net_accept[] = { "net_last_error", NULL };
+static const char *deps_net_shutdown[] = { "net_last_error", NULL };
+static const char *deps_net_set_timeouts[] = { "net_last_error", NULL };
 
 static const PreludeChunk PRELUDE_CHUNKS[] = {
     {
@@ -130,28 +144,108 @@ static const PreludeChunk PRELUDE_CHUNKS[] = {
         NULL
     },
     {
-        "read_file",
-        "static inline char *__cco_read_file(const char *path) {\n"
+        "io_last_error",
+        "static char __cco_last_io_err_buf[256] = \"\";\n\n"
+        "static inline char *__cco_io_last_error(void) {\n"
+        "    return strdup(__cco_last_io_err_buf);\n"
+        "}\n\n",
+        NULL
+    },
+    {
+        "read_file_checked",
+        "static inline char *__cco_read_file_checked(const char *path) {\n"
+        "    __cco_last_io_err_buf[0] = '\\0';\n"
+        "    if (!path) {\n"
+        "        snprintf(__cco_last_io_err_buf, sizeof(__cco_last_io_err_buf), \"Null path argument\");\n"
+        "        return strdup(\"\");\n"
+        "    }\n"
         "    FILE *f = fopen(path, \"rb\");\n"
         "    if (!f) {\n"
-        "        fprintf(stderr, \"Error: Could not open file '%s' for reading\\n\", path ? path : \"\");\n"
-        "        exit(1);\n"
+        "        snprintf(__cco_last_io_err_buf, sizeof(__cco_last_io_err_buf), \"%s\", strerror(errno));\n"
+        "        return strdup(\"\");\n"
         "    }\n"
-        "    fseek(f, 0L, SEEK_END);\n"
-        "    long sz = ftell(f);\n"
-        "    rewind(f);\n"
-        "    char *buf = (char *)malloc(sz + 1);\n"
+        "    long sz = -1;\n"
+        "    if (fseek(f, 0L, SEEK_END) == 0) {\n"
+        "        sz = ftell(f);\n"
+        "        if (sz >= 0) {\n"
+        "            rewind(f);\n"
+        "        } else {\n"
+        "            clearerr(f);\n"
+        "            rewind(f);\n"
+        "        }\n"
+        "    } else {\n"
+        "        clearerr(f);\n"
+        "    }\n"
+        "    if (sz > 0 && sz <= 134217728L) {\n"
+        "        char *buf = (char *)malloc((size_t)sz + 1);\n"
+        "        if (!buf) {\n"
+        "            fclose(f);\n"
+        "            snprintf(__cco_last_io_err_buf, sizeof(__cco_last_io_err_buf), \"Memory allocation failed\");\n"
+        "            return strdup(\"\");\n"
+        "        }\n"
+        "        size_t read_bytes = fread(buf, 1, (size_t)sz, f);\n"
+        "        if (ferror(f)) {\n"
+        "            free(buf);\n"
+        "            fclose(f);\n"
+        "            snprintf(__cco_last_io_err_buf, sizeof(__cco_last_io_err_buf), \"%s\", strerror(errno ? errno : EIO));\n"
+        "            return strdup(\"\");\n"
+        "        }\n"
+        "        buf[read_bytes] = '\\0';\n"
+        "        fclose(f);\n"
+        "        return buf;\n"
+        "    }\n"
+        "    size_t cap = 4096;\n"
+        "    size_t len = 0;\n"
+        "    char *buf = (char *)malloc(cap + 1);\n"
         "    if (!buf) {\n"
         "        fclose(f);\n"
-        "        fprintf(stderr, \"Memory allocation failed in read_file()\\n\");\n"
-        "        exit(1);\n"
+        "        snprintf(__cco_last_io_err_buf, sizeof(__cco_last_io_err_buf), \"Memory allocation failed\");\n"
+        "        return strdup(\"\");\n"
         "    }\n"
-        "    size_t read_bytes = fread(buf, 1, sz, f);\n"
-        "    buf[read_bytes] = '\\0';\n"
+        "    size_t n;\n"
+        "    while ((n = fread(buf + len, 1, cap - len, f)) > 0) {\n"
+        "        len += n;\n"
+        "        if (len >= cap) {\n"
+        "            if (cap >= 67108864) break;\n"
+        "            size_t new_cap = cap * 2;\n"
+        "            char *new_buf = (char *)realloc(buf, new_cap + 1);\n"
+        "            if (!new_buf) {\n"
+        "                free(buf);\n"
+        "                fclose(f);\n"
+        "                snprintf(__cco_last_io_err_buf, sizeof(__cco_last_io_err_buf), \"Memory allocation failed\");\n"
+        "                return strdup(\"\");\n"
+        "            }\n"
+        "            buf = new_buf;\n"
+        "            cap = new_cap;\n"
+        "        }\n"
+        "    }\n"
+        "    if (ferror(f)) {\n"
+        "        free(buf);\n"
+        "        fclose(f);\n"
+        "        snprintf(__cco_last_io_err_buf, sizeof(__cco_last_io_err_buf), \"%s\", strerror(errno ? errno : EIO));\n"
+        "        return strdup(\"\");\n"
+        "    }\n"
+        "    buf[len] = '\\0';\n"
         "    fclose(f);\n"
         "    return buf;\n"
         "}\n\n",
-        NULL
+        deps_read_file_checked
+    },
+    {
+        "read_file",
+        "static inline char *__cco_read_file(const char *path) {\n"
+        "    char *res = __cco_read_file_checked(path);\n"
+        "    const char *err = __cco_io_last_error();\n"
+        "    if (err && *err) {\n"
+        "        fprintf(stderr, \"Error: Could not open file '%s' for reading: %s\\n\", path ? path : \"\", err);\n"
+        "        free(res);\n"
+        "        free((void *)err);\n"
+        "        exit(1);\n"
+        "    }\n"
+        "    free((void *)err);\n"
+        "    return res;\n"
+        "}\n\n",
+        deps_read_file
     },
     {
         "write_file",
@@ -834,41 +928,191 @@ static const PreludeChunk PRELUDE_CHUNKS[] = {
         NULL
     },
     {
-        "net_listen",
-        "static inline int __cco_net_listen(int port) {\n"
+        "net_last_error",
+        "static char __cco_last_net_err_buf[256] = \"\";\n\n"
+        "static inline char *__cco_net_last_error(void) {\n"
+        "    return strdup(__cco_last_net_err_buf);\n"
+        "}\n\n",
+        deps_net_last_error
+    },
+    {
+        "net_listen_on",
+        "static inline int __cco_net_listen_on(const char *address, int port) {\n"
+        "    __cco_last_net_err_buf[0] = '\\0';\n"
+        "    if (!address) {\n"
+        "        snprintf(__cco_last_net_err_buf, sizeof(__cco_last_net_err_buf), \"Null address argument\");\n"
+        "        errno = EINVAL;\n"
+        "        return -1;\n"
+        "    }\n"
+        "    if (port < 1 || port > 65535) {\n"
+        "        snprintf(__cco_last_net_err_buf, sizeof(__cco_last_net_err_buf), \"Invalid port: %d (must be 1-65535)\", port);\n"
+        "        errno = EINVAL;\n"
+        "        return -1;\n"
+        "    }\n"
+        "    struct sockaddr_in addr;\n"
+        "    memset(&addr, 0, sizeof(addr));\n"
+        "    addr.sin_family = AF_INET;\n"
+        "    addr.sin_port = htons((uint16_t)port);\n"
+        "    if (inet_pton(AF_INET, address, &addr.sin_addr) <= 0) {\n"
+        "        snprintf(__cco_last_net_err_buf, sizeof(__cco_last_net_err_buf), \"Invalid IPv4 address: %s\", address);\n"
+        "        errno = EINVAL;\n"
+        "        return -1;\n"
+        "    }\n"
         "    int server_fd = socket(AF_INET, SOCK_STREAM, 0);\n"
-        "    if (server_fd < 0) return -1;\n"
+        "    if (server_fd < 0) {\n"
+        "        snprintf(__cco_last_net_err_buf, sizeof(__cco_last_net_err_buf), \"socket() failed: %s\", strerror(errno));\n"
+        "        return -1;\n"
+        "    }\n"
         "    int opt = 1;\n"
         "    setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));\n"
-        "    struct sockaddr_in address;\n"
-        "    memset(&address, 0, sizeof(address));\n"
-        "    address.sin_family = AF_INET;\n"
-        "    address.sin_addr.s_addr = INADDR_ANY;\n"
-        "    address.sin_port = htons((uint16_t)port);\n"
-        "    if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0) {\n"
+        "    if (bind(server_fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {\n"
+        "        snprintf(__cco_last_net_err_buf, sizeof(__cco_last_net_err_buf), \"bind() failed: %s\", strerror(errno));\n"
         "        close(server_fd);\n"
         "        return -1;\n"
         "    }\n"
         "    if (listen(server_fd, 128) < 0) {\n"
+        "        snprintf(__cco_last_net_err_buf, sizeof(__cco_last_net_err_buf), \"listen() failed: %s\", strerror(errno));\n"
         "        close(server_fd);\n"
         "        return -1;\n"
         "    }\n"
         "    return server_fd;\n"
         "}\n\n",
-        NULL
+        deps_net_listen_on
+    },
+    {
+        "net_listen",
+        "static inline int __cco_net_listen(int port) {\n"
+        "    return __cco_net_listen_on(\"0.0.0.0\", port);\n"
+        "}\n\n",
+        deps_net_listen
+    },
+    {
+        "net_connect",
+        "static inline int __cco_net_connect(const char *address, int port) {\n"
+        "    __cco_last_net_err_buf[0] = '\\0';\n"
+        "    if (!address) {\n"
+        "        snprintf(__cco_last_net_err_buf, sizeof(__cco_last_net_err_buf), \"Null address argument\");\n"
+        "        errno = EINVAL;\n"
+        "        return -1;\n"
+        "    }\n"
+        "    if (port < 1 || port > 65535) {\n"
+        "        snprintf(__cco_last_net_err_buf, sizeof(__cco_last_net_err_buf), \"Invalid port: %d (must be 1-65535)\", port);\n"
+        "        errno = EINVAL;\n"
+        "        return -1;\n"
+        "    }\n"
+        "    struct sockaddr_in addr;\n"
+        "    memset(&addr, 0, sizeof(addr));\n"
+        "    addr.sin_family = AF_INET;\n"
+        "    addr.sin_port = htons((uint16_t)port);\n"
+        "    if (inet_pton(AF_INET, address, &addr.sin_addr) <= 0) {\n"
+        "        snprintf(__cco_last_net_err_buf, sizeof(__cco_last_net_err_buf), \"Invalid IPv4 address: %s\", address);\n"
+        "        errno = EINVAL;\n"
+        "        return -1;\n"
+        "    }\n"
+        "    int sock = socket(AF_INET, SOCK_STREAM, 0);\n"
+        "    if (sock < 0) {\n"
+        "        snprintf(__cco_last_net_err_buf, sizeof(__cco_last_net_err_buf), \"socket() failed: %s\", strerror(errno));\n"
+        "        return -1;\n"
+        "    }\n"
+        "    if (connect(sock, (struct sockaddr *)&addr, sizeof(addr)) < 0) {\n"
+        "        if (errno == EINTR) {\n"
+        "            struct pollfd pfd;\n"
+        "            pfd.fd = sock;\n"
+        "            pfd.events = POLLOUT;\n"
+        "            pfd.revents = 0;\n"
+        "            while (1) {\n"
+        "                int pr = poll(&pfd, 1, -1);\n"
+        "                if (pr < 0) {\n"
+        "                    if (errno == EINTR) continue;\n"
+        "                    snprintf(__cco_last_net_err_buf, sizeof(__cco_last_net_err_buf), \"poll() after EINTR failed: %s\", strerror(errno));\n"
+        "                    close(sock);\n"
+        "                    return -1;\n"
+        "                }\n"
+        "                int so_error = 0;\n"
+        "                socklen_t len = sizeof(so_error);\n"
+        "                if (getsockopt(sock, SOL_SOCKET, SO_ERROR, &so_error, &len) < 0) {\n"
+        "                    snprintf(__cco_last_net_err_buf, sizeof(__cco_last_net_err_buf), \"getsockopt() failed: %s\", strerror(errno));\n"
+        "                    close(sock);\n"
+        "                    return -1;\n"
+        "                }\n"
+        "                if (so_error != 0) {\n"
+        "                    errno = so_error;\n"
+        "                    snprintf(__cco_last_net_err_buf, sizeof(__cco_last_net_err_buf), \"connect() failed: %s\", strerror(errno));\n"
+        "                    close(sock);\n"
+        "                    return -1;\n"
+        "                }\n"
+        "                break;\n"
+        "            }\n"
+        "        } else {\n"
+        "            snprintf(__cco_last_net_err_buf, sizeof(__cco_last_net_err_buf), \"connect() failed: %s\", strerror(errno));\n"
+        "            close(sock);\n"
+        "            return -1;\n"
+        "        }\n"
+        "    }\n"
+        "    return sock;\n"
+        "}\n\n",
+        deps_net_connect
     },
     {
         "net_accept",
         "static inline int __cco_net_accept(int server_fd) {\n"
+        "    __cco_last_net_err_buf[0] = '\\0';\n"
+        "    if (server_fd < 0) {\n"
+        "        snprintf(__cco_last_net_err_buf, sizeof(__cco_last_net_err_buf), \"Invalid server descriptor: %d\", server_fd);\n"
+        "        errno = EBADF;\n"
+        "        return -1;\n"
+        "    }\n"
         "    struct sockaddr_in client_addr;\n"
         "    socklen_t client_len = sizeof(client_addr);\n"
-        "    return accept(server_fd, (struct sockaddr *)&client_addr, &client_len);\n"
+        "    while (1) {\n"
+        "        int fd = accept(server_fd, (struct sockaddr *)&client_addr, &client_len);\n"
+        "        if (fd < 0) {\n"
+        "            if (errno == EINTR) continue;\n"
+        "            snprintf(__cco_last_net_err_buf, sizeof(__cco_last_net_err_buf), \"accept() failed: %s\", strerror(errno));\n"
+        "            return -1;\n"
+        "        }\n"
+        "        return fd;\n"
+        "    }\n"
         "}\n\n",
-        NULL
+        deps_net_accept
     },
     {
-        "net_recv",
-        "static inline char *__cco_net_recv(int client_fd, int initial_capacity) {\n"
+        "net_recv_raw",
+        "static inline char *__cco_net_recv_raw(int client_fd, int max_len) {\n"
+        "    __cco_last_net_err_buf[0] = '\\0';\n"
+        "    if (client_fd < 0) {\n"
+        "        snprintf(__cco_last_net_err_buf, sizeof(__cco_last_net_err_buf), \"Invalid socket descriptor: %d\", client_fd);\n"
+        "        return strdup(\"\");\n"
+        "    }\n"
+        "    size_t limit = (max_len > 0) ? (size_t)max_len : 4096;\n"
+        "    if (limit > 1048576) limit = 1048576;\n"
+        "    char *buf = (char *)malloc(limit + 1);\n"
+        "    if (!buf) return strdup(\"\");\n"
+        "    while (1) {\n"
+        "        ssize_t n = recv(client_fd, buf, limit, 0);\n"
+        "        if (n > 0) {\n"
+        "            buf[n] = '\\0';\n"
+        "            return buf;\n"
+        "        } else if (n == 0) {\n"
+        "            free(buf);\n"
+        "            return strdup(\"\");\n"
+        "        } else {\n"
+        "            if (errno == EINTR) continue;\n"
+        "            if (errno == EAGAIN || errno == EWOULDBLOCK) {\n"
+        "                snprintf(__cco_last_net_err_buf, sizeof(__cco_last_net_err_buf), \"recv() timed out: Resource temporarily unavailable\");\n"
+        "            } else {\n"
+        "                snprintf(__cco_last_net_err_buf, sizeof(__cco_last_net_err_buf), \"recv() failed: %s\", strerror(errno));\n"
+        "            }\n"
+        "            free(buf);\n"
+        "            return strdup(\"\");\n"
+        "        }\n"
+        "    }\n"
+        "}\n\n",
+        deps_net_recv_raw
+    },
+    {
+        "net_recv_http",
+        "static inline char *__cco_net_recv_http(int client_fd, int initial_capacity) {\n"
         "    if (client_fd < 0) return strdup(\"\");\n"
         "    size_t cap = (initial_capacity > 0) ? (size_t)initial_capacity : 4096;\n"
         "    size_t len = 0;\n"
@@ -931,9 +1175,24 @@ static const PreludeChunk PRELUDE_CHUNKS[] = {
         NULL
     },
     {
+        "net_recv",
+        "static inline char *__cco_net_recv(int client_fd, int initial_capacity) {\n"
+        "    return __cco_net_recv_http(client_fd, initial_capacity);\n"
+        "}\n\n",
+        deps_net_recv
+    },
+    {
         "net_send",
         "static inline int __cco_net_send(int client_fd, const char *data) {\n"
-        "    if (client_fd < 0 || !data) return 0;\n"
+        "    __cco_last_net_err_buf[0] = '\\0';\n"
+        "    if (client_fd < 0 || !data) {\n"
+        "        if (client_fd < 0) {\n"
+        "            snprintf(__cco_last_net_err_buf, sizeof(__cco_last_net_err_buf), \"Invalid socket descriptor: %d\", client_fd);\n"
+        "            errno = EBADF;\n"
+        "            return -1;\n"
+        "        }\n"
+        "        return 0;\n"
+        "    }\n"
         "    size_t len = strlen(data);\n"
         "    ssize_t total = 0;\n"
         "    while (total < (ssize_t)len) {\n"
@@ -945,14 +1204,200 @@ static const PreludeChunk PRELUDE_CHUNKS[] = {
         "        ssize_t sent = send(client_fd, data + total, len - (size_t)total, flags);\n"
         "        if (sent < 0) {\n"
         "            if (errno == EINTR) continue;\n"
-        "            break;\n"
+        "            snprintf(__cco_last_net_err_buf, sizeof(__cco_last_net_err_buf), \"send() failed: %s\", strerror(errno));\n"
+        "            return (total > 0) ? (int)total : -1;\n"
         "        }\n"
         "        if (sent == 0) break;\n"
         "        total += sent;\n"
         "    }\n"
         "    return (int)total;\n"
         "}\n\n",
-        NULL
+        deps_net_send
+    },
+    {
+        "net_send_bytes",
+        "static inline int __cco_net_send_bytes(int client_fd, const int *bytes, int length) {\n"
+        "    __cco_last_net_err_buf[0] = '\\0';\n"
+        "    if (client_fd < 0 || !bytes || length <= 0) {\n"
+        "        if (client_fd < 0) {\n"
+        "            snprintf(__cco_last_net_err_buf, sizeof(__cco_last_net_err_buf), \"Invalid socket descriptor: %d\", client_fd);\n"
+        "            errno = EBADF;\n"
+        "            return -1;\n"
+        "        }\n"
+        "        if (!bytes) {\n"
+        "            snprintf(__cco_last_net_err_buf, sizeof(__cco_last_net_err_buf), \"Null bytes buffer argument\");\n"
+        "            errno = EINVAL;\n"
+        "            return -1;\n"
+        "        }\n"
+        "        return 0;\n"
+        "    }\n"
+        "    int arr_len = __cco_arr_len((void *)bytes);\n"
+        "    if (length > arr_len) length = arr_len;\n"
+        "    if (length > 16777216) length = 16777216;\n"
+        "    size_t chunk_cap = (length < 4096) ? (size_t)length : 4096;\n"
+        "    unsigned char stack_chunk[4096];\n"
+        "    unsigned char *chunk = (length <= 4096) ? stack_chunk : (unsigned char *)malloc(chunk_cap);\n"
+        "    if (!chunk) {\n"
+        "        snprintf(__cco_last_net_err_buf, sizeof(__cco_last_net_err_buf), \"Memory allocation failed in net_send_bytes\");\n"
+        "        return -1;\n"
+        "    }\n"
+        "    int total_sent = 0;\n"
+        "    while (total_sent < length) {\n"
+        "        size_t to_send = (size_t)(length - total_sent);\n"
+        "        if (to_send > chunk_cap) to_send = chunk_cap;\n"
+        "        for (size_t i = 0; i < to_send; i++) {\n"
+        "            chunk[i] = (unsigned char)(bytes[total_sent + (int)i] & 0xFF);\n"
+        "        }\n"
+        "        size_t chunk_sent = 0;\n"
+        "        while (chunk_sent < to_send) {\n"
+        "            #ifdef MSG_NOSIGNAL\n"
+        "            int flags = MSG_NOSIGNAL;\n"
+        "            #else\n"
+        "            int flags = 0;\n"
+        "            #endif\n"
+        "            ssize_t sent = send(client_fd, chunk + chunk_sent, to_send - chunk_sent, flags);\n"
+        "            if (sent < 0) {\n"
+        "                if (errno == EINTR) continue;\n"
+        "                snprintf(__cco_last_net_err_buf, sizeof(__cco_last_net_err_buf), \"send() failed: %s\", strerror(errno));\n"
+        "                if (chunk != stack_chunk) free(chunk);\n"
+        "                return (total_sent > 0) ? total_sent : -1;\n"
+        "            }\n"
+        "            if (sent == 0) {\n"
+        "                if (chunk != stack_chunk) free(chunk);\n"
+        "                return total_sent;\n"
+        "            }\n"
+        "            chunk_sent += (size_t)sent;\n"
+        "        }\n"
+        "        total_sent += (int)to_send;\n"
+        "    }\n"
+        "    if (chunk != stack_chunk) free(chunk);\n"
+        "    return total_sent;\n"
+        "}\n\n",
+        deps_net_send_bytes
+    },
+    {
+        "net_recv_bytes",
+        "static inline int __cco_net_recv_bytes(int client_fd, int *buffer, int max_len) {\n"
+        "    __cco_last_net_err_buf[0] = '\\0';\n"
+        "    if (client_fd < 0 || !buffer || max_len <= 0) {\n"
+        "        if (client_fd < 0) {\n"
+        "            snprintf(__cco_last_net_err_buf, sizeof(__cco_last_net_err_buf), \"Invalid socket descriptor: %d\", client_fd);\n"
+        "            errno = EBADF;\n"
+        "        } else if (!buffer) {\n"
+        "            snprintf(__cco_last_net_err_buf, sizeof(__cco_last_net_err_buf), \"Null receive buffer argument\");\n"
+        "            errno = EINVAL;\n"
+        "        }\n"
+        "        return -1;\n"
+        "    }\n"
+        "    int arr_len = __cco_arr_len((void *)buffer);\n"
+        "    if (max_len > arr_len) max_len = arr_len;\n"
+        "    if (max_len > 16777216) max_len = 16777216;\n"
+        "    size_t chunk_cap = (max_len < 65536) ? (size_t)max_len : 65536;\n"
+        "    unsigned char stack_chunk[4096];\n"
+        "    unsigned char *chunk = (chunk_cap <= sizeof(stack_chunk)) ? stack_chunk : (unsigned char *)malloc(chunk_cap);\n"
+        "    if (!chunk) {\n"
+        "        snprintf(__cco_last_net_err_buf, sizeof(__cco_last_net_err_buf), \"Memory allocation failed in net_recv_bytes\");\n"
+        "        return -1;\n"
+        "    }\n"
+        "    ssize_t n;\n"
+        "    while (1) {\n"
+        "        n = recv(client_fd, chunk, chunk_cap, 0);\n"
+        "        if (n < 0) {\n"
+        "            if (errno == EINTR) continue;\n"
+        "            if (errno == EAGAIN || errno == EWOULDBLOCK) {\n"
+        "                snprintf(__cco_last_net_err_buf, sizeof(__cco_last_net_err_buf), \"recv() timed out: Resource temporarily unavailable\");\n"
+        "            } else {\n"
+        "                snprintf(__cco_last_net_err_buf, sizeof(__cco_last_net_err_buf), \"recv() failed: %s\", strerror(errno));\n"
+        "            }\n"
+        "            if (chunk != stack_chunk) free(chunk);\n"
+        "            return -1;\n"
+        "        }\n"
+        "        break;\n"
+        "    }\n"
+        "    if (n > 0) {\n"
+        "        for (ssize_t i = 0; i < n; i++) {\n"
+        "            buffer[i] = (int)chunk[i];\n"
+        "        }\n"
+        "    }\n"
+        "    if (chunk != stack_chunk) free(chunk);\n"
+        "    return (int)n;\n"
+        "}\n\n",
+        deps_net_recv_bytes
+    },
+    {
+        "net_shutdown",
+        "static inline int __cco_net_shutdown(int fd, int how) {\n"
+        "    __cco_last_net_err_buf[0] = '\\0';\n"
+        "    if (fd < 0) {\n"
+        "        snprintf(__cco_last_net_err_buf, sizeof(__cco_last_net_err_buf), \"Invalid socket descriptor: %d\", fd);\n"
+        "        errno = EBADF;\n"
+        "        return -1;\n"
+        "    }\n"
+        "    if (how < 0 || how > 2) {\n"
+        "        snprintf(__cco_last_net_err_buf, sizeof(__cco_last_net_err_buf), \"Invalid shutdown mode: %d (must be 0 for SHUT_RD, 1 for SHUT_WR, 2 for SHUT_RDWR)\", how);\n"
+        "        errno = EINVAL;\n"
+        "        return -1;\n"
+        "    }\n"
+        "    int mode = (how == 0) ? SHUT_RD : ((how == 1) ? SHUT_WR : SHUT_RDWR);\n"
+        "    if (shutdown(fd, mode) < 0) {\n"
+        "        snprintf(__cco_last_net_err_buf, sizeof(__cco_last_net_err_buf), \"shutdown() failed: %s\", strerror(errno));\n"
+        "        return -1;\n"
+        "    }\n"
+        "    return 0;\n"
+        "}\n\n",
+        deps_net_shutdown
+    },
+    {
+        "net_set_timeouts",
+        "static inline int __cco_net_set_timeouts(int fd, int recv_ms, int send_ms) {\n"
+        "    __cco_last_net_err_buf[0] = '\\0';\n"
+        "    if (fd < 0) {\n"
+        "        snprintf(__cco_last_net_err_buf, sizeof(__cco_last_net_err_buf), \"Invalid socket descriptor: %d\", fd);\n"
+        "        errno = EBADF;\n"
+        "        return -1;\n"
+        "    }\n"
+        "    if (recv_ms < 0 || send_ms < 0) {\n"
+        "        snprintf(__cco_last_net_err_buf, sizeof(__cco_last_net_err_buf), \"Invalid timeout value: recv_ms=%d, send_ms=%d (must be >= 0)\", recv_ms, send_ms);\n"
+        "        errno = EINVAL;\n"
+        "        return -1;\n"
+        "    }\n"
+        "    struct timeval old_rcv;\n"
+        "    socklen_t optlen_rcv = sizeof(old_rcv);\n"
+        "    if (getsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &old_rcv, &optlen_rcv) < 0) {\n"
+        "        snprintf(__cco_last_net_err_buf, sizeof(__cco_last_net_err_buf), \"getsockopt(SO_RCVTIMEO) failed: %s\", strerror(errno));\n"
+        "        return -1;\n"
+        "    }\n"
+        "    struct timeval old_snd;\n"
+        "    socklen_t optlen_snd = sizeof(old_snd);\n"
+        "    if (getsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &old_snd, &optlen_snd) < 0) {\n"
+        "        snprintf(__cco_last_net_err_buf, sizeof(__cco_last_net_err_buf), \"getsockopt(SO_SNDTIMEO) failed: %s\", strerror(errno));\n"
+        "        return -1;\n"
+        "    }\n"
+        "    struct timeval tv_rcv;\n"
+        "    tv_rcv.tv_sec = (time_t)(recv_ms / 1000);\n"
+        "    tv_rcv.tv_usec = (suseconds_t)((recv_ms % 1000) * 1000);\n"
+        "    struct timeval tv_snd;\n"
+        "    tv_snd.tv_sec = (time_t)(send_ms / 1000);\n"
+        "    tv_snd.tv_usec = (suseconds_t)((send_ms % 1000) * 1000);\n"
+        "    if (setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv_rcv, sizeof(tv_rcv)) < 0) {\n"
+        "        snprintf(__cco_last_net_err_buf, sizeof(__cco_last_net_err_buf), \"setsockopt(SO_RCVTIMEO) failed: %s\", strerror(errno));\n"
+        "        return -1;\n"
+        "    }\n"
+        "    if (setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv_snd, sizeof(tv_snd)) < 0) {\n"
+        "        int snd_err = errno;\n"
+        "        char snd_err_msg[128];\n"
+        "        snprintf(snd_err_msg, sizeof(snd_err_msg), \"%s\", strerror(snd_err));\n"
+        "        if (setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &old_rcv, sizeof(old_rcv)) < 0) {\n"
+        "            snprintf(__cco_last_net_err_buf, sizeof(__cco_last_net_err_buf), \"SO_SNDTIMEO failed: %.100s; rollback failed: %.100s\", snd_err_msg, strerror(errno));\n"
+        "        } else {\n"
+        "            snprintf(__cco_last_net_err_buf, sizeof(__cco_last_net_err_buf), \"SO_SNDTIMEO failed: %.120s (SO_RCVTIMEO rolled back)\", snd_err_msg);\n"
+        "        }\n"
+        "        errno = snd_err;\n"
+        "        return -1;\n"
+        "    }\n"
+        "    return 0;\n"
+        "}\n\n",
+        deps_net_set_timeouts
     },
     {
         "net_close",

@@ -120,9 +120,14 @@ static bool is_stdlib_heap_fn(const char *name) {
            strcmp(name, "char_to_string") == 0 ||
            strcmp(name, "to_string") == 0 ||
            strcmp(name, "read_file") == 0 ||
+           strcmp(name, "read_file_checked") == 0 ||
+           strcmp(name, "io_last_error") == 0 ||
+           strcmp(name, "net_last_error") == 0 ||
            strcmp(name, "read_line") == 0 ||
            strcmp(name, "input") == 0 ||
            strcmp(name, "net_recv") == 0 ||
+           strcmp(name, "net_recv_raw") == 0 ||
+           strcmp(name, "net_recv_http") == 0 ||
            strcmp(name, "program_name") == 0 ||
            strcmp(name, "args") == 0 ||
            strcmp(name, "keys") == 0;
@@ -1424,10 +1429,12 @@ static void analyze_own_node(OwnScopeStack *stack, AstNode *node) {
                 }
                 break;
             }
-            if (strcmp(callee, "len") == 0) {
-                if (node->as.call.arg_count == 1) {
-                    AstNode *arg = node->as.call.args[0];
-                    analyze_own_node(stack, arg);
+            if (strcmp(callee, "len") == 0 ||
+                strcmp(callee, "write_bytes") == 0 ||
+                strcmp(callee, "net_send_bytes") == 0 ||
+                strcmp(callee, "net_recv_bytes") == 0) {
+                for (int i = 0; i < node->as.call.arg_count; i++) {
+                    analyze_own_node(stack, node->as.call.args[i]);
                 }
                 break;
             }

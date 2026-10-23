@@ -10,6 +10,7 @@
 #include <string.h>
 #include <stdarg.h>
 #include <ctype.h>
+#include <stdint.h>
 
 typedef struct {
     char *buffer;
@@ -598,9 +599,9 @@ static Type infer_expr_type(AstNode *program, AstNode *fn, AstNode *expr) {
         if (strcmp(name, "push") == 0 && expr->as.call.arg_count > 0) {
             return infer_expr_type(program, fn, expr->as.call.args[0]);
         }
-        if (strcmp(name, "len") == 0 || strcmp(name, "abs_int") == 0 || strcmp(name, "min_int") == 0 || strcmp(name, "max_int") == 0 || strcmp(name, "arg_count") == 0 || strcmp(name, "to_int") == 0 || strcmp(name, "random_int") == 0 || strcmp(name, "net_listen") == 0 || strcmp(name, "net_accept") == 0 || strcmp(name, "net_send") == 0 || strcmp(name, "execute_cmd") == 0 || strcmp(name, "system") == 0) return TY_INT;
+        if (strcmp(name, "len") == 0 || strcmp(name, "abs_int") == 0 || strcmp(name, "min_int") == 0 || strcmp(name, "max_int") == 0 || strcmp(name, "arg_count") == 0 || strcmp(name, "to_int") == 0 || strcmp(name, "random_int") == 0 || strcmp(name, "net_listen") == 0 || strcmp(name, "net_listen_on") == 0 || strcmp(name, "net_connect") == 0 || strcmp(name, "net_accept") == 0 || strcmp(name, "net_send") == 0 || strcmp(name, "net_send_bytes") == 0 || strcmp(name, "net_recv_bytes") == 0 || strcmp(name, "net_shutdown") == 0 || strcmp(name, "net_set_timeouts") == 0 || strcmp(name, "execute_cmd") == 0 || strcmp(name, "system") == 0) return TY_INT;
         if (strcmp(name, "sqrt") == 0 || strcmp(name, "exp") == 0 || strcmp(name, "log") == 0 || strcmp(name, "sin") == 0 || strcmp(name, "cos") == 0 || strcmp(name, "tan") == 0 || strcmp(name, "pow") == 0 || strcmp(name, "abs_float") == 0 || strcmp(name, "floor") == 0 || strcmp(name, "ceil") == 0 || strcmp(name, "min_float") == 0 || strcmp(name, "max_float") == 0 || strcmp(name, "to_float") == 0) return TY_FLOAT;
-        if (strcmp(name, "concat") == 0 || strcmp(name, "substring") == 0 || strcmp(name, "char_to_string") == 0 || strcmp(name, "to_string") == 0 || strcmp(name, "read_file") == 0 || strcmp(name, "program_name") == 0 || strcmp(name, "args") == 0 || strcmp(name, "read_line") == 0 || strcmp(name, "input") == 0 || strcmp(name, "net_recv") == 0) return TY_STRING;
+        if (strcmp(name, "concat") == 0 || strcmp(name, "substring") == 0 || strcmp(name, "char_to_string") == 0 || strcmp(name, "to_string") == 0 || strcmp(name, "read_file") == 0 || strcmp(name, "read_file_checked") == 0 || strcmp(name, "io_last_error") == 0 || strcmp(name, "net_last_error") == 0 || strcmp(name, "program_name") == 0 || strcmp(name, "args") == 0 || strcmp(name, "read_line") == 0 || strcmp(name, "input") == 0 || strcmp(name, "net_recv") == 0 || strcmp(name, "net_recv_raw") == 0 || strcmp(name, "net_recv_http") == 0) return TY_STRING;
         if (strcmp(name, "equals") == 0 || strcmp(name, "write_file") == 0 || strcmp(name, "is_int") == 0 || strcmp(name, "is_float") == 0 || strcmp(name, "file_exists") == 0 || strcmp(name, "write_bytes") == 0) return TY_BOOL;
         if (strcmp(name, "char_at") == 0) return TY_CHAR;
         if (strcmp(name, "random_seed") == 0 || strcmp(name, "net_close") == 0 || strcmp(name, "sleep_ms") == 0 || strcmp(name, "exit") == 0) return TY_VOID;
@@ -1700,6 +1701,12 @@ static void gen_expr(CodegenCtx *ctx, AstNode *expr) {
                 sb_append(&ctx->sb, "__cco_read_file(");
                 gen_expr(ctx, expr->as.call.args[0]);
                 sb_append(&ctx->sb, ")");
+            } else if (strcmp(callee, "read_file_checked") == 0) {
+                sb_append(&ctx->sb, "__cco_read_file_checked(");
+                gen_expr(ctx, expr->as.call.args[0]);
+                sb_append(&ctx->sb, ")");
+            } else if (strcmp(callee, "io_last_error") == 0) {
+                sb_append(&ctx->sb, "__cco_io_last_error()");
             } else if (strcmp(callee, "char_to_string") == 0) {
                 sb_append(&ctx->sb, "__cco_char_to_string(");
                 gen_expr(ctx, expr->as.call.args[0]);
@@ -1778,6 +1785,20 @@ static void gen_expr(CodegenCtx *ctx, AstNode *expr) {
                 sb_append(&ctx->sb, "__cco_net_listen(");
                 gen_expr(ctx, expr->as.call.args[0]);
                 sb_append(&ctx->sb, ")");
+            } else if (strcmp(callee, "net_listen_on") == 0) {
+                sb_append(&ctx->sb, "__cco_net_listen_on(");
+                gen_expr(ctx, expr->as.call.args[0]);
+                sb_append(&ctx->sb, ", ");
+                gen_expr(ctx, expr->as.call.args[1]);
+                sb_append(&ctx->sb, ")");
+            } else if (strcmp(callee, "net_connect") == 0) {
+                sb_append(&ctx->sb, "__cco_net_connect(");
+                gen_expr(ctx, expr->as.call.args[0]);
+                sb_append(&ctx->sb, ", ");
+                gen_expr(ctx, expr->as.call.args[1]);
+                sb_append(&ctx->sb, ")");
+            } else if (strcmp(callee, "net_last_error") == 0) {
+                sb_append(&ctx->sb, "__cco_net_last_error()");
             } else if (strcmp(callee, "net_accept") == 0) {
                 sb_append(&ctx->sb, "__cco_net_accept(");
                 gen_expr(ctx, expr->as.call.args[0]);
@@ -1788,15 +1809,57 @@ static void gen_expr(CodegenCtx *ctx, AstNode *expr) {
                 sb_append(&ctx->sb, ", ");
                 gen_expr(ctx, expr->as.call.args[1]);
                 sb_append(&ctx->sb, ")");
+            } else if (strcmp(callee, "net_recv_raw") == 0) {
+                sb_append(&ctx->sb, "__cco_net_recv_raw(");
+                gen_expr(ctx, expr->as.call.args[0]);
+                sb_append(&ctx->sb, ", ");
+                gen_expr(ctx, expr->as.call.args[1]);
+                sb_append(&ctx->sb, ")");
+            } else if (strcmp(callee, "net_recv_http") == 0) {
+                sb_append(&ctx->sb, "__cco_net_recv_http(");
+                gen_expr(ctx, expr->as.call.args[0]);
+                sb_append(&ctx->sb, ", ");
+                gen_expr(ctx, expr->as.call.args[1]);
+                sb_append(&ctx->sb, ")");
             } else if (strcmp(callee, "net_send") == 0) {
                 sb_append(&ctx->sb, "__cco_net_send(");
                 gen_expr(ctx, expr->as.call.args[0]);
                 sb_append(&ctx->sb, ", ");
                 gen_expr(ctx, expr->as.call.args[1]);
                 sb_append(&ctx->sb, ")");
+            } else if (strcmp(callee, "net_send_bytes") == 0) {
+                sb_append(&ctx->sb, "__cco_net_send_bytes(");
+                gen_expr(ctx, expr->as.call.args[0]);
+                sb_append(&ctx->sb, ", ");
+                gen_expr(ctx, expr->as.call.args[1]);
+                sb_append(&ctx->sb, ", ");
+                gen_expr(ctx, expr->as.call.args[2]);
+                sb_append(&ctx->sb, ")");
+            } else if (strcmp(callee, "net_recv_bytes") == 0) {
+                sb_append(&ctx->sb, "__cco_net_recv_bytes(");
+                gen_expr(ctx, expr->as.call.args[0]);
+                sb_append(&ctx->sb, ", ");
+                gen_expr(ctx, expr->as.call.args[1]);
+                sb_append(&ctx->sb, ", ");
+                gen_expr(ctx, expr->as.call.args[2]);
+                sb_append(&ctx->sb, ")");
             } else if (strcmp(callee, "net_close") == 0) {
                 sb_append(&ctx->sb, "__cco_net_close(");
                 gen_expr(ctx, expr->as.call.args[0]);
+                sb_append(&ctx->sb, ")");
+            } else if (strcmp(callee, "net_shutdown") == 0) {
+                sb_append(&ctx->sb, "__cco_net_shutdown(");
+                gen_expr(ctx, expr->as.call.args[0]);
+                sb_append(&ctx->sb, ", ");
+                gen_expr(ctx, expr->as.call.args[1]);
+                sb_append(&ctx->sb, ")");
+            } else if (strcmp(callee, "net_set_timeouts") == 0) {
+                sb_append(&ctx->sb, "__cco_net_set_timeouts(");
+                gen_expr(ctx, expr->as.call.args[0]);
+                sb_append(&ctx->sb, ", ");
+                gen_expr(ctx, expr->as.call.args[1]);
+                sb_append(&ctx->sb, ", ");
+                gen_expr(ctx, expr->as.call.args[2]);
                 sb_append(&ctx->sb, ")");
             } else if (strcmp(callee, "sleep_ms") == 0) {
                 sb_append(&ctx->sb, "__cco_sleep_ms(");
@@ -1868,9 +1931,14 @@ static inline bool is_heap_string_returning_call(const char *name) {
     return (strcmp(name, "concat") == 0 ||
             strcmp(name, "substring") == 0 ||
             strcmp(name, "read_file") == 0 ||
+            strcmp(name, "read_file_checked") == 0 ||
+            strcmp(name, "io_last_error") == 0 ||
+            strcmp(name, "net_last_error") == 0 ||
             strcmp(name, "read_line") == 0 ||
             strcmp(name, "input") == 0 ||
             strcmp(name, "net_recv") == 0 ||
+            strcmp(name, "net_recv_raw") == 0 ||
+            strcmp(name, "net_recv_http") == 0 ||
             strcmp(name, "program_name") == 0);
 }
 
@@ -2747,6 +2815,185 @@ static void gen_function(CodegenCtx *ctx, AstNode *fn) {
     sb_append(&ctx->sb, "\n");
 }
 
+typedef enum {
+    HEADER_NONE        = 0,
+    HEADER_STDIO       = 1 << 0,  // <stdio.h>
+    HEADER_STDLIB      = 1 << 1,  // <stdlib.h>
+    HEADER_STDBOOL     = 1 << 2,  // <stdbool.h>
+    HEADER_STDINT      = 1 << 3,  // <stdint.h>
+    HEADER_STRING      = 1 << 4,  // <string.h>
+    HEADER_MATH        = 1 << 5,  // <math.h> (also triggers linker -lm)
+    HEADER_TIME        = 1 << 6,  // <time.h>
+    HEADER_ERRNO       = 1 << 7,  // <errno.h>
+    HEADER_UNISTD      = 1 << 8,  // <unistd.h>
+    HEADER_SYS_TYPES   = 1 << 9,  // <sys/types.h>
+    HEADER_SYS_SOCKET  = 1 << 10, // <sys/socket.h>
+    HEADER_NETINET_IN  = 1 << 11, // <netinet/in.h>
+    HEADER_ARPA_INET   = 1 << 12, // <arpa/inet.h>
+    HEADER_STRINGS     = 1 << 13, // <strings.h>
+    HEADER_POLL        = 1 << 14, // <poll.h>
+    HEADER_POSIX       = 1 << 15, // _POSIX_C_SOURCE 200809L & _DEFAULT_SOURCE
+} HeaderFlags;
+
+static bool s_last_codegen_needs_libm = false;
+
+bool cco_codegen_needs_libm(void) {
+    return s_last_codegen_needs_libm;
+}
+
+static bool chunk_needs_posix(const char *name) {
+    if (!name) return false;
+    return (strcmp(name, "map_put") == 0 ||
+            strcmp(name, "map_keys") == 0 ||
+            strcmp(name, "get_args") == 0 ||
+            strcmp(name, "get_program_name") == 0 ||
+            strcmp(name, "int_to_str") == 0 ||
+            strcmp(name, "float_to_str") == 0 ||
+            strcmp(name, "bool_to_str") == 0 ||
+            strcmp(name, "char_to_str") == 0 ||
+            strcmp(name, "to_string") == 0 ||
+            strcmp(name, "sleep_ms") == 0 ||
+            strcmp(name, "net_listen") == 0 ||
+            strcmp(name, "net_listen_on") == 0 ||
+            strcmp(name, "net_connect") == 0 ||
+            strcmp(name, "net_last_error") == 0 ||
+            strcmp(name, "net_accept") == 0 ||
+            strcmp(name, "net_recv") == 0 ||
+            strcmp(name, "net_recv_raw") == 0 ||
+            strcmp(name, "net_recv_http") == 0 ||
+            strcmp(name, "net_send") == 0 ||
+            strcmp(name, "net_send_bytes") == 0 ||
+            strcmp(name, "net_recv_bytes") == 0 ||
+            strcmp(name, "net_shutdown") == 0 ||
+            strcmp(name, "net_set_timeouts") == 0 ||
+            strcmp(name, "net_close") == 0);
+}
+
+static uint32_t get_chunk_header_flags(const char *name) {
+    if (!name) return HEADER_NONE;
+    if (strcmp(name, "concat") == 0 ||
+        strcmp(name, "char_at") == 0 ||
+        strcmp(name, "substring") == 0 ||
+        strcmp(name, "char_to_string") == 0 ||
+        strcmp(name, "to_string") == 0) {
+        return HEADER_STDIO | HEADER_STDLIB | HEADER_STRING;
+    }
+    if (strcmp(name, "concat_free") == 0) {
+        return HEADER_STDIO | HEADER_STDLIB | HEADER_STRING | HEADER_STDBOOL;
+    }
+    if (strcmp(name, "int_to_str") == 0 ||
+        strcmp(name, "float_to_str") == 0) {
+        return HEADER_STDIO | HEADER_STRING;
+    }
+    if (strcmp(name, "bool_to_str") == 0) {
+        return HEADER_STDBOOL | HEADER_STRING;
+    }
+    if (strcmp(name, "char_to_str") == 0 ||
+        strcmp(name, "get_args") == 0 ||
+        strcmp(name, "get_program_name") == 0 ||
+        strcmp(name, "map_keys") == 0) {
+        return HEADER_STRING;
+    }
+    if (strcmp(name, "read_file") == 0 ||
+        strcmp(name, "read_file_checked") == 0 ||
+        strcmp(name, "io_last_error") == 0) {
+        return HEADER_STDIO | HEADER_STDLIB | HEADER_STRING | HEADER_ERRNO;
+    }
+    if (strcmp(name, "write_file") == 0) {
+        return HEADER_STDIO | HEADER_STDLIB | HEADER_STDBOOL | HEADER_STRING;
+    }
+    if (strcmp(name, "write_bytes") == 0) {
+        return HEADER_STDIO | HEADER_STDBOOL;
+    }
+    if (strcmp(name, "read_line") == 0 ||
+        strcmp(name, "input") == 0) {
+        return HEADER_STDIO | HEADER_STDLIB;
+    }
+    if (strcmp(name, "alloc_arr") == 0 ||
+        strcmp(name, "list_new") == 0 ||
+        strcmp(name, "arr_maybe_grow") == 0 ||
+        strcmp(name, "arr_decr_len") == 0 ||
+        strcmp(name, "bounds_check") == 0) {
+        return HEADER_STDIO | HEADER_STDLIB;
+    }
+    if (strcmp(name, "free_arr") == 0 ||
+        strcmp(name, "map_free") == 0 ||
+        strcmp(name, "execute_cmd") == 0 ||
+        strcmp(name, "cco_exit") == 0) {
+        return HEADER_STDLIB;
+    }
+    if (strcmp(name, "map_hash") == 0) {
+        return HEADER_STRING | HEADER_STDBOOL | HEADER_STDINT;
+    }
+    if (strcmp(name, "map_new") == 0 ||
+        strcmp(name, "map_rehash") == 0 ||
+        strcmp(name, "map_get") == 0 ||
+        strcmp(name, "map_remove") == 0) {
+        return HEADER_STDIO | HEADER_STDLIB | HEADER_STDINT;
+    }
+    if (strcmp(name, "map_put") == 0) {
+        return HEADER_STDIO | HEADER_STDLIB | HEADER_STRING | HEADER_STDINT;
+    }
+    if (strcmp(name, "map_has") == 0 ||
+        strcmp(name, "is_int") == 0 ||
+        strcmp(name, "is_float") == 0) {
+        return HEADER_STDBOOL;
+    }
+    if (strcmp(name, "file_exists") == 0) {
+        return HEADER_STDIO | HEADER_STDBOOL;
+    }
+    if (strcmp(name, "to_int") == 0 ||
+        strcmp(name, "to_float") == 0) {
+        return HEADER_STDIO | HEADER_STDLIB;
+    }
+    if (strcmp(name, "try_parse_int") == 0 ||
+        strcmp(name, "try_parse_float") == 0) {
+        return HEADER_ERRNO | HEADER_STDBOOL | HEADER_STDLIB;
+    }
+    if (strcmp(name, "random_seed") == 0 ||
+        strcmp(name, "random_int") == 0) {
+        return HEADER_STDLIB | HEADER_TIME;
+    }
+    if (strcmp(name, "sleep_ms") == 0) {
+        return HEADER_TIME;
+    }
+    if (strcmp(name, "net_last_error") == 0) {
+        return HEADER_STDLIB | HEADER_STRING;
+    }
+    if (strcmp(name, "net_listen") == 0) {
+        return HEADER_SYS_SOCKET | HEADER_NETINET_IN | HEADER_UNISTD | HEADER_STRING | HEADER_STDINT | HEADER_ARPA_INET | HEADER_ERRNO | HEADER_STDIO;
+    }
+    if (strcmp(name, "net_listen_on") == 0) {
+        return HEADER_SYS_SOCKET | HEADER_NETINET_IN | HEADER_ARPA_INET | HEADER_UNISTD | HEADER_STRING | HEADER_STDINT | HEADER_ERRNO | HEADER_STDIO;
+    }
+    if (strcmp(name, "net_connect") == 0) {
+        return HEADER_SYS_SOCKET | HEADER_NETINET_IN | HEADER_ARPA_INET | HEADER_UNISTD | HEADER_STRING | HEADER_STDINT | HEADER_ERRNO | HEADER_STDIO | HEADER_POLL;
+    }
+    if (strcmp(name, "net_accept") == 0) {
+        return HEADER_SYS_SOCKET | HEADER_NETINET_IN;
+    }
+    if (strcmp(name, "net_recv") == 0 ||
+        strcmp(name, "net_recv_raw") == 0 ||
+        strcmp(name, "net_recv_http") == 0) {
+        return HEADER_SYS_SOCKET | HEADER_SYS_TYPES | HEADER_STRINGS | HEADER_ERRNO | HEADER_STDLIB | HEADER_STRING;
+    }
+    if (strcmp(name, "net_send") == 0 ||
+        strcmp(name, "net_send_bytes") == 0 ||
+        strcmp(name, "net_recv_bytes") == 0) {
+        return HEADER_SYS_SOCKET | HEADER_SYS_TYPES | HEADER_ERRNO | HEADER_STRING | HEADER_STDLIB;
+    }
+    if (strcmp(name, "net_close") == 0) {
+        return HEADER_UNISTD;
+    }
+    if (strcmp(name, "net_shutdown") == 0) {
+        return HEADER_SYS_SOCKET | HEADER_ERRNO | HEADER_STDIO;
+    }
+    if (strcmp(name, "net_set_timeouts") == 0) {
+        return HEADER_SYS_SOCKET | HEADER_SYS_TYPES | HEADER_TIME | HEADER_ERRNO | HEADER_STDIO;
+    }
+    return HEADER_NONE;
+}
+
 static void mark_chunk_used(bool *used_chunks, const char *name) {
     if (!name) return;
     for (size_t i = 0; i < PRELUDE_CHUNK_COUNT; i++) {
@@ -2757,163 +3004,260 @@ static void mark_chunk_used(bool *used_chunks, const char *name) {
     }
 }
 
-static void check_releases_usage(AstNode *node, bool *used_chunks) {
+static void check_releases_usage(AstNode *node, bool *used_chunks, uint32_t *header_flags) {
     if (!node) return;
     for (int i = 0; i < node->releases_count; i++) {
+        *header_flags |= HEADER_STDLIB;
         if (node->releases_to_emit && node->releases_to_emit[i].is_map) {
             mark_chunk_used(used_chunks, "map_free");
+            *header_flags |= HEADER_STDINT;
         } else if (node->releases_to_emit && node->releases_to_emit[i].is_array) {
             mark_chunk_used(used_chunks, "free_arr");
         }
     }
     if (node->frees_count > 0) {
         mark_chunk_used(used_chunks, "free_arr");
+        *header_flags |= HEADER_STDLIB;
     }
 }
 
-static void scan_node_usage(AstNode *node, bool *used_chunks) {
+static void scan_node_usage(AstNode *node, bool *used_chunks, uint32_t *header_flags, bool *needs_libm) {
     if (!node) return;
 
-    check_releases_usage(node, used_chunks);
+    check_releases_usage(node, used_chunks, header_flags);
     if (node->frees_count > 0) {
         mark_chunk_used(used_chunks, "free_arr");
+        *header_flags |= HEADER_STDLIB;
     }
 
     switch (node->type) {
         case NODE_PROGRAM:
             for (int i = 0; i < node->as.program.class_count; i++) {
-                scan_node_usage(node->as.program.classes[i], used_chunks);
+                scan_node_usage(node->as.program.classes[i], used_chunks, header_flags, needs_libm);
             }
             for (int i = 0; i < node->as.program.struct_count; i++) {
-                scan_node_usage(node->as.program.structs[i], used_chunks);
+                scan_node_usage(node->as.program.structs[i], used_chunks, header_flags, needs_libm);
             }
             for (int i = 0; i < node->as.program.count; i++) {
-                scan_node_usage(node->as.program.functions[i], used_chunks);
+                scan_node_usage(node->as.program.functions[i], used_chunks, header_flags, needs_libm);
             }
             break;
 
         case NODE_CLASS:
+            *header_flags |= HEADER_STDLIB;
             for (int f = 0; f < node->as.class_decl.field_count; f++) {
-                if (node->as.class_decl.fields[f]->as.field.is_map) {
+                AstNode *fld = node->as.class_decl.fields[f];
+                if (fld->as.field.type == TY_BOOL) {
+                    *header_flags |= HEADER_STDBOOL;
+                }
+                if (fld->as.field.is_map) {
                     mark_chunk_used(used_chunks, "map_free");
-                    if (node->as.class_decl.fields[f]->as.field.is_array) {
+                    *header_flags |= HEADER_STDINT | HEADER_STDLIB;
+                    if (fld->as.field.is_array) {
                         mark_chunk_used(used_chunks, "arr_len");
                         mark_chunk_used(used_chunks, "free_arr");
                     }
                 }
-                if (node->as.class_decl.fields[f]->as.field.is_array) {
+                if (fld->as.field.is_array) {
                     mark_chunk_used(used_chunks, "free_arr");
+                    *header_flags |= HEADER_STDLIB;
                 }
             }
             for (int m = 0; m < node->as.class_decl.method_count; m++) {
-                scan_node_usage(node->as.class_decl.methods[m], used_chunks);
+                scan_node_usage(node->as.class_decl.methods[m], used_chunks, header_flags, needs_libm);
+            }
+            break;
+
+        case NODE_STRUCT:
+            for (int f = 0; f < node->as.struct_decl.field_count; f++) {
+                AstNode *fld = node->as.struct_decl.fields[f];
+                if (fld->as.struct_field_decl.field_type == TY_BOOL) {
+                    *header_flags |= HEADER_STDBOOL;
+                }
+            }
+            break;
+
+        case NODE_ENUM:
+            *header_flags |= HEADER_STDLIB;
+            for (int v = 0; v < node->as.enum_decl.variant_count; v++) {
+                AstNode *vn = node->as.enum_decl.variants[v];
+                for (int f = 0; f < vn->as.variant_decl.field_count; f++) {
+                    AstNode *fld = vn->as.variant_decl.fields[f];
+                    if (fld->as.field.type == TY_BOOL) {
+                        *header_flags |= HEADER_STDBOOL;
+                    }
+                }
             }
             break;
 
         case NODE_FUNCTION:
-            scan_node_usage(node->as.function.body, used_chunks);
+            if (node->as.function.return_type == TY_BOOL) {
+                *header_flags |= HEADER_STDBOOL;
+            }
+            for (int p = 0; p < node->as.function.param_count; p++) {
+                if (node->as.function.param_types[p] == TY_BOOL) {
+                    *header_flags |= HEADER_STDBOOL;
+                }
+                if (node->as.function.param_is_map && node->as.function.param_is_map[p]) {
+                    *header_flags |= HEADER_STDINT;
+                }
+            }
+            scan_node_usage(node->as.function.body, used_chunks, header_flags, needs_libm);
             break;
 
         case NODE_METHOD:
-            scan_node_usage(node->as.method.body, used_chunks);
+            if (node->as.method.return_type == TY_BOOL) {
+                *header_flags |= HEADER_STDBOOL;
+            }
+            for (int p = 0; p < node->as.method.param_count; p++) {
+                if (node->as.method.param_types[p] == TY_BOOL) {
+                    *header_flags |= HEADER_STDBOOL;
+                }
+                if (node->as.method.param_is_map && node->as.method.param_is_map[p]) {
+                    *header_flags |= HEADER_STDINT;
+                }
+            }
+            scan_node_usage(node->as.method.body, used_chunks, header_flags, needs_libm);
             break;
 
         case NODE_BLOCK:
             for (int i = 0; i < node->as.block.count; i++) {
-                scan_node_usage(node->as.block.stmts[i], used_chunks);
+                scan_node_usage(node->as.block.stmts[i], used_chunks, header_flags, needs_libm);
             }
             break;
 
         case NODE_LET:
+            if (node->as.let.var_type == TY_BOOL) {
+                *header_flags |= HEADER_STDBOOL;
+            }
+            if (node->as.let.var_type == TY_STRING) {
+                *header_flags |= HEADER_STRING | HEADER_POSIX | HEADER_STDLIB;
+            }
+            if (node->as.let.is_map) {
+                *header_flags |= HEADER_STDINT | HEADER_STDLIB;
+            }
             if (node->as.let.is_array) {
                 mark_chunk_used(used_chunks, "free_arr");
+                *header_flags |= HEADER_STDLIB;
             }
-            scan_node_usage(node->as.let.value, used_chunks);
+            scan_node_usage(node->as.let.value, used_chunks, header_flags, needs_libm);
+            break;
+
+        case NODE_LITERAL:
+            if (node->as.literal.lit_type == TY_BOOL) {
+                *header_flags |= HEADER_STDBOOL;
+            }
             break;
 
         case NODE_ASSIGN:
-            scan_node_usage(node->as.assign.value, used_chunks);
+            if (node->as.assign.value && node->as.assign.value->type == NODE_LITERAL &&
+                node->as.assign.value->as.literal.lit_type == TY_STRING) {
+                *header_flags |= HEADER_STRING | HEADER_POSIX | HEADER_STDLIB;
+            }
+            scan_node_usage(node->as.assign.value, used_chunks, header_flags, needs_libm);
             break;
 
         case NODE_MEMBER_ASSIGN:
-            scan_node_usage(node->as.member_assign.object, used_chunks);
-            scan_node_usage(node->as.member_assign.value, used_chunks);
+            scan_node_usage(node->as.member_assign.object, used_chunks, header_flags, needs_libm);
+            scan_node_usage(node->as.member_assign.value, used_chunks, header_flags, needs_libm);
             break;
 
         case NODE_INDEX_ASSIGN:
             mark_chunk_used(used_chunks, "bounds_check");
-            scan_node_usage(node->as.index_assign.array_expr, used_chunks);
-            scan_node_usage(node->as.index_assign.index, used_chunks);
-            scan_node_usage(node->as.index_assign.value, used_chunks);
+            *header_flags |= HEADER_STDIO | HEADER_STDLIB;
+            scan_node_usage(node->as.index_assign.array_expr, used_chunks, header_flags, needs_libm);
+            scan_node_usage(node->as.index_assign.index, used_chunks, header_flags, needs_libm);
+            scan_node_usage(node->as.index_assign.value, used_chunks, header_flags, needs_libm);
             break;
 
         case NODE_IF:
-            scan_node_usage(node->as.if_stmt.cond, used_chunks);
-            scan_node_usage(node->as.if_stmt.then_b, used_chunks);
-            scan_node_usage(node->as.if_stmt.else_b, used_chunks);
+            scan_node_usage(node->as.if_stmt.cond, used_chunks, header_flags, needs_libm);
+            scan_node_usage(node->as.if_stmt.then_b, used_chunks, header_flags, needs_libm);
+            scan_node_usage(node->as.if_stmt.else_b, used_chunks, header_flags, needs_libm);
             break;
 
         case NODE_WHILE:
-            scan_node_usage(node->as.while_stmt.cond, used_chunks);
-            scan_node_usage(node->as.while_stmt.body, used_chunks);
+            scan_node_usage(node->as.while_stmt.cond, used_chunks, header_flags, needs_libm);
+            scan_node_usage(node->as.while_stmt.body, used_chunks, header_flags, needs_libm);
             break;
 
         case NODE_FOR:
-            scan_node_usage(node->as.for_stmt.init, used_chunks);
-            scan_node_usage(node->as.for_stmt.cond, used_chunks);
-            scan_node_usage(node->as.for_stmt.step, used_chunks);
-            scan_node_usage(node->as.for_stmt.body, used_chunks);
+            scan_node_usage(node->as.for_stmt.init, used_chunks, header_flags, needs_libm);
+            scan_node_usage(node->as.for_stmt.cond, used_chunks, header_flags, needs_libm);
+            scan_node_usage(node->as.for_stmt.step, used_chunks, header_flags, needs_libm);
+            scan_node_usage(node->as.for_stmt.body, used_chunks, header_flags, needs_libm);
             break;
 
         case NODE_FOR_EACH:
             mark_chunk_used(used_chunks, "arr_len");
-            scan_node_usage(node->as.for_each.collection_expr, used_chunks);
-            scan_node_usage(node->as.for_each.body, used_chunks);
+            scan_node_usage(node->as.for_each.collection_expr, used_chunks, header_flags, needs_libm);
+            scan_node_usage(node->as.for_each.body, used_chunks, header_flags, needs_libm);
             break;
 
         case NODE_MATCH:
-            scan_node_usage(node->as.match_stmt.expr, used_chunks);
+            scan_node_usage(node->as.match_stmt.expr, used_chunks, header_flags, needs_libm);
             for (int a = 0; a < node->as.match_stmt.arm_count; a++) {
-                scan_node_usage(node->as.match_stmt.arms[a]->as.match_arm.body, used_chunks);
+                scan_node_usage(node->as.match_stmt.arms[a]->as.match_arm.body, used_chunks, header_flags, needs_libm);
             }
             break;
 
         case NODE_RETURN:
-            scan_node_usage(node->as.return_stmt.value, used_chunks);
+            if (node->as.return_stmt.value && node->as.return_stmt.value->type == NODE_LITERAL &&
+                node->as.return_stmt.value->as.literal.lit_type == TY_STRING) {
+                *header_flags |= HEADER_STRING | HEADER_POSIX | HEADER_STDLIB;
+            }
+            scan_node_usage(node->as.return_stmt.value, used_chunks, header_flags, needs_libm);
             break;
 
         case NODE_PRINT:
+            *header_flags |= HEADER_STDIO;
             if (node->as.print_stmt.values) {
                 for (int i = 0; i < node->as.print_stmt.value_count; i++) {
-                    scan_node_usage(node->as.print_stmt.values[i], used_chunks);
+                    scan_node_usage(node->as.print_stmt.values[i], used_chunks, header_flags, needs_libm);
                 }
             } else if (node->as.print_stmt.value) {
-                scan_node_usage(node->as.print_stmt.value, used_chunks);
+                scan_node_usage(node->as.print_stmt.value, used_chunks, header_flags, needs_libm);
             }
             break;
 
         case NODE_EXPR_STMT:
-            scan_node_usage(node->as.expr_stmt.expr, used_chunks);
+            scan_node_usage(node->as.expr_stmt.expr, used_chunks, header_flags, needs_libm);
             break;
 
         case NODE_BINARY:
-            scan_node_usage(node->as.binary.left, used_chunks);
-            scan_node_usage(node->as.binary.right, used_chunks);
+            if (strcmp(node->as.binary.op, "==") == 0 ||
+                strcmp(node->as.binary.op, "!=") == 0 ||
+                strcmp(node->as.binary.op, "<") == 0 ||
+                strcmp(node->as.binary.op, "<=") == 0 ||
+                strcmp(node->as.binary.op, ">") == 0 ||
+                strcmp(node->as.binary.op, ">=") == 0 ||
+                strcmp(node->as.binary.op, "&&") == 0 ||
+                strcmp(node->as.binary.op, "||") == 0) {
+                *header_flags |= HEADER_STDBOOL;
+            }
+            scan_node_usage(node->as.binary.left, used_chunks, header_flags, needs_libm);
+            scan_node_usage(node->as.binary.right, used_chunks, header_flags, needs_libm);
             break;
 
         case NODE_UNARY:
-            scan_node_usage(node->as.unary.operand, used_chunks);
+            if (strcmp(node->as.unary.op, "!") == 0) {
+                *header_flags |= HEADER_STDBOOL;
+            }
+            scan_node_usage(node->as.unary.operand, used_chunks, header_flags, needs_libm);
             break;
 
         case NODE_INDEX:
             mark_chunk_used(used_chunks, "bounds_check");
-            scan_node_usage(node->as.index.array_expr, used_chunks);
-            scan_node_usage(node->as.index.index, used_chunks);
+            *header_flags |= HEADER_STDIO | HEADER_STDLIB;
+            scan_node_usage(node->as.index.array_expr, used_chunks, header_flags, needs_libm);
+            scan_node_usage(node->as.index.index, used_chunks, header_flags, needs_libm);
             break;
 
         case NODE_ALLOC:
+            *header_flags |= HEADER_STDIO | HEADER_STDLIB;
             if (node->as.alloc.is_map) {
                 mark_chunk_used(used_chunks, "map_new");
+                *header_flags |= HEADER_STDINT;
             } else if (node->as.alloc.is_list) {
                 mark_chunk_used(used_chunks, "list_new");
             } else {
@@ -2922,13 +3266,27 @@ static void scan_node_usage(AstNode *node, bool *used_chunks) {
             if (node->as.alloc.elem_type == TY_CLASS) {
                 mark_chunk_used(used_chunks, "free_arr");
             }
-            scan_node_usage(node->as.alloc.count_expr, used_chunks);
+            scan_node_usage(node->as.alloc.count_expr, used_chunks, header_flags, needs_libm);
             break;
 
         case NODE_CALL: {
             const char *callee = node->as.call.callee;
             if (callee) {
-                if (strcmp(callee, "concat") == 0) mark_chunk_used(used_chunks, "concat");
+                if (strcmp(callee, "equals") == 0) {
+                    *header_flags |= HEADER_STRING | HEADER_STDBOOL;
+                } else if (strcmp(callee, "sqrt") == 0 ||
+                           strcmp(callee, "pow") == 0 ||
+                           strcmp(callee, "exp") == 0 ||
+                           strcmp(callee, "log") == 0 ||
+                           strcmp(callee, "sin") == 0 ||
+                           strcmp(callee, "cos") == 0 ||
+                           strcmp(callee, "tan") == 0 ||
+                           strcmp(callee, "abs_float") == 0 ||
+                           strcmp(callee, "floor") == 0 ||
+                           strcmp(callee, "ceil") == 0) {
+                    *header_flags |= HEADER_MATH;
+                    *needs_libm = true;
+                } else if (strcmp(callee, "concat") == 0) mark_chunk_used(used_chunks, "concat");
                 else if (strcmp(callee, "char_at") == 0) mark_chunk_used(used_chunks, "char_at");
                 else if (strcmp(callee, "substring") == 0) mark_chunk_used(used_chunks, "substring");
                 else if (strcmp(callee, "abs_int") == 0) mark_chunk_used(used_chunks, "abs_int");
@@ -2937,6 +3295,8 @@ static void scan_node_usage(AstNode *node, bool *used_chunks) {
                 else if (strcmp(callee, "min_float") == 0) mark_chunk_used(used_chunks, "min_float");
                 else if (strcmp(callee, "max_float") == 0) mark_chunk_used(used_chunks, "max_float");
                 else if (strcmp(callee, "read_file") == 0) mark_chunk_used(used_chunks, "read_file");
+                else if (strcmp(callee, "read_file_checked") == 0) mark_chunk_used(used_chunks, "read_file_checked");
+                else if (strcmp(callee, "io_last_error") == 0) mark_chunk_used(used_chunks, "io_last_error");
                 else if (strcmp(callee, "char_to_string") == 0) mark_chunk_used(used_chunks, "char_to_string");
                 else if (strcmp(callee, "to_string") == 0) mark_chunk_used(used_chunks, "to_string");
                 else if (strcmp(callee, "exit") == 0) mark_chunk_used(used_chunks, "cco_exit");
@@ -2961,6 +3321,7 @@ static void scan_node_usage(AstNode *node, bool *used_chunks) {
                 else if (strcmp(callee, "len") == 0) {
                     mark_chunk_used(used_chunks, "arr_len");
                     mark_chunk_used(used_chunks, "map_bucket");
+                    *header_flags |= HEADER_STRING;
                 }
                 else if (strcmp(callee, "args") == 0) {
                     mark_chunk_used(used_chunks, "get_args");
@@ -2998,46 +3359,92 @@ static void scan_node_usage(AstNode *node, bool *used_chunks) {
                 else if (strcmp(callee, "net_listen") == 0) {
                     mark_chunk_used(used_chunks, "net_listen");
                 }
+                else if (strcmp(callee, "net_listen_on") == 0) {
+                    mark_chunk_used(used_chunks, "net_listen_on");
+                }
+                else if (strcmp(callee, "net_connect") == 0) {
+                    mark_chunk_used(used_chunks, "net_connect");
+                }
+                else if (strcmp(callee, "net_last_error") == 0) {
+                    mark_chunk_used(used_chunks, "net_last_error");
+                }
                 else if (strcmp(callee, "net_accept") == 0) {
                     mark_chunk_used(used_chunks, "net_accept");
                 }
                 else if (strcmp(callee, "net_recv") == 0) {
                     mark_chunk_used(used_chunks, "net_recv");
                 }
+                else if (strcmp(callee, "net_recv_raw") == 0) {
+                    mark_chunk_used(used_chunks, "net_recv_raw");
+                }
+                else if (strcmp(callee, "net_recv_http") == 0) {
+                    mark_chunk_used(used_chunks, "net_recv_http");
+                }
                 else if (strcmp(callee, "net_send") == 0) {
                     mark_chunk_used(used_chunks, "net_send");
                 }
+                else if (strcmp(callee, "net_send_bytes") == 0) {
+                    mark_chunk_used(used_chunks, "net_send_bytes");
+                }
+                else if (strcmp(callee, "net_recv_bytes") == 0) {
+                    mark_chunk_used(used_chunks, "net_recv_bytes");
+                }
                 else if (strcmp(callee, "net_close") == 0) {
                     mark_chunk_used(used_chunks, "net_close");
+                }
+                else if (strcmp(callee, "net_shutdown") == 0) {
+                    mark_chunk_used(used_chunks, "net_shutdown");
+                }
+                else if (strcmp(callee, "net_set_timeouts") == 0) {
+                    mark_chunk_used(used_chunks, "net_set_timeouts");
                 }
                 else if (strcmp(callee, "sleep_ms") == 0) {
                     mark_chunk_used(used_chunks, "sleep_ms");
                 }
             }
             for (int i = 0; i < node->as.call.arg_count; i++) {
-                scan_node_usage(node->as.call.args[i], used_chunks);
+                scan_node_usage(node->as.call.args[i], used_chunks, header_flags, needs_libm);
             }
             break;
         }
 
         case NODE_METHOD_CALL:
-            scan_node_usage(node->as.method_call.object, used_chunks);
+            if (node->as.method_call.method_name && strcmp(node->as.method_call.method_name, "push") == 0) {
+                mark_chunk_used(used_chunks, "arr_maybe_grow");
+                if (node->as.method_call.arg_count > 0) {
+                    AstNode *arg0 = node->as.method_call.args[0];
+                    if (arg0 && arg0->type == NODE_LITERAL && arg0->as.literal.lit_type == TY_STRING) {
+                        *header_flags |= HEADER_STRING | HEADER_POSIX | HEADER_STDLIB;
+                    }
+                }
+            }
+            scan_node_usage(node->as.method_call.object, used_chunks, header_flags, needs_libm);
             for (int i = 0; i < node->as.method_call.arg_count; i++) {
-                scan_node_usage(node->as.method_call.args[i], used_chunks);
+                scan_node_usage(node->as.method_call.args[i], used_chunks, header_flags, needs_libm);
             }
             break;
 
         case NODE_NEW:
+            *header_flags |= HEADER_STDLIB;
             for (int i = 0; i < node->as.new_expr.field_count; i++) {
-                scan_node_usage(node->as.new_expr.field_values[i], used_chunks);
+                AstNode *fv = node->as.new_expr.field_values[i];
+                if (fv && fv->type == NODE_LITERAL && fv->as.literal.lit_type == TY_STRING) {
+                    *header_flags |= HEADER_STRING | HEADER_POSIX | HEADER_STDLIB;
+                }
+                scan_node_usage(fv, used_chunks, header_flags, needs_libm);
             }
             break;
 
         case NODE_MEMBER:
-            scan_node_usage(node->as.member.object, used_chunks);
+            scan_node_usage(node->as.member.object, used_chunks, header_flags, needs_libm);
+            break;
+
+        case NODE_FSTRING_TEXT:
+            *header_flags |= HEADER_STRING | HEADER_POSIX | HEADER_STDLIB;
             break;
 
         case NODE_FSTRING:
+            *header_flags |= HEADER_STDIO | HEADER_STDLIB | HEADER_STRING | HEADER_POSIX;
             mark_chunk_used(used_chunks, "concat_free");
             mark_chunk_used(used_chunks, "int_to_str");
             mark_chunk_used(used_chunks, "float_to_str");
@@ -3046,7 +3453,7 @@ static void scan_node_usage(AstNode *node, bool *used_chunks) {
             for (int i = 0; i < node->as.fstring.part_count; i++) {
                 AstNode *part = node->as.fstring.parts[i];
                 if (part->type != NODE_FSTRING_TEXT) {
-                    scan_node_usage(part, used_chunks);
+                    scan_node_usage(part, used_chunks, header_flags, needs_libm);
                 }
             }
             break;
@@ -3086,31 +3493,85 @@ char *generate_c_code(AstNode *program, AstArena *arena) {
     ctx.current_function = NULL;
     ctx.ct = build_class_table(program, arena);
 
-    // Fixed C prelude
-    sb_append(&ctx.sb, "/* Generated by Cco (C--) Compiler */\n");
-    sb_append(&ctx.sb, "#define _POSIX_C_SOURCE 200809L\n");
-    sb_append(&ctx.sb, "#include <stdio.h>\n");
-    sb_append(&ctx.sb, "#include <stdlib.h>\n");
-    sb_append(&ctx.sb, "#include <stdbool.h>\n");
-    sb_append(&ctx.sb, "#include <string.h>\n");
-    sb_append(&ctx.sb, "#include <strings.h>\n");
-    sb_append(&ctx.sb, "#include <signal.h>\n");
-    sb_append(&ctx.sb, "#include <math.h>\n");
-    sb_append(&ctx.sb, "#include <time.h>\n");
-    sb_append(&ctx.sb, "#include <errno.h>\n");
-    sb_append(&ctx.sb, "#include <unistd.h>\n");
-    sb_append(&ctx.sb, "#include <sys/types.h>\n");
-    sb_append(&ctx.sb, "#include <sys/socket.h>\n");
-    sb_append(&ctx.sb, "#include <netinet/in.h>\n");
-    sb_append(&ctx.sb, "#include <arpa/inet.h>\n");
-    sb_append(&ctx.sb, "#include <fcntl.h>\n\n");
-    sb_append(&ctx.sb, "static int __cco_argc;\n");
-    sb_append(&ctx.sb, "static char **__cco_argv;\n\n");
+    bool has_main_fn = false;
+    if (program && program->type == NODE_PROGRAM) {
+        for (int i = 0; i < program->as.program.count; i++) {
+            if (program->as.program.functions[i] &&
+                strcmp(program->as.program.functions[i]->as.function.name, "main") == 0) {
+                has_main_fn = true;
+                break;
+            }
+        }
+    }
 
     bool used_chunks[PRELUDE_CHUNK_COUNT];
     memset(used_chunks, 0, sizeof(used_chunks));
-    scan_node_usage(program, used_chunks);
+    uint32_t header_flags = HEADER_NONE;
+    bool needs_libm = false;
+
+    if (program && program->type == NODE_PROGRAM) {
+        if (program->as.program.class_count > 0 || program->as.program.enum_count > 0) {
+            header_flags |= HEADER_STDLIB;
+        }
+    }
+
+    scan_node_usage(program, used_chunks, &header_flags, &needs_libm);
     resolve_transitive_dependencies(used_chunks);
+
+    // Aggregate headers from all activated prelude chunks
+    for (size_t i = 0; i < PRELUDE_CHUNK_COUNT; i++) {
+        if (used_chunks[i]) {
+            header_flags |= get_chunk_header_flags(PRELUDE_CHUNKS[i].name);
+        }
+    }
+
+    s_last_codegen_needs_libm = needs_libm;
+
+    // Fixed C prelude comment
+    sb_append(&ctx.sb, "/* Generated by Cco (C--) Compiler */\n");
+
+    // 1. Feature-test macros (only emitted if POSIX features/headers are required)
+    bool needs_posix = (header_flags & (HEADER_POSIX | HEADER_UNISTD | HEADER_SYS_TYPES |
+                                         HEADER_SYS_SOCKET | HEADER_NETINET_IN |
+                                         HEADER_ARPA_INET | HEADER_POLL | HEADER_STRINGS)) != 0;
+    for (size_t i = 0; i < PRELUDE_CHUNK_COUNT; i++) {
+        if (used_chunks[i] && chunk_needs_posix(PRELUDE_CHUNKS[i].name)) {
+            needs_posix = true;
+            break;
+        }
+    }
+    if (needs_posix) {
+        sb_append(&ctx.sb, "#define _POSIX_C_SOURCE 200809L\n");
+        sb_append(&ctx.sb, "#define _DEFAULT_SOURCE\n");
+    }
+
+    // 2. Standard C11 headers (emitted in fixed deterministic order)
+    if (header_flags & HEADER_STDIO)      sb_append(&ctx.sb, "#include <stdio.h>\n");
+    if (header_flags & HEADER_STDLIB)     sb_append(&ctx.sb, "#include <stdlib.h>\n");
+    if (header_flags & HEADER_STDBOOL)    sb_append(&ctx.sb, "#include <stdbool.h>\n");
+    if (header_flags & HEADER_STDINT)     sb_append(&ctx.sb, "#include <stdint.h>\n");
+    if (header_flags & HEADER_STRING)     sb_append(&ctx.sb, "#include <string.h>\n");
+    if (header_flags & HEADER_MATH)       sb_append(&ctx.sb, "#include <math.h>\n");
+    if (header_flags & HEADER_TIME)       sb_append(&ctx.sb, "#include <time.h>\n");
+    if (header_flags & HEADER_ERRNO)      sb_append(&ctx.sb, "#include <errno.h>\n");
+
+    // 3. POSIX/system headers (emitted in fixed deterministic order)
+    if (header_flags & HEADER_UNISTD)     sb_append(&ctx.sb, "#include <unistd.h>\n");
+    if (header_flags & HEADER_SYS_TYPES)  sb_append(&ctx.sb, "#include <sys/types.h>\n");
+    if (header_flags & HEADER_SYS_SOCKET) sb_append(&ctx.sb, "#include <sys/socket.h>\n");
+    if (header_flags & HEADER_NETINET_IN) sb_append(&ctx.sb, "#include <netinet/in.h>\n");
+    if (header_flags & HEADER_ARPA_INET)  sb_append(&ctx.sb, "#include <arpa/inet.h>\n");
+    if (header_flags & HEADER_POLL)       sb_append(&ctx.sb, "#include <poll.h>\n");
+    if (header_flags & HEADER_STRINGS)    sb_append(&ctx.sb, "#include <strings.h>\n");
+
+    if (header_flags != HEADER_NONE || needs_posix) {
+        sb_append(&ctx.sb, "\n");
+    }
+
+    if (has_main_fn) {
+        sb_append(&ctx.sb, "static int __cco_argc;\n");
+        sb_append(&ctx.sb, "static char **__cco_argv;\n\n");
+    }
 
     for (size_t i = 0; i < PRELUDE_CHUNK_COUNT; i++) {
         if (used_chunks[i]) {
