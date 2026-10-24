@@ -1,0 +1,5 @@
+# Error: Undefined variable inside f-string
+fn main() -> void {
+    let name: string = "Cco";
+    print(f"Missing value: {missing}");
+}

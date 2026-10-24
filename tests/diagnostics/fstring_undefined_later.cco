@@ -1,0 +1,5 @@
+# Error: Undefined variable in second interpolation
+fn main() -> void {
+    let a: int = 10;
+    print(f"{a} + {missing}");
+}

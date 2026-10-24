@@ -247,6 +247,12 @@ static AstNode *parse_fstring_lit(Parser *p, Token tok) {
             TokenArray sub_tokens = lex_source(expr_str);
             free(expr_str);
 
+            int col_offset = tok.col + 2 + expr_start - 1;
+            for (int t = 0; t < sub_tokens.count; t++) {
+                sub_tokens.tokens[t].line = tok.line;
+                sub_tokens.tokens[t].col += col_offset;
+            }
+
             Parser sub_p = create_parser(sub_tokens, p->arena);
             AstNode *sub_expr = parse_expr(&sub_p);
 
@@ -254,7 +260,7 @@ static AstNode *parse_fstring_lit(Parser *p, Token tok) {
                 Token extra_tok = sub_p.tokens.tokens[sub_p.current];
                 free(text_buf);
                 free_tokens(&sub_tokens);
-                fatal_parser_error(tok.line, tok.col, extra_tok.lexeme, "unexpected tokens in f-string expression");
+                fatal_parser_error(extra_tok.line, extra_tok.col, extra_tok.lexeme, "unexpected tokens in f-string expression");
             }
 
             free_tokens(&sub_tokens);
