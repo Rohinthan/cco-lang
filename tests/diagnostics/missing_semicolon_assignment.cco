@@ -1,0 +1,2 @@
+# Error: Missing semicolon after assignment
+age = 21 height = 5.8;

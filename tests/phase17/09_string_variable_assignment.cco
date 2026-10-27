@@ -1,0 +1,7 @@
+fn main() -> int {
+    let msg: string = "stored in local variable";
+    print(msg);
+    let msg2: string = "another local variable";
+    print(msg2);
+    return 0;
+}

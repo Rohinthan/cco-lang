@@ -1,0 +1,4 @@
+# Error: Undefined function
+fn main() -> void {
+    compute_something(10);
+}

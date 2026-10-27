@@ -1,0 +1,4 @@
+# Error: Unclosed parenthesis
+fn main() -> void {
+    let x: int = (10 + 20;
+}

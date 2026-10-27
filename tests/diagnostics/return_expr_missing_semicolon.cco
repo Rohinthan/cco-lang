@@ -1,0 +1,8 @@
+# Error: Return expression missing semicolon
+fn foo() -> int {
+    return 42 let x: int = 1;
+}
+
+fn main() -> void {
+    foo();
+}

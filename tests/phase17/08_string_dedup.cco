@@ -1,0 +1,6 @@
+fn main() -> int {
+    print("duplicate_string");
+    print("unique_string");
+    print("duplicate_string");
+    return 0;
+}

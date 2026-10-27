@@ -1,0 +1,4 @@
+# Error: Unterminated string literal
+fn main() -> void {
+    let s: string = "unterminated string literal;
+}

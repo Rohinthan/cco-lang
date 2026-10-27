@@ -1,0 +1,5 @@
+# Error: Unclosed brace
+fn main() -> void {
+    if (true) {
+        print(1);
+}

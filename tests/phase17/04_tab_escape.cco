@@ -1,0 +1,4 @@
+fn main() -> int {
+    print("Col1\tCol2\tCol3");
+    return 0;
+}

@@ -1,0 +1,6 @@
+# Error: Invalid return type
+fn get_number() -> int {
+    return "string instead of int";
+}
+
+fn main() -> void {}

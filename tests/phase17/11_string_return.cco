@@ -1,0 +1,9 @@
+fn get_greeting() -> string {
+    return "returned from function";
+}
+
+fn main() -> int {
+    let msg: string = get_greeting();
+    print(msg);
+    return 0;
+}

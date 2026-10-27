@@ -1,0 +1,5 @@
+# Error: Undefined variable
+fn main() -> void {
+    let a: int = 10;
+    print(b);
+}

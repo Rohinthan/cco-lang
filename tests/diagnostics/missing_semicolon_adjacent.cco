@@ -1,0 +1,2 @@
+# Error: Missing semicolon between adjacent statements on the same line
+x = 10 y = 20;

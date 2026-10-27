@@ -1,0 +1,6 @@
+fn main() -> int {
+    let s: string = "hello";
+    let sub: string = substring(s, 0, 2);
+    print(sub);
+    return 0;
+}

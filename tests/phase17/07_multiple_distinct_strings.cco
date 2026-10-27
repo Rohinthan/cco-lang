@@ -1,0 +1,6 @@
+fn main() -> int {
+    print("First message");
+    print("Second message");
+    print("Third message");
+    return 0;
+}

@@ -1,0 +1,6 @@
+# Error: Unclosed bracket
+fn main() -> void {
+    let a: int[] = alloc(int, 3);
+    let x: int = a[0
+    let y: int = 1;
+}

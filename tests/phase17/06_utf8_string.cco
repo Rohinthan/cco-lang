@@ -1,0 +1,4 @@
+fn main() -> int {
+    print("UTF-8: こんにちは世界, éàü, 🚀");
+    return 0;
+}

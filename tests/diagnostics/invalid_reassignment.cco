@@ -1,0 +1,5 @@
+# Error: Invalid reassignment
+fn main() -> void {
+    let x: int = 10;
+    x = "cannot be string";
+}

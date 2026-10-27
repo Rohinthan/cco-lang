@@ -1,0 +1,10 @@
+fn greet(prefix: string, name: string) -> int {
+    print(prefix);
+    print(name);
+    return 0;
+}
+
+fn main() -> int {
+    greet("Prefix:", "Parameter Value");
+    return 0;
+}

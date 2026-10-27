@@ -1,0 +1,5 @@
+# Error: Duplicate declaration
+fn foo() -> void {}
+fn foo() -> void {}
+
+fn main() -> void {}

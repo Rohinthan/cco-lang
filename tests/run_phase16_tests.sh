@@ -82,6 +82,10 @@ echo "--- 2. Negative Feature Boundary Tests ---"
 for neg_file in tests/phase16/negative/*.cco; do
     [ -e "$neg_file" ] || continue
     neg_name=$(basename "$neg_file" .cco)
+    if [ "$neg_name" = "neg_string_lit" ]; then
+        echo "[$((TOTAL + 1))] Negative test $neg_name ... SKIPPED (Graduated to supported feature in Phase 17)"
+        continue
+    fi
     TOTAL=$((TOTAL + 1))
     echo -n "[$TOTAL] Negative boundary test $neg_name ... "
 

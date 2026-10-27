@@ -1,0 +1,12 @@
+fn main() -> int {
+    let count: int = 3;
+    while (count > 0) {
+        if (count == 2) {
+            print("two");
+        } else {
+            print("other");
+        }
+        count = count - 1;
+    }
+    return 0;
+}

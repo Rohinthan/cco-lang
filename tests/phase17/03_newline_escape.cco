@@ -1,0 +1,4 @@
+fn main() -> int {
+    print("Line 1\nLine 2\nLine 3");
+    return 0;
+}

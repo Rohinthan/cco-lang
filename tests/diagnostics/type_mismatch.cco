@@ -1,0 +1,4 @@
+# Error: Type mismatch
+fn main() -> void {
+    let x: int = "cannot be string";
+}

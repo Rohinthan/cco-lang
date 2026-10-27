@@ -1,0 +1,4 @@
+# Error: Same-line unclosed parenthesis
+fn main() -> void {
+    print(1 + 2 print(3));
+}

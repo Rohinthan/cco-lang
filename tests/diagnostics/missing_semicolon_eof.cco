@@ -1,0 +1,2 @@
+# Error: Missing semicolon at EOF
+print("Hello, world") print("done")

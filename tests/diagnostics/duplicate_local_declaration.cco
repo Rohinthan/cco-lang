@@ -1,0 +1,6 @@
+# Error: Duplicate local declaration
+fn main() -> int {
+    let a: int = 1;
+    let a: int = 2;
+    return a;
+}

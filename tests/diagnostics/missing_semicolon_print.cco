@@ -1,0 +1,2 @@
+# Error: Missing semicolon after print statement
+print("Age:", 21) print("Height:", 5.8);
