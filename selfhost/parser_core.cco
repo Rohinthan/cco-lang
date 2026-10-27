@@ -227,6 +227,10 @@ fn consume_symbol(p: &Parser, sym: string, msg: string) -> bool {
         advance(p);
         return true;
     }
+    if (equals(sym, ";") && p.pos > 0) {
+        line = p.tokens[p.pos - 1].line;
+        col = p.tokens[p.pos - 1].col;
+    }
     report_error(p, msg, line, col);
     return false;
 }
@@ -999,6 +1003,7 @@ fn parse_program(tokens: Token[]) -> Program {
         classes: classes,
         enums: enums,
         functions: functions,
+        error_count: p.error_count,
     };
 }
 

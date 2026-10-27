@@ -18,6 +18,9 @@ fn main() -> int {
     let source: string = read_file(filename);
     let tokens: Token[] = lex(source);
     let prog: Program = parse_program_from_file(filename);
+    if (prog.error_count > 0) {
+        return 1;
+    }
     let errs: int = typecheck_program(&prog);
     if (errs != 0) {
         print("Typecheck errors encountered.");

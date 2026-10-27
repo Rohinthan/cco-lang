@@ -6,6 +6,9 @@ fn main() -> int {
     let source: string = read_file("target.cco");
     let tokens: Token[] = lex(source);
     let prog: Program = parse_program(tokens);
+    if (prog.error_count > 0) {
+        return 1;
+    }
     let s_fn: string = int_to_str(len(prog.functions));
     let m_fn: string = concat("Parsed functions: ", s_fn);
     print(m_fn);

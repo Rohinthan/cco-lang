@@ -338,6 +338,81 @@ fn emit_call_rel32(cb: &CodeBuf) -> int {
     return fixup;
 }
 
+// Read-Only Data (.rodata) Pool for Strings & Constants
+
+class RodataPool {
+    bytes: int[];
+    strings: string[];
+    offsets: int[];
+}
+
+fn rodata_pool_new() -> RodataPool {
+    return RodataPool {
+        bytes: list_new(int),
+        strings: list_new(string),
+        offsets: list_new(int),
+    };
+}
+
+fn rodata_get_or_add(pool: &RodataPool, s: string) -> int {
+    let num_strs: int = len(pool.strings);
+    let i: int = 0;
+    while (i < num_strs) {
+        if (equals(pool.strings[i], s)) {
+            return pool.offsets[i];
+        }
+        i = i + 1;
+    }
+
+    let off: int = len(pool.bytes);
+    pool.strings = push(pool.strings, concat(s, ""));
+    pool.offsets = push(pool.offsets, off);
+
+    let n: int = len(s);
+    let idx: int = 0;
+    while (idx < n) {
+        let c: char = char_at(s, idx);
+        if (c == '\\' && idx + 1 < n) {
+            let next_c: char = char_at(s, idx + 1);
+            if (next_c == 'n') {
+                pool.bytes = push(pool.bytes, 10);
+                idx = idx + 2;
+            } else if (next_c == 't') {
+                pool.bytes = push(pool.bytes, 9);
+                idx = idx + 2;
+            } else if (next_c == 'r') {
+                pool.bytes = push(pool.bytes, 13);
+                idx = idx + 2;
+            } else if (next_c == '0') {
+                pool.bytes = push(pool.bytes, 0);
+                idx = idx + 2;
+            } else if (next_c == '\"') {
+                pool.bytes = push(pool.bytes, 34);
+                idx = idx + 2;
+            } else if (next_c == '\'') {
+                pool.bytes = push(pool.bytes, 39);
+                idx = idx + 2;
+            } else if (next_c == '\\') {
+                pool.bytes = push(pool.bytes, 92);
+                idx = idx + 2;
+            } else {
+                pool.bytes = push(pool.bytes, 92);
+                let b_val: int = (next_c - ' ') + 32;
+                if (b_val < 0) { b_val = b_val + 256; }
+                pool.bytes = push(pool.bytes, b_val);
+                idx = idx + 2;
+            }
+        } else {
+            let b_val: int = (c - ' ') + 32;
+            if (b_val < 0) { b_val = b_val + 256; }
+            pool.bytes = push(pool.bytes, b_val);
+            idx = idx + 1;
+        }
+    }
+    pool.bytes = push(pool.bytes, 0); // Null terminator
+    return off;
+}
+
 // Function Compilation Context
 
 class FuncContext {
@@ -348,6 +423,8 @@ class FuncContext {
     epilogue_fixups: int[];
     call_target_names: string[];
     call_fixup_offsets: int[];
+    rodata_reloc_offsets: int[];
+    rodata_reloc_targets: int[];
     error_msg: string;
     has_error: bool;
     stack_depth: int;
@@ -363,6 +440,8 @@ fn make_func_context(name: string) -> FuncContext {
         epilogue_fixups: list_new(int),
         call_target_names: list_new(string),
         call_fixup_offsets: list_new(int),
+        rodata_reloc_offsets: list_new(int),
+        rodata_reloc_targets: list_new(int),
         error_msg: concat("", ""),
         has_error: false,
         stack_depth: 0,
@@ -480,9 +559,22 @@ fn compile_leaf_to_rcx(ctx: &FuncContext, e: &Expr, cb: &CodeBuf) -> bool {
 
 // Expression Compiler
 
-fn compile_expr(ctx: &FuncContext, e: &Expr, cb: &CodeBuf) -> bool {
+fn compile_expr(ctx: &FuncContext, pool: &RodataPool, e: &Expr, cb: &CodeBuf) -> bool {
     if (e.kind == 1) { // EXPR_INT
         emit_mov_imm32_rax(cb, e.int_val);
+        return true;
+    }
+
+    if (e.kind == 3) { // EXPR_STRING
+        let rodata_off: int = rodata_get_or_add(pool, e.str_val);
+        // lea %rax, [rip + disp32]: 0x48, 0x8d, 0x05, disp32
+        cb_push(cb, 72);  // 0x48 REX.W
+        cb_push(cb, 141); // 0x8d LEA
+        cb_push(cb, 5);   // 0x05 ModR/M (%rax, [rip + disp32])
+        let fixup_off: int = cb_len(cb);
+        cb_push_u32(cb, 0);
+        ctx.rodata_reloc_offsets = push(ctx.rodata_reloc_offsets, fixup_off);
+        ctx.rodata_reloc_targets = push(ctx.rodata_reloc_targets, rodata_off);
         return true;
     }
 
@@ -508,7 +600,7 @@ fn compile_expr(ctx: &FuncContext, e: &Expr, cb: &CodeBuf) -> bool {
             set_func_error(ctx, "Malformed unary expression");
             return false;
         }
-        if (!compile_expr(ctx, e.children[0], cb)) { return false; }
+        if (!compile_expr(ctx, pool, e.children[0], cb)) { return false; }
         if (equals(e.op, "-")) {
             emit_neg_rax(cb);
         } else if (equals(e.op, "!") || equals(e.op, "not")) {
@@ -532,23 +624,23 @@ fn compile_expr(ctx: &FuncContext, e: &Expr, cb: &CodeBuf) -> bool {
         }
         if (is_leaf_expr(e.children[1])) {
             // Leaf RHS: evaluate LHS into %rax, load RHS directly into %rcx (0 push, 0 pop)
-            if (!compile_expr(ctx, e.children[0], cb)) { return false; }
+            if (!compile_expr(ctx, pool, e.children[0], cb)) { return false; }
             if (!compile_leaf_to_rcx(ctx, e.children[1], cb)) { return false; }
         } else if (ctx.scratch_depth == 0 && !expr_has_call(e.children[1])) {
             // Complex RHS without calls: evaluate LHS, preserve in scratch %r10
-            if (!compile_expr(ctx, e.children[0], cb)) { return false; }
+            if (!compile_expr(ctx, pool, e.children[0], cb)) { return false; }
             emit_mov_rax_r10(cb);
             ctx.scratch_depth = ctx.scratch_depth + 1;
-            if (!compile_expr(ctx, e.children[1], cb)) { return false; }
+            if (!compile_expr(ctx, pool, e.children[1], cb)) { return false; }
             ctx.scratch_depth = ctx.scratch_depth - 1;
             emit_mov_rax_rcx(cb);
             emit_mov_r10_rax(cb);
         } else {
             // General fallback: spill LHS to stack
-            if (!compile_expr(ctx, e.children[0], cb)) { return false; }
+            if (!compile_expr(ctx, pool, e.children[0], cb)) { return false; }
             emit_push_rax(cb);
             ctx.stack_depth = ctx.stack_depth + 1;
-            if (!compile_expr(ctx, e.children[1], cb)) { return false; }
+            if (!compile_expr(ctx, pool, e.children[1], cb)) { return false; }
             emit_mov_rax_rcx(cb);
             emit_pop_rax(cb);
             ctx.stack_depth = ctx.stack_depth - 1;
@@ -580,7 +672,7 @@ fn compile_expr(ctx: &FuncContext, e: &Expr, cb: &CodeBuf) -> bool {
         // Evaluate arguments left-to-right and push to stack
         let i: int = 0;
         while (i < num_args) {
-            if (!compile_expr(ctx, e.args[i], cb)) { return false; }
+            if (!compile_expr(ctx, pool, e.args[i], cb)) { return false; }
             emit_push_rax(cb);
             ctx.stack_depth = ctx.stack_depth + 1;
             i = i + 1;
@@ -619,14 +711,14 @@ fn compile_expr(ctx: &FuncContext, e: &Expr, cb: &CodeBuf) -> bool {
 
 // Statement Compiler
 
-fn compile_stmt(ctx: &FuncContext, s: &Stmt, cb: &CodeBuf) -> bool {
+fn compile_stmt(ctx: &FuncContext, pool: &RodataPool, s: &Stmt, cb: &CodeBuf) -> bool {
     if (s.kind == 1) { // STMT_LET
         let off: int = find_var_offset(ctx, s.var_name);
         if (off == 0) {
             off = alloc_var_offset(ctx, s.var_name);
         }
         if (len(s.init_expr) > 0) {
-            if (!compile_expr(ctx, s.init_expr[0], cb)) { return false; }
+            if (!compile_expr(ctx, pool, s.init_expr[0], cb)) { return false; }
             emit_mov_rax_disp_rbp(cb, off);
         }
         return true;
@@ -648,7 +740,7 @@ fn compile_stmt(ctx: &FuncContext, s: &Stmt, cb: &CodeBuf) -> bool {
             set_func_error(ctx, "Missing expression in assignment");
             return false;
         }
-        if (!compile_expr(ctx, s.expr[0], cb)) { return false; }
+        if (!compile_expr(ctx, pool, s.expr[0], cb)) { return false; }
         emit_mov_rax_disp_rbp(cb, off);
         return true;
     }
@@ -674,7 +766,7 @@ fn compile_stmt(ctx: &FuncContext, s: &Stmt, cb: &CodeBuf) -> bool {
             if (!compile_leaf_to_rcx(ctx, s.expr[0], cb)) { return false; }
         } else {
             // Compile RHS first into %rax, move to %rcx, then load target var
-            if (!compile_expr(ctx, s.expr[0], cb)) { return false; }
+            if (!compile_expr(ctx, pool, s.expr[0], cb)) { return false; }
             emit_mov_rax_rcx(cb);
             emit_mov_disp_rbp_rax(cb, off);
         }
@@ -718,7 +810,7 @@ fn compile_stmt(ctx: &FuncContext, s: &Stmt, cb: &CodeBuf) -> bool {
 
     if (s.kind == 8) { // STMT_RETURN
         if (len(s.expr) > 0) {
-            if (!compile_expr(ctx, s.expr[0], cb)) { return false; }
+            if (!compile_expr(ctx, pool, s.expr[0], cb)) { return false; }
         } else {
             emit_mov_imm32_rax(cb, 0);
         }
@@ -732,7 +824,7 @@ fn compile_stmt(ctx: &FuncContext, s: &Stmt, cb: &CodeBuf) -> bool {
             set_func_error(ctx, "If statement missing condition");
             return false;
         }
-        if (!compile_expr(ctx, s.cond_expr[0], cb)) { return false; }
+        if (!compile_expr(ctx, pool, s.cond_expr[0], cb)) { return false; }
         emit_cmp_zero_rax(cb);
         let else_fixup: int = emit_je_rel32(cb);
 
@@ -740,7 +832,7 @@ fn compile_stmt(ctx: &FuncContext, s: &Stmt, cb: &CodeBuf) -> bool {
         let i: int = 0;
         let num_then: int = len(s.then_block);
         while (i < num_then) {
-            if (!compile_stmt(ctx, s.then_block[i], cb)) { return false; }
+            if (!compile_stmt(ctx, pool, s.then_block[i], cb)) { return false; }
             i = i + 1;
         }
 
@@ -753,7 +845,7 @@ fn compile_stmt(ctx: &FuncContext, s: &Stmt, cb: &CodeBuf) -> bool {
         let j: int = 0;
         let num_else: int = len(s.else_block);
         while (j < num_else) {
-            if (!compile_stmt(ctx, s.else_block[j], cb)) { return false; }
+            if (!compile_stmt(ctx, pool, s.else_block[j], cb)) { return false; }
             j = j + 1;
         }
 
@@ -768,14 +860,14 @@ fn compile_stmt(ctx: &FuncContext, s: &Stmt, cb: &CodeBuf) -> bool {
             return false;
         }
         let loop_start: int = cb_len(cb);
-        if (!compile_expr(ctx, s.cond_expr[0], cb)) { return false; }
+        if (!compile_expr(ctx, pool, s.cond_expr[0], cb)) { return false; }
         emit_cmp_zero_rax(cb);
         let exit_fixup: int = emit_je_rel32(cb);
 
         let i: int = 0;
         let num_body: int = len(s.body);
         while (i < num_body) {
-            if (!compile_stmt(ctx, s.body[i], cb)) { return false; }
+            if (!compile_stmt(ctx, pool, s.body[i], cb)) { return false; }
             i = i + 1;
         }
 
@@ -792,12 +884,12 @@ fn compile_stmt(ctx: &FuncContext, s: &Stmt, cb: &CodeBuf) -> bool {
     if (s.kind == 7) { // STMT_FOR
         // For loop: then_block[0] is init, cond_expr[0] is cond, step_stmt[0] is step
         if (len(s.then_block) > 0) {
-            if (!compile_stmt(ctx, s.then_block[0], cb)) { return false; }
+            if (!compile_stmt(ctx, pool, s.then_block[0], cb)) { return false; }
         }
         let loop_start: int = cb_len(cb);
         let exit_fixup: int = -1;
         if (len(s.cond_expr) > 0) {
-            if (!compile_expr(ctx, s.cond_expr[0], cb)) { return false; }
+            if (!compile_expr(ctx, pool, s.cond_expr[0], cb)) { return false; }
             emit_cmp_zero_rax(cb);
             exit_fixup = emit_je_rel32(cb);
         }
@@ -805,12 +897,12 @@ fn compile_stmt(ctx: &FuncContext, s: &Stmt, cb: &CodeBuf) -> bool {
         let i: int = 0;
         let num_body: int = len(s.body);
         while (i < num_body) {
-            if (!compile_stmt(ctx, s.body[i], cb)) { return false; }
+            if (!compile_stmt(ctx, pool, s.body[i], cb)) { return false; }
             i = i + 1;
         }
 
         if (len(s.step_stmt) > 0) {
-            if (!compile_stmt(ctx, s.step_stmt[0], cb)) { return false; }
+            if (!compile_stmt(ctx, pool, s.step_stmt[0], cb)) { return false; }
         }
 
         cb_push(cb, 233); // jmp rel32
@@ -824,9 +916,64 @@ fn compile_stmt(ctx: &FuncContext, s: &Stmt, cb: &CodeBuf) -> bool {
         return true;
     }
 
+    if (s.kind == 11) { // STMT_PRINT
+        if (len(s.expr) < 1) {
+            // print() with no args -> print newline
+            cb_push(cb, 106); cb_push(cb, 10); // push $10 (newline)
+            cb_push(cb, 72); cb_push(cb, 199); cb_push(cb, 192); cb_push_u32(cb, 1); // mov $1, %rax
+            cb_push(cb, 72); cb_push(cb, 199); cb_push(cb, 199); cb_push_u32(cb, 1); // mov $1, %rdi
+            cb_push(cb, 72); cb_push(cb, 137); cb_push(cb, 230); // mov %rsp, %rsi
+            cb_push(cb, 72); cb_push(cb, 199); cb_push(cb, 194); cb_push_u32(cb, 1); // mov $1, %rdx
+            cb_push(cb, 15); cb_push(cb, 5); // syscall
+            cb_push(cb, 89); // pop %rcx
+            return true;
+        }
+
+        // Evaluate argument into %rax
+        if (!compile_expr(ctx, pool, s.expr[0], cb)) { return false; }
+
+        // Print string via Linux sys_write:
+        // 1. mov %rax, %rsi (buf)
+        cb_push(cb, 72); cb_push(cb, 137); cb_push(cb, 198);
+        // 2. xor %rdx, %rdx (len = 0)
+        cb_push(cb, 72); cb_push(cb, 49); cb_push(cb, 210);
+        // 3. cmpb $0, (%rsi, %rdx)
+        cb_push(cb, 128); cb_push(cb, 60); cb_push(cb, 22); cb_push(cb, 0);
+        // 4. je .Ldone (+5 bytes)
+        cb_push(cb, 116); cb_push(cb, 5);
+        // 5. inc %rdx
+        cb_push(cb, 72); cb_push(cb, 255); cb_push(cb, 194);
+        // 6. jmp to cmpb (-11 bytes = 0xf5 = 245)
+        cb_push(cb, 235); cb_push(cb, 245);
+        // .Ldone:
+        // 7. mov $1, %rdi (stdout = 1)
+        cb_push(cb, 72); cb_push(cb, 199); cb_push(cb, 199); cb_push_u32(cb, 1);
+        // 8. mov $1, %rax (SYS_write = 1)
+        cb_push(cb, 72); cb_push(cb, 199); cb_push(cb, 192); cb_push_u32(cb, 1);
+        // 9. syscall
+        cb_push(cb, 15); cb_push(cb, 5);
+
+        // 10. Print trailing newline:
+        // push $10
+        cb_push(cb, 106); cb_push(cb, 10);
+        // mov %rsp, %rsi
+        cb_push(cb, 72); cb_push(cb, 137); cb_push(cb, 230);
+        // mov $1, %rdi
+        cb_push(cb, 72); cb_push(cb, 199); cb_push(cb, 199); cb_push_u32(cb, 1);
+        // mov $1, %rdx (count = 1)
+        cb_push(cb, 72); cb_push(cb, 199); cb_push(cb, 194); cb_push_u32(cb, 1);
+        // mov $1, %rax (SYS_write = 1)
+        cb_push(cb, 72); cb_push(cb, 199); cb_push(cb, 192); cb_push_u32(cb, 1);
+        // syscall
+        cb_push(cb, 15); cb_push(cb, 5);
+        // pop %rcx
+        cb_push(cb, 89);
+        return true;
+    }
+
     if (s.kind == 12) { // STMT_EXPR
         if (len(s.expr) > 0) {
-            if (!compile_expr(ctx, s.expr[0], cb)) { return false; }
+            if (!compile_expr(ctx, pool, s.expr[0], cb)) { return false; }
         }
         return true;
     }
@@ -844,9 +991,11 @@ class CompiledFunc {
     is_main: bool;
     call_target_names: string[];
     call_fixup_offsets: int[];
+    rodata_reloc_offsets: int[];
+    rodata_reloc_targets: int[];
 }
 
-fn compile_function_decl(f: &FunctionDecl, out_func: &CompiledFunc) -> string {
+fn compile_function_decl(f: &FunctionDecl, pool: &RodataPool, out_func: &CompiledFunc) -> string {
     let ctx: FuncContext = make_func_context(f.name);
     let cb: CodeBuf = cb_new();
 
@@ -890,7 +1039,7 @@ fn compile_function_decl(f: &FunctionDecl, out_func: &CompiledFunc) -> string {
     let s_idx: int = 0;
     let num_stmts: int = len(f.body);
     while (s_idx < num_stmts) {
-        if (!compile_stmt(&ctx, f.body[s_idx], &cb)) {
+        if (!compile_stmt(&ctx, pool, f.body[s_idx], &cb)) {
             return concat(ctx.error_msg, "");
         }
         s_idx = s_idx + 1;
@@ -914,7 +1063,6 @@ fn compile_function_decl(f: &FunctionDecl, out_func: &CompiledFunc) -> string {
     emit_pop_rbp(&cb);
     emit_ret(&cb);
 
-    free(out_func.name);
     out_func.name = concat(f.name, "");
     let code_len: int = cb_len(&cb);
     let c_i: int = 0;
@@ -929,6 +1077,13 @@ fn compile_function_decl(f: &FunctionDecl, out_func: &CompiledFunc) -> string {
     while (c_i < num_calls) {
         out_func.call_target_names = push(out_func.call_target_names, concat(ctx.call_target_names[c_i], ""));
         out_func.call_fixup_offsets = push(out_func.call_fixup_offsets, ctx.call_fixup_offsets[c_i]);
+        c_i = c_i + 1;
+    }
+    let num_rodata: int = len(ctx.rodata_reloc_offsets);
+    c_i = 0;
+    while (c_i < num_rodata) {
+        out_func.rodata_reloc_offsets = push(out_func.rodata_reloc_offsets, ctx.rodata_reloc_offsets[c_i]);
+        out_func.rodata_reloc_targets = push(out_func.rodata_reloc_targets, ctx.rodata_reloc_targets[c_i]);
         c_i = c_i + 1;
     }
     return concat("", "");

@@ -8,6 +8,9 @@ fn main() -> int {
     let source: string = read_file("target.cco");
     let tokens: Token[] = lex(source);
     let prog: Program = parse_program(tokens);
+    if (prog.error_count > 0) {
+        return 1;
+    }
     let errs: int = typecheck_program(&prog);
     let s_err: string = int_to_str(errs);
     let m_err: string = concat("Typecheck errors: ", s_err);

@@ -110,6 +110,10 @@ fn main() -> int {
     }
 
     let prog: Program = parse_program_from_file(input_path);
+    if (prog.error_count > 0) {
+        print("Parsing errors encountered.");
+        return 1;
+    }
     let errs: int = typecheck_program(&prog);
     if (errs != 0) {
         print("Typecheck errors encountered.");

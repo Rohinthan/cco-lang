@@ -23,19 +23,14 @@ fn make_check_context() -> NativeCheckContext {
 }
 
 fn check_supported_expr(ctx: &NativeCheckContext, e: &Expr) -> bool {
-    // Unsupported expression kinds: float, string lit, class member, array alloc, map
+    // Unsupported expression kinds: float, class member, array alloc, map
     if (e.kind == 2) { // EXPR_FLOAT
         ctx.has_error = true;
         free(ctx.error_msg);
         ctx.error_msg = concat("Native backend currently does not support floating-point expressions", "");
         return false;
     }
-    if (e.kind == 3) { // EXPR_STRING
-        ctx.has_error = true;
-        free(ctx.error_msg);
-        ctx.error_msg = concat("Native backend currently does not support string literal expressions", "");
-        return false;
-    }
+    // Note: EXPR_STRING (kind 3) is now fully supported via .rodata!
     if (e.kind == 10 || e.kind == 11 || e.kind == 12 || e.kind == 13 || e.kind == 14 || e.kind == 15) {
         ctx.has_error = true;
         free(ctx.error_msg);
@@ -51,11 +46,19 @@ fn check_supported_expr(ctx: &NativeCheckContext, e: &Expr) -> bool {
         i = i + 1;
     }
 
-    if (e.kind == 9 && len(e.args) > 6) {
-        ctx.has_error = true;
-        free(ctx.error_msg);
-        ctx.error_msg = concat("Native backend currently supports at most 6 arguments", "");
-        return false;
+    if (e.kind == 9) {
+        if (equals(e.callee, "concat") || equals(e.callee, "substring") || equals(e.callee, "input") || equals(e.callee, "read_line") || equals(e.callee, "read_file") || equals(e.callee, "free") || equals(e.callee, "len")) {
+            ctx.has_error = true;
+            free(ctx.error_msg);
+            ctx.error_msg = concat("Native backend currently does not support heap or dynamic string operation: ", e.callee);
+            return false;
+        }
+        if (len(e.args) > 6) {
+            ctx.has_error = true;
+            free(ctx.error_msg);
+            ctx.error_msg = concat("Native backend currently supports at most 6 arguments", "");
+            return false;
+        }
     }
 
     i = 0;
@@ -71,7 +74,7 @@ fn check_supported_stmts(ctx: &NativeCheckContext, stmts: &Stmt[]) -> bool {
     let i: int = 0;
     let n: int = len(stmts);
     while (i < n) {
-        if (stmts[i].kind == 11) { // STMT_MATCH
+        if (stmts[i].kind == 14) { // STMT_MATCH
             ctx.has_error = true;
             free(ctx.error_msg);
             ctx.error_msg = concat("Native backend currently does not support match statements", "");
@@ -173,7 +176,10 @@ fn compile_program_native(prog: &Program, source_name: string, out_bin_path: str
         return false;
     }
 
-    // 1. Compile each function into machine code
+    // 1. Initialize Read-Only Data (.rodata) pool
+    let rodata_pool: RodataPool = rodata_pool_new();
+
+    // 2. Compile each function into machine code
     let compiled_funcs: CompiledFunc[] = list_new(CompiledFunc);
     let i: int = 0;
     let num_funcs: int = len(prog.functions);
@@ -185,8 +191,10 @@ fn compile_program_native(prog: &Program, source_name: string, out_bin_path: str
             is_main: false,
             call_target_names: list_new(string),
             call_fixup_offsets: list_new(int),
+            rodata_reloc_offsets: list_new(int),
+            rodata_reloc_targets: list_new(int),
         };
-        let fn_err: string = compile_function_decl(prog.functions[i], &cf);
+        let fn_err: string = compile_function_decl(prog.functions[i], &rodata_pool, &cf);
         if (len(fn_err) > 0) {
             out_res.success = false;
             free(out_res.error_msg);
@@ -197,10 +205,10 @@ fn compile_program_native(prog: &Program, source_name: string, out_bin_path: str
         i = i + 1;
     }
 
-    // 2. Assemble ELF64 Relocatable Object
-    let elf: CodeBuf = build_elf64_object(source_name, &compiled_funcs);
+    // 3. Assemble ELF64 Relocatable Object with .rodata
+    let elf: CodeBuf = build_elf64_object(source_name, &compiled_funcs, &rodata_pool.bytes);
 
-    // 3. Write object file
+    // 4. Write object file
     let obj_path: string = concat(out_bin_path, ".o");
     if (!write_bytes(obj_path, elf.bytes)) {
         out_res.success = false;
@@ -209,7 +217,7 @@ fn compile_program_native(prog: &Program, source_name: string, out_bin_path: str
         return false;
     }
 
-    // 4. Invoke Internal Linker
+    // 5. Invoke Internal Linker
     let link_cmd: string = concat("./cco-link ", obj_path);
     link_cmd = concat(link_cmd, " -o ");
     link_cmd = concat(link_cmd, out_bin_path);
