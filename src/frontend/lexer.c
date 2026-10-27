@@ -144,7 +144,7 @@ TokenArray lex_source(const char *source) {
                     pos += 2;
                     col += 2;
                 } else if (source[pos] == '\n') {
-                    fatal_lexer_error(start_line, start_col, "unterminated string literal");
+                    fatal_lexer_error_code("E1004", start_line, start_col, "unterminated string literal");
                 } else {
                     col++;
                     pos++;
@@ -152,7 +152,7 @@ TokenArray lex_source(const char *source) {
             }
 
             if (source[pos] == '\0') {
-                fatal_lexer_error(start_line, start_col, "unterminated string literal");
+                fatal_lexer_error_code("E1004", start_line, start_col, "unterminated string literal");
             }
 
             int len = pos - start_pos;
@@ -163,7 +163,7 @@ TokenArray lex_source(const char *source) {
             pos++; // Skip closing quote
             col++;
 
-            Token tok = {TOKEN_STRING_LIT, buf, start_line, start_col};
+            Token tok = {TOKEN_STRING_LIT, buf, start_line, start_col, line, col};
             append_token(&array, tok);
             continue;
         }
@@ -244,7 +244,7 @@ TokenArray lex_source(const char *source) {
             pos++; // Skip closing quote
             col++;
 
-            Token tok = {TOKEN_FSTRING_LIT, buf, start_line, start_col};
+            Token tok = {TOKEN_FSTRING_LIT, buf, start_line, start_col, line, col};
             append_token(&array, tok);
             continue;
         }
@@ -280,7 +280,7 @@ TokenArray lex_source(const char *source) {
             char *buf = malloc(2);
             buf[0] = ch_val;
             buf[1] = '\0';
-            Token tok = {TOKEN_CHAR_LIT, buf, start_line, start_col};
+            Token tok = {TOKEN_CHAR_LIT, buf, start_line, start_col, line, col};
             append_token(&array, tok);
             continue;
         }
@@ -306,7 +306,7 @@ TokenArray lex_source(const char *source) {
             strncpy(buf, source + start_pos, len);
             buf[len] = '\0';
 
-            Token tok = {is_float ? TOKEN_FLOAT_LIT : TOKEN_INT_LIT, buf, line, start_col};
+            Token tok = {is_float ? TOKEN_FLOAT_LIT : TOKEN_INT_LIT, buf, line, start_col, line, col};
             append_token(&array, tok);
             continue;
         }
@@ -327,7 +327,7 @@ TokenArray lex_source(const char *source) {
             buf[len] = '\0';
 
             TokenType type = check_keyword(buf);
-            Token tok = {type, buf, line, start_col};
+            Token tok = {type, buf, line, start_col, line, col};
             append_token(&array, tok);
             continue;
         }
@@ -336,82 +336,82 @@ TokenArray lex_source(const char *source) {
         int start_col = col;
         if (c == '-' && source[pos + 1] == '>') {
             pos += 2; col += 2;
-            append_token(&array, (Token){TOKEN_ARROW, strdup("->"), line, start_col});
+            append_token(&array, (Token){TOKEN_ARROW, strdup("->"), line, start_col, line, col});
             continue;
         }
         if (c == '=' && source[pos + 1] == '>') {
             pos += 2; col += 2;
-            append_token(&array, (Token){TOKEN_FAT_ARROW, strdup("=>"), line, start_col});
+            append_token(&array, (Token){TOKEN_FAT_ARROW, strdup("=>"), line, start_col, line, col});
             continue;
         }
         if (c == '=' && source[pos + 1] == '=') {
             pos += 2; col += 2;
-            append_token(&array, (Token){TOKEN_EQ, strdup("=="), line, start_col});
+            append_token(&array, (Token){TOKEN_EQ, strdup("=="), line, start_col, line, col});
             continue;
         }
         if (c == '!' && source[pos + 1] == '=') {
             pos += 2; col += 2;
-            append_token(&array, (Token){TOKEN_NE, strdup("!="), line, start_col});
+            append_token(&array, (Token){TOKEN_NE, strdup("!="), line, start_col, line, col});
             continue;
         }
         if (c == '<' && source[pos + 1] == '=') {
             pos += 2; col += 2;
-            append_token(&array, (Token){TOKEN_LE, strdup("<="), line, start_col});
+            append_token(&array, (Token){TOKEN_LE, strdup("<="), line, start_col, line, col});
             continue;
         }
         if (c == '>' && source[pos + 1] == '=') {
             pos += 2; col += 2;
-            append_token(&array, (Token){TOKEN_GE, strdup(">="), line, start_col});
+            append_token(&array, (Token){TOKEN_GE, strdup(">="), line, start_col, line, col});
             continue;
         }
         if (c == '+' && source[pos + 1] == '+') {
             pos += 2; col += 2;
-            append_token(&array, (Token){TOKEN_INCREMENT, strdup("++"), line, start_col});
+            append_token(&array, (Token){TOKEN_INCREMENT, strdup("++"), line, start_col, line, col});
             continue;
         }
         if (c == '-' && source[pos + 1] == '-') {
             pos += 2; col += 2;
-            append_token(&array, (Token){TOKEN_DECREMENT, strdup("--"), line, start_col});
+            append_token(&array, (Token){TOKEN_DECREMENT, strdup("--"), line, start_col, line, col});
             continue;
         }
         if (c == '+' && source[pos + 1] == '=') {
             pos += 2; col += 2;
-            append_token(&array, (Token){TOKEN_PLUS_EQ, strdup("+="), line, start_col});
+            append_token(&array, (Token){TOKEN_PLUS_EQ, strdup("+="), line, start_col, line, col});
             continue;
         }
         if (c == '-' && source[pos + 1] == '=') {
             pos += 2; col += 2;
-            append_token(&array, (Token){TOKEN_MINUS_EQ, strdup("-="), line, start_col});
+            append_token(&array, (Token){TOKEN_MINUS_EQ, strdup("-="), line, start_col, line, col});
             continue;
         }
         if (c == '*' && source[pos + 1] == '=') {
             pos += 2; col += 2;
-            append_token(&array, (Token){TOKEN_STAR_EQ, strdup("*="), line, start_col});
+            append_token(&array, (Token){TOKEN_STAR_EQ, strdup("*="), line, start_col, line, col});
             continue;
         }
         if (c == '/' && source[pos + 1] == '=') {
             pos += 2; col += 2;
-            append_token(&array, (Token){TOKEN_SLASH_EQ, strdup("/="), line, start_col});
+            append_token(&array, (Token){TOKEN_SLASH_EQ, strdup("/="), line, start_col, line, col});
             continue;
         }
         if (c == '%' && source[pos + 1] == '=') {
             pos += 2; col += 2;
-            append_token(&array, (Token){TOKEN_PERCENT_EQ, strdup("%="), line, start_col});
+            append_token(&array, (Token){TOKEN_PERCENT_EQ, strdup("%="), line, start_col, line, col});
             continue;
         }
         if (c == '&' && source[pos + 1] == '&') {
             pos += 2; col += 2;
-            append_token(&array, (Token){TOKEN_AND, strdup("&&"), line, start_col});
+            append_token(&array, (Token){TOKEN_AND, strdup("&&"), line, start_col, line, col});
             continue;
         }
         if (c == '|' && source[pos + 1] == '|') {
             pos += 2; col += 2;
-            append_token(&array, (Token){TOKEN_OR, strdup("||"), line, start_col});
+            append_token(&array, (Token){TOKEN_OR, strdup("||"), line, start_col, line, col});
             continue;
         }
         if (c == '.' && source[pos + 1] == '.') {
             pos += 2; col += 2;
-            append_token(&array, (Token){TOKEN_DOT_DOT, strdup(".."), line, start_col});
+            append_token(&array, (Token){TOKEN_DOT_DOT, strdup(".."), line, start_col, line, col});
             continue;
         }
 
@@ -443,9 +443,9 @@ TokenArray lex_source(const char *source) {
 
         if (single_type != TOKEN_ERROR) {
             char buf[2] = {c, '\0'};
-            append_token(&array, (Token){single_type, strdup(buf), line, start_col});
             pos++;
             col++;
+            append_token(&array, (Token){single_type, strdup(buf), line, start_col, line, col});
             continue;
         }
 
@@ -455,7 +455,7 @@ TokenArray lex_source(const char *source) {
         fatal_lexer_error(line, col, err_msg);
     }
 
-    append_token(&array, (Token){TOKEN_EOF, strdup("EOF"), line, col});
+    append_token(&array, (Token){TOKEN_EOF, strdup("EOF"), line, col, line, col});
     return array;
 }
 

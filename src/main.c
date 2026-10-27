@@ -396,6 +396,8 @@ int main(int argc, char **argv) {
             run_binary = true;
         } else if (strcmp(argv[i], "--dump-tokens") == 0) {
             dump_tokens_mode = true;
+        } else if (strcmp(argv[i], "--codes") == 0 || strcmp(argv[i], "--diagnostic-codes") == 0) {
+            set_diagnostic_codes_enabled(true);
         } else if (argv[i][0] != '-') {
             if (!input_path) {
                 input_path = argv[i];
@@ -902,6 +904,8 @@ int main(int argc, char **argv) {
         c_code = generate_c_code(ast, arena);
     }
 
+    bool needs_libm = (use_ir || cco_codegen_needs_libm());
+
     if (emit_c) {
         printf("%s", c_code);
     }
@@ -959,6 +963,28 @@ int main(int argc, char **argv) {
         }
     }
 
+    if (compile_to_binary) {
+        bool has_main = false;
+        if (ast && ast->type == NODE_PROGRAM) {
+            for (int f = 0; f < ast->as.program.count; f++) {
+                if (ast->as.program.functions[f] &&
+                    ast->as.program.functions[f]->as.function.name &&
+                    strcmp(ast->as.program.functions[f]->as.function.name, "main") == 0) {
+                    has_main = true;
+                    break;
+                }
+            }
+        }
+        if (!has_main) {
+            ErrorLocation loc = {input_path, 1, 1};
+            print_formatted_error("program contains no 'main' function or top-level statements",
+                                  loc, "entry file requires a 'main' function to produce an executable",
+                                  "add 'fn main() -> void' or top-level statements to your program",
+                                  NULL, NULL, NULL);
+            exit(1);
+        }
+    }
+
     // Write generated C code to file
     write_file(output_c_path, c_code);
 
@@ -978,8 +1004,9 @@ int main(int argc, char **argv) {
 
         ensure_parent_dir(binary_out_path);
 
+        const char *math_flag = needs_libm ? " -lm" : "";
         char cmd[PATH_MAX * 4 + 512];
-        snprintf(cmd, sizeof(cmd), "%s -O3 -Wall -Wextra -std=c11 -Wno-unused-function -Wno-parentheses-equality \"%s\" -o \"%s\" -lm", cc, output_c_path, binary_out_path);
+        snprintf(cmd, sizeof(cmd), "%s -O3 -Wall -Wextra -std=c11 -Wno-unused-function -Wno-parentheses-equality \"%s\" -o \"%s\"%s", cc, output_c_path, binary_out_path, math_flag);
         double t_link = time_passes ? cco_get_time_ms() : 0.0;
         int res = system(cmd);
         if (time_passes) pass_timings.link_ms += (cco_get_time_ms() - t_link);

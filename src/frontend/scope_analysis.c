@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <limits.h>
 
 typedef struct {
     AstNode *block_node;
@@ -21,10 +22,22 @@ typedef struct {
 typedef struct {
     Scope scopes[128];
     int depth;
+    int loop_depth;
     AstArena *arena;
     AstNode *program;
     AstNode *current_function;
 } ScopeStack;
+
+static AstNode *s_current_program = NULL;
+
+static bool is_known_struct(AstNode *program, const char *name) {
+    if (!program) program = s_current_program;
+    if (!program || program->type != NODE_PROGRAM || !name) return false;
+    for (int i = 0; i < program->as.program.struct_count; i++) {
+        if (strcmp(program->as.program.structs[i]->as.struct_decl.name, name) == 0) return true;
+    }
+    return false;
+}
 
 static void push_scope(ScopeStack *stack, AstNode *block_node, bool is_loop) {
     if (stack->depth >= 128) {
@@ -111,6 +124,7 @@ static AstNode *find_function(AstNode *program, const char *name) {
     return NULL;
 }
 
+static bool type_desc_needs_cleanup(const TypeDesc *td);
 static void analyze_node(ScopeStack *stack, AstNode *node);
 
 static bool is_stdlib_heap_fn(const char *name) {
@@ -164,7 +178,7 @@ static void analyze_block(ScopeStack *stack, AstNode *block_node, bool is_loop) 
                 }
 
                 if (is_alloc) {
-                    if (!(stmt->as.let.var_type == TY_STRING && stmt->as.let.is_array)) {
+                    if (!(stmt->as.let.var_type == TY_STRING && stmt->as.let.is_array) && !type_desc_needs_cleanup(stmt->as.let.type_desc)) {
                         stmt->is_heap_owner = true;
                         bool is_str = (stmt->as.let.var_type == TY_STRING && !stmt->as.let.is_array);
                         bool is_arr = !is_str;
@@ -189,14 +203,16 @@ static void analyze_block(ScopeStack *stack, AstNode *block_node, bool is_loop) 
 
             if (stmt->as.assign.value->type == NODE_IDENT) {
                 const char *rhs_name = stmt->as.assign.value->as.ident.name;
-                int rhs_scope_idx = -1;
-                int rhs_owned_idx = find_owned_in_stack(stack, rhs_name, &rhs_scope_idx);
-                if (rhs_owned_idx != -1) {
-                    stack->scopes[rhs_scope_idx].transferred[rhs_owned_idx] = true;
-                    int lhs_scope_idx = -1;
-                    int lhs_owned_idx = find_owned_in_stack(stack, stmt->as.assign.name, &lhs_scope_idx);
-                    if (lhs_scope_idx != -1 && lhs_scope_idx < rhs_scope_idx) {
-                        stack->scopes[lhs_scope_idx].transferred[lhs_owned_idx] = false;
+                if (strcmp(stmt->as.assign.name, rhs_name) != 0) {
+                    int rhs_scope_idx = -1;
+                    int rhs_owned_idx = find_owned_in_stack(stack, rhs_name, &rhs_scope_idx);
+                    if (rhs_owned_idx != -1) {
+                        stack->scopes[rhs_scope_idx].transferred[rhs_owned_idx] = true;
+                        int lhs_scope_idx = -1;
+                        int lhs_owned_idx = find_owned_in_stack(stack, stmt->as.assign.name, &lhs_scope_idx);
+                        if (lhs_scope_idx != -1) {
+                            stack->scopes[lhs_scope_idx].transferred[lhs_owned_idx] = false;
+                        }
                     }
                 }
             } else if (stmt->as.assign.value->type == NODE_CALL) {
@@ -211,19 +227,11 @@ static void analyze_block(ScopeStack *stack, AstNode *block_node, bool is_loop) 
                         }
                     }
                 } else if (callee && strcmp(callee, "put") == 0 && stmt->as.assign.value->as.call.arg_count == 3) {
-                    AstNode *k_arg = stmt->as.assign.value->as.call.args[1];
                     AstNode *v_arg = stmt->as.assign.value->as.call.args[2];
-                    if (k_arg && k_arg->type == NODE_IDENT) {
-                        int k_scope_idx = -1;
-                        int k_owned_idx = find_owned_in_stack(stack, k_arg->as.ident.name, &k_scope_idx);
-                        if (k_owned_idx != -1) {
-                            stack->scopes[k_scope_idx].transferred[k_owned_idx] = true;
-                        }
-                    }
                     if (v_arg && v_arg->type == NODE_IDENT) {
                         int v_scope_idx = -1;
                         int v_owned_idx = find_owned_in_stack(stack, v_arg->as.ident.name, &v_scope_idx);
-                        if (v_owned_idx != -1) {
+                        if (v_owned_idx != -1 && stack->scopes[v_scope_idx].is_array[v_owned_idx]) {
                             stack->scopes[v_scope_idx].transferred[v_owned_idx] = true;
                         }
                     }
@@ -320,8 +328,10 @@ static void analyze_node(ScopeStack *stack, AstNode *node) {
             break;
 
         case NODE_WHILE:
+            stack->loop_depth++;
             analyze_node(stack, node->as.while_stmt.cond);
             analyze_block(stack, node->as.while_stmt.body, true);
+            stack->loop_depth--;
             break;
 
         case NODE_MATCH:
@@ -339,6 +349,7 @@ static void analyze_node(ScopeStack *stack, AstNode *node) {
             break;
 
         case NODE_FOR:
+            stack->loop_depth++;
             push_scope(stack, node, true);
             if (node->as.for_stmt.init) analyze_node(stack, node->as.for_stmt.init);
             if (node->as.for_stmt.cond) analyze_node(stack, node->as.for_stmt.cond);
@@ -357,9 +368,11 @@ static void analyze_node(ScopeStack *stack, AstNode *node) {
                 }
             }
             pop_scope(stack);
+            stack->loop_depth--;
             break;
 
         case NODE_FOR_EACH:
+            stack->loop_depth++;
             analyze_node(stack, node->as.for_each.collection_expr);
             if (node->as.for_each.body) {
                 if (node->as.for_each.body->type == NODE_BLOCK) {
@@ -368,6 +381,7 @@ static void analyze_node(ScopeStack *stack, AstNode *node) {
                     analyze_node(stack, node->as.for_each.body);
                 }
             }
+            stack->loop_depth--;
             break;
 
         case NODE_RETURN: {
@@ -416,8 +430,27 @@ static void analyze_node(ScopeStack *stack, AstNode *node) {
 
         case NODE_BREAK:
         case NODE_CONTINUE: {
+            if (stack->loop_depth <= 0) {
+                const char *stmt_name = (node->type == NODE_BREAK) ? "break" : "continue";
+                char short_msg[256];
+                snprintf(short_msg, sizeof(short_msg), "'%s' statement outside of loop", stmt_name);
+                ErrorLocation primary = {get_error_filename(), node->line, node->col};
+                print_formatted_error(
+                    short_msg,
+                    primary,
+                    "cannot use outside of loop",
+                    NULL,
+                    NULL,
+                    NULL,
+                    NULL
+                );
+            }
             for (int s_idx = stack->depth - 1; s_idx >= 0; s_idx--) {
                 Scope *s = &stack->scopes[s_idx];
+                if (s->block_node && s->block_node->type == NODE_FOR) {
+                    if (s->is_loop_scope) break;
+                    continue;
+                }
                 for (int i = 0; i < s->count; i++) {
                     if (!s->transferred[i]) {
                         add_free_to_node(stack, node, s->owned_vars[i], s->is_array[i]);
@@ -476,13 +509,49 @@ static void analyze_node(ScopeStack *stack, AstNode *node) {
             for (int k = 0; k < node->as.new_expr.field_count; k++) {
                 AstNode *val = node->as.new_expr.field_values[k];
                 analyze_node(stack, val);
+
+                bool is_str_field = false;
+                if (stack->program && stack->program->type == NODE_PROGRAM) {
+                    for (int c = 0; c < stack->program->as.program.class_count; c++) {
+                        AstNode *cls_ast = stack->program->as.program.classes[c];
+                        if (strcmp(cls_ast->as.class_decl.name, node->as.new_expr.class_name) == 0) {
+                            for (int f = 0; f < cls_ast->as.class_decl.field_count; f++) {
+                                if (strcmp(cls_ast->as.class_decl.fields[f]->as.field.name, node->as.new_expr.field_names[k]) == 0) {
+                                    if (cls_ast->as.class_decl.fields[f]->as.field.type == TY_STRING && !cls_ast->as.class_decl.fields[f]->as.field.is_array) {
+                                        is_str_field = true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    for (int e = 0; e < stack->program->as.program.enum_count; e++) {
+                        AstNode *en_ast = stack->program->as.program.enums[e];
+                        if (strcmp(en_ast->as.enum_decl.name, node->as.new_expr.class_name) == 0) {
+                            for (int v = 0; v < en_ast->as.enum_decl.variant_count; v++) {
+                                AstNode *vn = en_ast->as.enum_decl.variants[v];
+                                if (node->as.new_expr.variant_name && strcmp(vn->as.variant_decl.name, node->as.new_expr.variant_name) == 0) {
+                                    for (int f = 0; f < vn->as.variant_decl.field_count; f++) {
+                                        if (strcmp(vn->as.variant_decl.fields[f]->as.field.name, node->as.new_expr.field_names[k]) == 0) {
+                                            if (vn->as.variant_decl.fields[f]->as.field.type == TY_STRING && !vn->as.variant_decl.fields[f]->as.field.is_array) {
+                                                is_str_field = true;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 bool val_is_heap = (val->type == NODE_ALLOC && !val->as.alloc.is_map);
                 if (!val_is_heap && val->type == NODE_IDENT) {
                     int s_idx = -1;
                     int o_idx = find_owned_in_stack(stack, val->as.ident.name, &s_idx);
                     if (o_idx != -1) {
-                        val_is_heap = true;
-                        stack->scopes[s_idx].transferred[o_idx] = true;
+                        if (!is_str_field) {
+                            val_is_heap = true;
+                            stack->scopes[s_idx].transferred[o_idx] = true;
+                        }
                     }
                 }
                 if (val_is_heap && stack->program && stack->program->type == NODE_PROGRAM) {
@@ -526,7 +595,9 @@ typedef struct OwnVar {
     bool is_array;
     bool is_map;
     Type key_type;
+    TypeDesc *type_desc;
     int const_size;
+    int decl_loop_depth;
 } OwnVar;
 
 typedef struct MovedVar {
@@ -549,8 +620,15 @@ typedef struct OwnScopeStack {
     OwnScope scopes[128];
     int depth;
 
-    MovedVar moved[256];
+    MovedVar *moved;
     int moved_count;
+    int moved_capacity;
+
+    int loop_depth;
+
+    AstNode *current_stmt;
+    const char *reassign_lhs;
+    int in_condition;
 
     AstArena *arena;
     AstNode *program;
@@ -584,7 +662,7 @@ static OwnScope *current_own_scope(OwnScopeStack *stack) {
     return &stack->scopes[stack->depth - 1];
 }
 
-static void own_scope_add_var_full_map(OwnScopeStack *stack, OwnScope *s, const char *name, const char *class_name, int line, int col, bool is_param, bool is_borrowed_param, bool is_array, bool is_map, Type key_type, int const_size) {
+static void own_scope_add_var_desc(OwnScopeStack *stack, OwnScope *s, const char *name, const char *class_name, int line, int col, bool is_param, bool is_borrowed_param, bool is_array, bool is_map, Type key_type, TypeDesc *type_desc, int const_size) {
     if (!name) return;
     if (s->count >= s->capacity) {
         s->capacity = s->capacity == 0 ? 4 : s->capacity * 2;
@@ -604,16 +682,18 @@ static void own_scope_add_var_full_map(OwnScopeStack *stack, OwnScope *s, const 
     s->vars[s->count].is_array = is_array;
     s->vars[s->count].is_map = is_map;
     s->vars[s->count].key_type = key_type;
+    s->vars[s->count].type_desc = type_desc;
     s->vars[s->count].const_size = const_size;
+    s->vars[s->count].decl_loop_depth = stack->loop_depth;
     s->count++;
 }
 
 static void own_scope_add_var_full(OwnScopeStack *stack, OwnScope *s, const char *name, const char *class_name, int line, int col, bool is_param, bool is_borrowed_param, bool is_array, int const_size) {
-    own_scope_add_var_full_map(stack, s, name, class_name, line, col, is_param, is_borrowed_param, is_array, false, TY_INT, const_size);
+    own_scope_add_var_desc(stack, s, name, class_name, line, col, is_param, is_borrowed_param, is_array, false, TY_INT, NULL, const_size);
 }
 
 static void own_scope_add_var(OwnScopeStack *stack, OwnScope *s, const char *name, const char *class_name, int line, int col, bool is_param, bool is_borrowed_param) {
-    own_scope_add_var_full(stack, s, name, class_name, line, col, is_param, is_borrowed_param, false, -1);
+    own_scope_add_var_desc(stack, s, name, class_name, line, col, is_param, is_borrowed_param, false, false, TY_INT, NULL, -1);
 }
 
 static OwnVar *find_own_var(OwnScopeStack *stack, const char *name, int *out_scope_idx, int *out_var_idx) {
@@ -632,13 +712,94 @@ static OwnVar *find_own_var(OwnScopeStack *stack, const char *name, int *out_sco
 }
 
 static MovedVar *find_moved_var(OwnScopeStack *stack, const char *name) {
-    if (!name) return NULL;
+    if (!name || !stack->moved) return NULL;
     for (int i = 0; i < stack->moved_count; i++) {
         if (strcmp(stack->moved[i].name, name) == 0) {
             return &stack->moved[i];
         }
     }
     return NULL;
+}
+
+#define OWN_MOVED_INITIAL_CAP 64
+#define OWN_MOVED_DEFAULT_MAX_CAP 65536
+#define OWN_MOVED_ABSOLUTE_LIMIT 1048576
+
+static int get_max_moved_capacity(void) {
+    const char *env = getenv("CCO_MAX_MOVED_CAP");
+    if (!env || env[0] == '\0') {
+        return OWN_MOVED_DEFAULT_MAX_CAP;
+    }
+
+    char *endptr = NULL;
+    long val = strtol(env, &endptr, 10);
+    if (*endptr != '\0' || val <= 0 || val > OWN_MOVED_ABSOLUTE_LIMIT) {
+        fprintf(stderr, "Ownership Scope Analysis Error: invalid CCO_MAX_MOVED_CAP value '%s' (must be between 1 and %d)\n",
+                env, OWN_MOVED_ABSOLUTE_LIMIT);
+        exit(1);
+    }
+    return (int)val;
+}
+
+static void ensure_moved_capacity(OwnScopeStack *stack, int needed) {
+    if (needed < 0) {
+        fprintf(stderr, "Ownership Scope Analysis Error: invalid moved variable table capacity request (%d)\n", needed);
+        exit(1);
+    }
+    if (needed <= stack->moved_capacity) return;
+
+    int max_cap = get_max_moved_capacity();
+    if (needed > max_cap) {
+        fprintf(stderr, "Ownership Scope Analysis Error: moved variable table capacity limit exceeded (%d variables, requested %d)\n", max_cap, needed);
+        exit(1);
+    }
+
+    int new_cap = stack->moved_capacity == 0 ? OWN_MOVED_INITIAL_CAP : stack->moved_capacity * 2;
+    if (new_cap > max_cap) new_cap = max_cap;
+    while (new_cap < needed) {
+        if (new_cap > max_cap / 2) {
+            new_cap = max_cap;
+            break;
+        }
+        new_cap *= 2;
+    }
+    if (new_cap > max_cap) new_cap = max_cap;
+
+    MovedVar *new_arr = (MovedVar *)arena_alloc_array(stack->arena, new_cap, sizeof(MovedVar));
+    if (!new_arr) {
+        fprintf(stderr, "Ownership Scope Analysis Error: out of memory allocating moved variable table\n");
+        exit(1);
+    }
+    if (stack->moved && stack->moved_count > 0) {
+        memcpy(new_arr, stack->moved, stack->moved_count * sizeof(MovedVar));
+    }
+    stack->moved = new_arr;
+    stack->moved_capacity = new_cap;
+}
+
+static MovedVar *snapshot_moved_vars(OwnScopeStack *stack, int count) {
+    if (count <= 0) return NULL;
+    MovedVar *snap = (MovedVar *)arena_alloc_array(stack->arena, count, sizeof(MovedVar));
+    if (!snap) {
+        fprintf(stderr, "Ownership Scope Analysis Error: out of memory during branch snapshot\n");
+        exit(1);
+    }
+    if (stack->moved && count > 0) {
+        memcpy(snap, stack->moved, count * sizeof(MovedVar));
+    }
+    return snap;
+}
+
+static void restore_moved_snapshot(OwnScopeStack *stack, MovedVar *snap, int count) {
+    if (count < 0) {
+        fprintf(stderr, "Ownership Scope Analysis Error: negative moved variable count (%d)\n", count);
+        exit(1);
+    }
+    ensure_moved_capacity(stack, count);
+    stack->moved_count = count;
+    if (snap && count > 0 && stack->moved) {
+        memcpy(stack->moved, snap, count * sizeof(MovedVar));
+    }
 }
 
 static bool is_block_terminator(AstNode *block) {
@@ -651,8 +812,89 @@ static bool is_block_terminator(AstNode *block) {
     return false;
 }
 
+static bool is_match_arm_terminator(AstNode *block) {
+    if (!block) return false;
+    if (block->type == NODE_RETURN) return true;
+    if (block->type == NODE_BLOCK && block->as.block.count > 0) {
+        AstNode *last = block->as.block.stmts[block->as.block.count - 1];
+        return (last->type == NODE_RETURN);
+    }
+    return false;
+}
+
+static void check_loop_move_allowed(OwnScopeStack *stack, const char *name, int move_line, int move_col) {
+    if (!name || stack->loop_depth <= 0) return;
+    if (stack->reassign_lhs && strcmp(stack->reassign_lhs, name) == 0) {
+        return;
+    }
+    if (stack->current_stmt && stack->current_stmt->type == NODE_RETURN) {
+        return;
+    }
+
+    OwnVar *ov = find_own_var(stack, name, NULL, NULL);
+    if (!ov) return;
+
+    if (ov->decl_loop_depth < stack->loop_depth) {
+        char short_msg[256];
+        char note_msg[256];
+        snprintf(short_msg, sizeof(short_msg), "cannot move '%s' inside a loop", name);
+        snprintf(note_msg, sizeof(note_msg), "'%s' was declared outside the loop here:", name);
+        ErrorLocation primary = {get_error_filename(), move_line, move_col};
+        ErrorLocation note_loc = {get_error_filename(), ov->decl_line, ov->decl_col};
+        print_formatted_error(
+            short_msg,
+            primary,
+            "cannot move out of ancestor scope in loop",
+            note_msg,
+            &note_loc,
+            "declared here",
+            "values declared outside a loop cannot be moved inside the loop because subsequent iterations would use an invalid value"
+        );
+    }
+}
+
+static void add_null_to_stmt(OwnScopeStack *stack, AstNode *stmt, const char *var_name) {
+    if (!stack || !stmt || !var_name) return;
+    for (int i = 0; i < stmt->nulls_count; i++) {
+        if (strcmp(stmt->nulls_to_emit[i], var_name) == 0) return;
+    }
+    int cap = stmt->nulls_count + 1;
+    char **new_nulls = (char **)arena_alloc_array(stack->arena, cap, sizeof(char *));
+    if (stmt->nulls_to_emit) {
+        memcpy(new_nulls, stmt->nulls_to_emit, stmt->nulls_count * sizeof(char *));
+    }
+    new_nulls[stmt->nulls_count] = arena_strdup(stack->arena, var_name);
+    stmt->nulls_to_emit = new_nulls;
+    stmt->nulls_count = cap;
+}
+
 static void mark_moved(OwnScopeStack *stack, const char *name, int move_line, int move_col, const char *dest_name, bool is_conditional) {
     if (!name) return;
+    if (stack->in_condition > 0) {
+        char short_msg[256];
+        snprintf(short_msg, sizeof(short_msg), "cannot move '%s' inside a condition expression", name);
+        ErrorLocation primary = {get_error_filename(), move_line, move_col};
+        print_formatted_error(
+            short_msg,
+            primary,
+            "ownership transfer not allowed in condition",
+            "condition expressions may evaluate conditionally or repeatedly at runtime and cannot transfer ownership",
+            NULL,
+            NULL,
+            "borrow the value with '&' instead of consuming it in a condition"
+        );
+    }
+    if (!is_conditional) {
+        check_loop_move_allowed(stack, name, move_line, move_col);
+        if (stack->current_stmt) {
+            bool is_reassigning_same = (stack->current_stmt->type == NODE_ASSIGN &&
+                                        stack->current_stmt->as.assign.name &&
+                                        strcmp(stack->current_stmt->as.assign.name, name) == 0);
+            if (!is_reassigning_same && stack->current_stmt->type != NODE_RETURN) {
+                add_null_to_stmt(stack, stack->current_stmt, name);
+            }
+        }
+    }
     MovedVar *mv = find_moved_var(stack, name);
     if (mv) {
         mv->move_line = move_line;
@@ -661,18 +903,17 @@ static void mark_moved(OwnScopeStack *stack, const char *name, int move_line, in
         if (is_conditional) mv->is_conditional = true;
         return;
     }
-    if (stack->moved_count < 256) {
-        stack->moved[stack->moved_count].name = arena_strdup(stack->arena, name);
-        stack->moved[stack->moved_count].move_line = move_line;
-        stack->moved[stack->moved_count].move_col = move_col;
-        stack->moved[stack->moved_count].dest_name = dest_name ? arena_strdup(stack->arena, dest_name) : NULL;
-        stack->moved[stack->moved_count].is_conditional = is_conditional;
-        stack->moved_count++;
-    }
+    ensure_moved_capacity(stack, stack->moved_count + 1);
+    stack->moved[stack->moved_count].name = arena_strdup(stack->arena, name);
+    stack->moved[stack->moved_count].move_line = move_line;
+    stack->moved[stack->moved_count].move_col = move_col;
+    stack->moved[stack->moved_count].dest_name = dest_name ? arena_strdup(stack->arena, dest_name) : NULL;
+    stack->moved[stack->moved_count].is_conditional = is_conditional;
+    stack->moved_count++;
 }
 
 static void unmark_moved(OwnScopeStack *stack, const char *name) {
-    if (!name) return;
+    if (!name || !stack->moved) return;
     for (int i = 0; i < stack->moved_count; i++) {
         if (strcmp(stack->moved[i].name, name) == 0) {
             stack->moved[i] = stack->moved[--stack->moved_count];
@@ -729,9 +970,44 @@ static void check_use_var(OwnScopeStack *stack, const char *name, int line, int 
     }
 }
 
-static void add_free_release_to_node_map(OwnScopeStack *stack, AstNode *node, const char *var_name, const char *class_name, bool is_array, bool is_map, Type key_type) {
+static bool type_desc_needs_cleanup(const TypeDesc *td) {
+    if (!td) return false;
+    switch (td->kind) {
+        case TYPEDESC_PRIMITIVE:
+            return false;
+        case TYPEDESC_CLASS:
+        case TYPEDESC_ENUM:
+            return true;
+        case TYPEDESC_NAMED:
+            if (is_known_struct(s_current_program, td->as.named_desc.name)) {
+                return false;
+            }
+            return true;
+        case TYPEDESC_MAP:
+            return true;
+        case TYPEDESC_ARRAY: {
+            TypeDesc *elem = td->as.array_desc.elem_type;
+            if (!elem) return false;
+            if (elem->kind == TYPEDESC_PRIMITIVE) {
+                return elem->as.primitive_desc.primitive_kind == TY_STRING;
+            }
+            if (elem->kind == TYPEDESC_NAMED && is_known_struct(s_current_program, elem->as.named_desc.name)) {
+                return false;
+            }
+            return true;
+        }
+        default:
+            return false;
+    }
+}
+
+static void add_free_release_to_node_desc(OwnScopeStack *stack, AstNode *node, const char *var_name, const char *class_name, bool is_array, bool is_map, Type key_type, TypeDesc *type_desc) {
     if (!node || !var_name) return;
-    if (!is_map && !class_name) return;
+    if (type_desc) {
+        if (!type_desc_needs_cleanup(type_desc)) return;
+    } else {
+        if (!is_map && !class_name) return;
+    }
     for (int i = 0; i < node->releases_count; i++) {
         if (strcmp(node->releases_to_emit[i].var_name, var_name) == 0) return;
     }
@@ -746,6 +1022,7 @@ static void add_free_release_to_node_map(OwnScopeStack *stack, AstNode *node, co
     new_rels[node->releases_count].is_array = is_array;
     new_rels[node->releases_count].is_map = is_map;
     new_rels[node->releases_count].key_type = key_type;
+    new_rels[node->releases_count].type_desc = type_desc;
     node->releases_to_emit = new_rels;
     node->releases_count++;
 }
@@ -929,197 +1206,360 @@ static bool is_heap_class_or_enum(ClassTable *ct, const char *name) {
     return (find_class(ct, name) != NULL || find_enum(ct, name) != NULL);
 }
 
-static void analyze_own_node(OwnScopeStack *stack, AstNode *node);
+static void check_reject_array_move(OwnScopeStack *stack, AstNode *expr) {
+    if (!expr || expr->type != NODE_INDEX) return;
+    char *elem_cls = get_expr_class_type(stack, expr);
+    if (elem_cls != NULL) {
+        const char *arr_n = expr->as.index.array_name;
+        if (!arr_n && expr->as.index.array_expr && expr->as.index.array_expr->type == NODE_IDENT) {
+            arr_n = expr->as.index.array_expr->as.ident.name;
+        }
+        char short_msg[256];
+        snprintf(short_msg, sizeof(short_msg), "cannot move out of array element '%s[0]' — array elements can only be borrowed, not moved, in this version of Cco", arr_n ? arr_n : "arr");
+        ErrorLocation primary = {get_error_filename(), expr->line, expr->col};
+        print_formatted_error(short_msg, primary, "cannot move out of array element", NULL, NULL, NULL, NULL);
+        exit(1);
+    }
+}
 
-static void analyze_own_block(OwnScopeStack *stack, AstNode *block_node, bool is_loop, bool is_fn_body) {
-    push_own_scope(stack, block_node, is_loop);
-    OwnScope *s = current_own_scope(stack);
+static void get_member_full_path(AstNode *expr, char *buf, size_t size) {
+    if (!expr || size == 0) return;
+    if (expr->type == NODE_IDENT) {
+        snprintf(buf, size, "%s", expr->as.ident.name ? expr->as.ident.name : "<expr>");
+    } else if (expr->type == NODE_MEMBER) {
+        char prefix[128] = "";
+        get_member_full_path(expr->as.member.object, prefix, sizeof(prefix));
+        snprintf(buf, size, "%s.%s", prefix, expr->as.member.member_name ? expr->as.member.member_name : "<field>");
+    } else if (expr->type == NODE_INDEX) {
+        char prefix[128] = "";
+        if (expr->as.index.array_expr) {
+            get_member_full_path(expr->as.index.array_expr, prefix, sizeof(prefix));
+        } else if (expr->as.index.array_name) {
+            snprintf(prefix, sizeof(prefix), "%s", expr->as.index.array_name);
+        } else {
+            snprintf(prefix, sizeof(prefix), "arr");
+        }
+        snprintf(buf, size, "%s[0]", prefix);
+    } else {
+        snprintf(buf, size, "<expr>");
+    }
+}
 
-    if (is_fn_body && stack->current_function) {
-        if (stack->current_function->type == NODE_METHOD) {
-            AstNode *m = stack->current_function;
-            for (int p = 0; p < m->as.method.param_count; p++) {
-                if (m->as.method.param_types[p] == TY_CLASS && m->as.method.param_class_names[p] && is_heap_class_or_enum(stack->ct, m->as.method.param_class_names[p])) {
-                    bool is_bor = m->as.method.param_is_borrowed ? m->as.method.param_is_borrowed[p] : (p == 0);
-                    own_scope_add_var(stack, s, m->as.method.param_names[p], m->as.method.param_class_names[p], m->as.method.param_lines ? m->as.method.param_lines[p] : m->line, m->as.method.param_cols ? m->as.method.param_cols[p] : m->col, true, is_bor);
-                }
-            }
-        } else if (stack->current_function->type == NODE_FUNCTION) {
-            AstNode *f = stack->current_function;
-            for (int p = 0; p < f->as.function.param_count; p++) {
-                if (f->as.function.param_types[p] == TY_CLASS && f->as.function.param_class_names[p] && is_heap_class_or_enum(stack->ct, f->as.function.param_class_names[p])) {
-                    bool is_bor = f->as.function.param_is_borrowed ? f->as.function.param_is_borrowed[p] : false;
-                    own_scope_add_var(stack, s, f->as.function.param_names[p], f->as.function.param_class_names[p], f->as.function.param_lines ? f->as.function.param_lines[p] : f->line, f->as.function.param_cols ? f->as.function.param_cols[p] : f->col, true, is_bor);
-                }
-            }
+static bool is_heap_member_access(OwnScopeStack *stack, AstNode *expr, char **out_cls, const char **out_mem_name) {
+    if (!expr || expr->type != NODE_MEMBER) return false;
+    char *obj_cls = get_expr_class_type(stack, expr->as.member.object);
+    if (!obj_cls) return false;
+    ClassDef *cd = find_class(stack->ct, obj_cls);
+    if (!cd) return false;
+    FieldInfo *fi = find_field(cd, expr->as.member.member_name);
+    if (!fi) return false;
+    if (fi->is_array || fi->is_map || (fi->type == TY_CLASS && fi->class_name && is_heap_class_or_enum(stack->ct, fi->class_name))) {
+        if (out_cls) *out_cls = fi->class_name;
+        if (out_mem_name) *out_mem_name = expr->as.member.member_name;
+        return true;
+    }
+    return false;
+}
+
+static void check_reject_member_move(OwnScopeStack *stack, AstNode *expr) {
+    if (!expr) return;
+    if (is_heap_member_access(stack, expr, NULL, NULL)) {
+        char path_buf[256];
+        get_member_full_path(expr, path_buf, sizeof(path_buf));
+        char short_msg[512];
+        snprintf(short_msg, sizeof(short_msg), "cannot move out of class member '%s' — class members can only be borrowed, not moved, in this version of Cco", path_buf);
+        ErrorLocation primary = {get_error_filename(), expr->line, expr->col};
+        print_formatted_error(short_msg, primary, "cannot move out of class member", NULL, NULL, NULL, NULL);
+        exit(1);
+    }
+}
+
+static bool is_same_member_target(AstNode *lhs_obj, const char *lhs_mem, AstNode *rhs) {
+    if (!lhs_obj || !lhs_mem || !rhs || rhs->type != NODE_MEMBER) return false;
+    if (!rhs->as.member.member_name || strcmp(lhs_mem, rhs->as.member.member_name) != 0) return false;
+    AstNode *rhs_obj = rhs->as.member.object;
+    if (!rhs_obj) return false;
+    if (lhs_obj->type == NODE_IDENT && rhs_obj->type == NODE_IDENT) {
+        if (lhs_obj->as.ident.name && rhs_obj->as.ident.name &&
+            strcmp(lhs_obj->as.ident.name, rhs_obj->as.ident.name) == 0) {
+            return true;
         }
     }
+    return false;
+}
 
-    for (int i = 0; i < block_node->as.block.count; i++) {
-        AstNode *stmt = block_node->as.block.stmts[i];
+static void analyze_own_node(OwnScopeStack *stack, AstNode *node);
 
-        if (stmt->type == NODE_LET) {
-            analyze_own_node(stack, stmt->as.let.value);
+static void analyze_own_stmt(OwnScopeStack *stack, AstNode *stmt) {
+    if (!stmt) return;
+    OwnScope *s = current_own_scope(stack);
+    if (!s) return;
 
-            if (!stmt->as.let.is_array && stmt->as.let.value && stmt->as.let.value->type == NODE_INDEX) {
-                AstNode *idx_node = stmt->as.let.value;
-                char *elem_cls = get_expr_class_type(stack, idx_node);
-                if (elem_cls != NULL) {
-                    const char *arr_n = idx_node->as.index.array_name;
-                    if (!arr_n && idx_node->as.index.array_expr && idx_node->as.index.array_expr->type == NODE_IDENT) {
-                        arr_n = idx_node->as.index.array_expr->as.ident.name;
-                    }
-                    char short_msg[256];
-                    snprintf(short_msg, sizeof(short_msg), "cannot move out of array element '%s[0]' — array elements can only be borrowed, not moved, in this version of Cco", arr_n ? arr_n : "arr");
-                    ErrorLocation primary = {get_error_filename(), idx_node->line, idx_node->col};
-                    print_formatted_error(short_msg, primary, "cannot move out of array element", NULL, NULL, NULL, NULL);
-                    exit(1);
-                }
+    AstNode *prev_stmt = stack->current_stmt;
+    stack->current_stmt = stmt;
+
+    if (stmt->type == NODE_LET) {
+        analyze_own_node(stack, stmt->as.let.value);
+
+        if (!stmt->as.let.is_array && stmt->as.let.value && stmt->as.let.value->type == NODE_INDEX) {
+            check_reject_array_move(stack, stmt->as.let.value);
+        }
+
+        if (stmt->as.let.value && stmt->as.let.value->type == NODE_MEMBER) {
+            check_reject_member_move(stack, stmt->as.let.value);
+        }
+
+        char *cls_name = stmt->as.let.class_name;
+        if (!cls_name && stmt->as.let.var_type == TY_CLASS) {
+            cls_name = stmt->as.let.class_name;
+        }
+        if (!cls_name) {
+            cls_name = get_expr_class_type(stack, stmt->as.let.value);
+        }
+        if (!cls_name && stmt->as.let.is_array && stmt->as.let.var_type == TY_STRING) {
+            cls_name = "string";
+        }
+
+        bool is_get_borrow = false;
+        if (stmt->as.let.value && stmt->as.let.value->type == NODE_CALL) {
+            const char *callee = stmt->as.let.value->as.call.callee;
+            if (callee && strcmp(callee, "get") == 0) {
+                is_get_borrow = true;
+            }
+        } else if (stmt->as.let.value && stmt->as.let.value->type == NODE_INDEX) {
+            is_get_borrow = true;
+        } else if (stmt->as.let.value && stmt->as.let.value->type == NODE_UNARY && strcmp(stmt->as.let.value->as.unary.op, "&") == 0) {
+            is_get_borrow = true;
+        } else if (stmt->as.let.value && stmt->as.let.value->type == NODE_IDENT) {
+            OwnVar *rhs_var = find_own_var(stack, stmt->as.let.value->as.ident.name, NULL, NULL);
+            if (rhs_var && rhs_var->is_borrowed_param) {
+                is_get_borrow = true;
+            }
+        }
+
+        if (type_desc_needs_cleanup(stmt->as.let.type_desc) || stmt->as.let.is_map || stmt->as.let.is_array || (cls_name && is_heap_class_or_enum(stack->ct, cls_name))) {
+            if (cls_name && is_heap_class_or_enum(stack->ct, cls_name)) {
+                stmt->as.let.class_name = arena_strdup(stack->arena, cls_name);
+                stmt->as.let.var_type = TY_CLASS;
             }
 
-            char *cls_name = stmt->as.let.class_name;
-            if (!cls_name && stmt->as.let.var_type == TY_CLASS) {
-                cls_name = stmt->as.let.class_name;
-            }
-            if (!cls_name) {
-                cls_name = get_expr_class_type(stack, stmt->as.let.value);
-            }
-            if (!cls_name && stmt->as.let.is_array && stmt->as.let.var_type == TY_STRING) {
-                cls_name = "string";
-            }
-
-            bool is_get_borrow = false;
-            if (stmt->as.let.value && stmt->as.let.value->type == NODE_CALL) {
-                const char *callee = stmt->as.let.value->as.call.callee;
-                if (callee && strcmp(callee, "get") == 0) {
-                    is_get_borrow = true;
-                }
-            }
-
-            if (stmt->as.let.is_map || stmt->as.let.is_array || (cls_name && is_heap_class_or_enum(stack->ct, cls_name))) {
-                if (cls_name && is_heap_class_or_enum(stack->ct, cls_name)) {
-                    stmt->as.let.class_name = arena_strdup(stack->arena, cls_name);
-                    stmt->as.let.var_type = TY_CLASS;
-                }
-
-                AstNode *val = stmt->as.let.value;
-                if (val && val->type == NODE_IDENT) {
-                    const char *rhs_name = val->as.ident.name;
-                    OwnVar *rhs_var = find_own_var(stack, rhs_name, NULL, NULL);
-                    if (rhs_var) {
-                        check_use_var(stack, rhs_name, val->line, val->col);
-                        mark_moved(stack, rhs_name, val->line, val->col, stmt->as.let.name, false);
-                    }
-                }
-
-                int const_size = -1;
-                if (stmt->as.let.value && stmt->as.let.value->type == NODE_ALLOC) {
-                    AstNode *cnt = stmt->as.let.value->as.alloc.count_expr;
-                    if (cnt && cnt->type == NODE_LITERAL && cnt->as.literal.lit_type == TY_INT) {
-                        const_size = (int)cnt->as.literal.val.i;
-                    }
-                }
-
-                unmark_moved(stack, stmt->as.let.name);
-                own_scope_add_var_full_map(stack, s, stmt->as.let.name, cls_name, stmt->line, stmt->col, false, is_get_borrow, stmt->as.let.is_array, stmt->as.let.is_map, stmt->as.let.key_type, const_size);
-            }
-        } else if (stmt->type == NODE_ASSIGN) {
-            analyze_own_node(stack, stmt->as.assign.value);
-
-            AstNode *val = stmt->as.assign.value;
-            if (val->type == NODE_IDENT) {
+            AstNode *val = stmt->as.let.value;
+            if (val && val->type == NODE_IDENT) {
                 const char *rhs_name = val->as.ident.name;
                 OwnVar *rhs_var = find_own_var(stack, rhs_name, NULL, NULL);
                 if (rhs_var) {
                     check_use_var(stack, rhs_name, val->line, val->col);
+                    if (!rhs_var->is_borrowed_param) {
+                        mark_moved(stack, rhs_name, val->line, val->col, stmt->as.let.name, false);
+                    }
+                    if (rhs_var->is_array) stmt->as.let.is_array = true;
+                    if (rhs_var->is_map) {
+                        stmt->as.let.is_map = true;
+                        stmt->as.let.key_type = rhs_var->key_type;
+                    }
+                }
+            } else if (val && val->type == NODE_UNARY && strcmp(val->as.unary.op, "&") == 0 && val->as.unary.operand && val->as.unary.operand->type == NODE_IDENT) {
+                const char *rhs_name = val->as.unary.operand->as.ident.name;
+                check_use_var(stack, rhs_name, val->line, val->col);
+            }
+
+            int const_size = -1;
+            if (stmt->as.let.value && stmt->as.let.value->type == NODE_ALLOC) {
+                AstNode *cnt = stmt->as.let.value->as.alloc.count_expr;
+                if (cnt && cnt->type == NODE_LITERAL && cnt->as.literal.lit_type == TY_INT) {
+                    const_size = (int)cnt->as.literal.val.i;
+                }
+            }
+
+            unmark_moved(stack, stmt->as.let.name);
+            own_scope_add_var_desc(stack, s, stmt->as.let.name, cls_name, stmt->line, stmt->col, false, is_get_borrow, stmt->as.let.is_array, stmt->as.let.is_map, stmt->as.let.key_type, stmt->as.let.type_desc, const_size);
+        }
+    } else if (stmt->type == NODE_ASSIGN) {
+        const char *prev_reassign = stack->reassign_lhs;
+        stack->reassign_lhs = stmt->as.assign.name;
+        analyze_own_node(stack, stmt->as.assign.value);
+        stack->reassign_lhs = prev_reassign;
+
+        AstNode *val = stmt->as.assign.value;
+        bool val_is_borrow = false;
+        if (val && val->type == NODE_IDENT) {
+            const char *rhs_name = val->as.ident.name;
+            OwnVar *rhs_var = find_own_var(stack, rhs_name, NULL, NULL);
+            if (rhs_var) {
+                check_use_var(stack, rhs_name, val->line, val->col);
+                if (rhs_var->is_borrowed_param) {
+                    val_is_borrow = true;
+                } else if (strcmp(rhs_name, stmt->as.assign.name) != 0) {
                     mark_moved(stack, rhs_name, val->line, val->col, stmt->as.assign.name, false);
                 }
             }
+        } else if (val && val->type == NODE_CALL && val->as.call.callee && strcmp(val->as.call.callee, "get") == 0) {
+            val_is_borrow = true;
+        } else if (val && val->type == NODE_UNARY && strcmp(val->as.unary.op, "&") == 0) {
+            val_is_borrow = true;
+        }
 
-            const char *lhs_name = stmt->as.assign.name;
-            OwnVar *lhs_var = find_own_var(stack, lhs_name, NULL, NULL);
-            if (lhs_var) {
-                if (!lhs_var->is_array && stmt->as.assign.value && stmt->as.assign.value->type == NODE_INDEX) {
-                    AstNode *idx_node = stmt->as.assign.value;
-                    char *elem_cls = get_expr_class_type(stack, idx_node);
-                    if (elem_cls != NULL) {
-                        const char *arr_n = idx_node->as.index.array_name;
-                        if (!arr_n && idx_node->as.index.array_expr && idx_node->as.index.array_expr->type == NODE_IDENT) {
-                            arr_n = idx_node->as.index.array_expr->as.ident.name;
+        const char *lhs_name = stmt->as.assign.name;
+        OwnVar *lhs_var = find_own_var(stack, lhs_name, NULL, NULL);
+        if (lhs_var) {
+            if (!lhs_var->is_borrowed_param && val_is_borrow) {
+                char short_msg[256];
+                snprintf(short_msg, sizeof(short_msg), "cannot assign borrowed value to owned variable '%s'", lhs_name);
+                ErrorLocation primary = {get_error_filename(), stmt->line, stmt->col};
+                print_formatted_error(
+                    short_msg,
+                    primary,
+                    "assignment of borrowed value",
+                    "borrowed references cannot be stored in owned local variables",
+                    NULL,
+                    NULL,
+                    NULL
+                );
+                exit(1);
+            }
+
+            if (lhs_var->is_borrowed_param && !val_is_borrow) {
+                char short_msg[256];
+                char note_msg[256];
+                snprintf(short_msg, sizeof(short_msg), "cannot assign owned value to borrowed variable '%s'", lhs_name);
+                snprintf(note_msg, sizeof(note_msg), "'%s' is a borrowed reference and cannot take ownership", lhs_name);
+                ErrorLocation primary = {get_error_filename(), stmt->line, stmt->col};
+                ErrorLocation note_loc = {get_error_filename(), lhs_var->decl_line, lhs_var->decl_col};
+                print_formatted_error(
+                    short_msg,
+                    primary,
+                    "assignment to borrowed variable",
+                    note_msg,
+                    &note_loc,
+                    "borrowed variable declared here",
+                    NULL
+                );
+                exit(1);
+            }
+
+            if (!lhs_var->is_array && stmt->as.assign.value && stmt->as.assign.value->type == NODE_INDEX) {
+                check_reject_array_move(stack, stmt->as.assign.value);
+            }
+
+            if (stmt->as.assign.value && stmt->as.assign.value->type == NODE_MEMBER) {
+                check_reject_member_move(stack, stmt->as.assign.value);
+            }
+
+            stmt->as.assign.class_name = lhs_var->class_name ? arena_strdup(stack->arena, lhs_var->class_name) : NULL;
+            stmt->as.assign.type_desc = lhs_var->type_desc;
+            if (!find_moved_var(stack, lhs_name) && !lhs_var->transferred && !lhs_var->is_borrowed_param) {
+                if (!lhs_var->is_array && !lhs_var->is_map) {
+                    stmt->as.assign.release_old = true;
+                } else if (stmt->as.assign.type_desc) {
+                    bool is_self_mutation = false;
+                    if (stmt->as.assign.value && stmt->as.assign.value->type == NODE_CALL && stmt->as.assign.value->as.call.callee && strcmp(stmt->as.assign.value->as.call.callee, "push") == 0 && stmt->as.assign.value->as.call.arg_count > 0) {
+                        AstNode *p0 = stmt->as.assign.value->as.call.args[0];
+                        if (p0 && p0->type == NODE_IDENT && strcmp(p0->as.ident.name, lhs_name) == 0) {
+                            is_self_mutation = true;
                         }
-                        char short_msg[256];
-                        snprintf(short_msg, sizeof(short_msg), "cannot move out of array element '%s[0]' — array elements can only be borrowed, not moved, in this version of Cco", arr_n ? arr_n : "arr");
-                        ErrorLocation primary = {get_error_filename(), idx_node->line, idx_node->col};
-                        print_formatted_error(short_msg, primary, "cannot move out of array element", NULL, NULL, NULL, NULL);
-                        exit(1);
+                    }
+                    if (stmt->as.assign.value && stmt->as.assign.value->type == NODE_IDENT && strcmp(stmt->as.assign.value->as.ident.name, lhs_name) == 0) {
+                        is_self_mutation = true;
+                    }
+                    if (!is_self_mutation) {
+                        stmt->as.assign.release_old = true;
                     }
                 }
-
-                stmt->as.assign.class_name = lhs_var->class_name ? arena_strdup(stack->arena, lhs_var->class_name) : NULL;
-                if (!lhs_var->is_array && !lhs_var->is_map && !find_moved_var(stack, lhs_name) && !lhs_var->transferred) {
-                    stmt->as.assign.release_old = true;
-                }
+            }
+            if (!lhs_var->is_borrowed_param) {
                 unmark_moved(stack, lhs_name);
                 lhs_var->transferred = false;
             }
-        } else if (stmt->type == NODE_INDEX_ASSIGN) {
-            analyze_own_node(stack, stmt->as.index_assign.index);
-            analyze_own_node(stack, stmt->as.index_assign.value);
+        }
+    } else if (stmt->type == NODE_INDEX_ASSIGN) {
+        analyze_own_node(stack, stmt->as.index_assign.index);
+        analyze_own_node(stack, stmt->as.index_assign.value);
 
-            AstNode *val = stmt->as.index_assign.value;
-            if (val->type == NODE_IDENT) {
-                const char *rhs_name = val->as.ident.name;
-                OwnVar *rhs_var = find_own_var(stack, rhs_name, NULL, NULL);
-                if (rhs_var) {
-                    check_use_var(stack, rhs_name, val->line, val->col);
-                    mark_moved(stack, rhs_name, val->line, val->col, NULL, false);
-                }
-            }
+        AstNode *val = stmt->as.index_assign.value;
+        if (val && val->type == NODE_MEMBER) {
+            check_reject_member_move(stack, val);
+        }
+        if (val && val->type == NODE_INDEX) {
+            check_reject_array_move(stack, val);
+        }
 
-            const char *arr_name = stmt->as.index_assign.array_name;
-            if (!arr_name && stmt->as.index_assign.array_expr && stmt->as.index_assign.array_expr->type == NODE_IDENT) {
-                arr_name = stmt->as.index_assign.array_expr->as.ident.name;
+        if (val && val->type == NODE_IDENT) {
+            const char *rhs_name = val->as.ident.name;
+            OwnVar *rhs_var = find_own_var(stack, rhs_name, NULL, NULL);
+            if (rhs_var) {
+                check_use_var(stack, rhs_name, val->line, val->col);
+                mark_moved(stack, rhs_name, val->line, val->col, NULL, false);
             }
-            if (arr_name) {
-                OwnVar *arr_var = find_own_var(stack, arr_name, NULL, NULL);
-                if (arr_var) {
-                    if (arr_var->const_size >= 0) {
-                        AstNode *idx_n = stmt->as.index_assign.index;
-                        if (idx_n && idx_n->type == NODE_LITERAL && idx_n->as.literal.lit_type == TY_INT) {
-                            long idx_val = idx_n->as.literal.val.i;
-                            if (idx_val < 0 || idx_val >= arr_var->const_size) {
-                                ErrorLocation primary = {get_error_filename(), stmt->line, stmt->col};
-                                char short_msg[256];
-                                snprintf(short_msg, sizeof(short_msg), "index %ld out of bounds for array of length %d", idx_val, arr_var->const_size);
-                                print_formatted_error(short_msg, primary, "index out of bounds", NULL, NULL, NULL, NULL);
-                                exit(1);
-                            }
+        }
+
+        const char *arr_name = stmt->as.index_assign.array_name;
+        if (!arr_name && stmt->as.index_assign.array_expr && stmt->as.index_assign.array_expr->type == NODE_IDENT) {
+            arr_name = stmt->as.index_assign.array_expr->as.ident.name;
+        }
+        if (arr_name) {
+            OwnVar *arr_var = find_own_var(stack, arr_name, NULL, NULL);
+            if (arr_var) {
+                if (arr_var->const_size >= 0) {
+                    AstNode *idx_n = stmt->as.index_assign.index;
+                    if (idx_n && idx_n->type == NODE_LITERAL && idx_n->as.literal.lit_type == TY_INT) {
+                        long idx_val = idx_n->as.literal.val.i;
+                        if (idx_val < 0 || idx_val >= arr_var->const_size) {
+                            ErrorLocation primary = {get_error_filename(), stmt->line, stmt->col};
+                            char short_msg[256];
+                            snprintf(short_msg, sizeof(short_msg), "index %ld out of bounds for array of length %d", idx_val, arr_var->const_size);
+                            print_formatted_error(short_msg, primary, "index out of bounds", NULL, NULL, NULL, NULL);
+                            exit(1);
                         }
                     }
+                }
 
-                    if (val && val->type == NODE_LITERAL && val->as.literal.lit_type == TY_STRING && arr_var->is_array) {
-                        ErrorLocation primary = {get_error_filename(), stmt->line, stmt->col};
-                        char short_msg[256];
-                        snprintf(short_msg, sizeof(short_msg), "cannot assign string to array of type %s[]", arr_var->class_name);
-                        print_formatted_error(short_msg, primary, "type mismatch", NULL, NULL, NULL, NULL);
-                        exit(1);
-                    }
+                if (val && val->type == NODE_LITERAL && val->as.literal.lit_type == TY_STRING && arr_var->is_array) {
+                    ErrorLocation primary = {get_error_filename(), stmt->line, stmt->col};
+                    char short_msg[256];
+                    snprintf(short_msg, sizeof(short_msg), "cannot assign string to array of type %s[]", arr_var->class_name);
+                    print_formatted_error(short_msg, primary, "type mismatch", NULL, NULL, NULL, NULL);
+                    exit(1);
                 }
             }
-        } else if (stmt->type == NODE_MEMBER_ASSIGN) {
-            analyze_own_node(stack, stmt->as.member_assign.object);
-            analyze_own_node(stack, stmt->as.member_assign.value);
+        }
+    } else if (stmt->type == NODE_MEMBER_ASSIGN) {
+        analyze_own_node(stack, stmt->as.member_assign.object);
+        analyze_own_node(stack, stmt->as.member_assign.value);
 
-            char *obj_cls = get_expr_class_type(stack, stmt->as.member_assign.object);
-            if (obj_cls) {
-                ClassDef *cd = find_class(stack->ct, obj_cls);
-                FieldInfo *fi = find_field(cd, stmt->as.member_assign.member_name);
-                if (fi && fi->type == TY_CLASS && !fi->is_array && !fi->is_map) {
-                    stmt->as.member_assign.field_class_name = arena_strdup(stack->arena, fi->class_name);
-                    stmt->as.member_assign.release_old = true;
+        char *obj_cls = get_expr_class_type(stack, stmt->as.member_assign.object);
+        if (obj_cls) {
+            ClassDef *cd = find_class(stack->ct, obj_cls);
+            FieldInfo *fi = find_field(cd, stmt->as.member_assign.member_name);
+            if (fi) {
+                bool is_heap_field = fi->is_map || fi->is_array || (fi->type == TY_CLASS && fi->class_name && is_heap_class_or_enum(stack->ct, fi->class_name)) || (fi->type == TY_STRING && !fi->is_array && !fi->is_map);
+                if (is_heap_field) {
+                    stmt->as.member_assign.field_class_name = (fi->type == TY_STRING && !fi->class_name) ? arena_strdup(stack->arena, "string") : (fi->class_name ? arena_strdup(stack->arena, fi->class_name) : NULL);
+                    stmt->as.member_assign.field_is_array = fi->is_array;
+                    stmt->as.member_assign.field_is_map = fi->is_map;
 
+                    bool is_mutation = false;
                     AstNode *val = stmt->as.member_assign.value;
-                    if (val->type == NODE_IDENT) {
+                    if (val && val->type == NODE_CALL && val->as.call.callee) {
+                        const char *callee = val->as.call.callee;
+                        if (strcmp(callee, "push") == 0 || strcmp(callee, "pop") == 0 ||
+                            strcmp(callee, "put") == 0 || strcmp(callee, "remove") == 0) {
+                            is_mutation = true;
+                        }
+                    }
+                    if (!is_mutation) {
+                        stmt->as.member_assign.release_old = true;
+                    }
+
+                    if (val && val->type == NODE_MEMBER) {
+                        if (!is_same_member_target(stmt->as.member_assign.object, stmt->as.member_assign.member_name, val)) {
+                            check_reject_member_move(stack, val);
+                        }
+                    }
+                    if (val && val->type == NODE_INDEX) {
+                        check_reject_array_move(stack, val);
+                    }
+
+                    if (val && val->type == NODE_IDENT) {
                         const char *rhs_name = val->as.ident.name;
                         OwnVar *rhs_var = find_own_var(stack, rhs_name, NULL, NULL);
                         if (rhs_var) {
@@ -1129,14 +1569,57 @@ static void analyze_own_block(OwnScopeStack *stack, AstNode *block_node, bool is
                     }
                 }
             }
-        } else {
-            analyze_own_node(stack, stmt);
         }
+    } else {
+        analyze_own_node(stack, stmt);
+    }
+
+    stack->current_stmt = prev_stmt;
+}
+
+static void analyze_own_block(OwnScopeStack *stack, AstNode *block_node, bool is_loop, bool is_fn_body) {
+    push_own_scope(stack, block_node, is_loop);
+    OwnScope *s = current_own_scope(stack);
+
+    if (is_fn_body && stack->current_function) {
+        if (stack->current_function->type == NODE_METHOD) {
+            AstNode *m = stack->current_function;
+            for (int p = 0; p < m->as.method.param_count; p++) {
+                bool is_map = m->as.method.param_is_map ? m->as.method.param_is_map[p] : false;
+                bool is_arr = m->as.method.param_is_array ? m->as.method.param_is_array[p] : false;
+                const char *cls = m->as.method.param_class_names ? m->as.method.param_class_names[p] : NULL;
+                TypeDesc *ptd = m->as.method.param_type_descs ? m->as.method.param_type_descs[p] : NULL;
+                Type kt = m->as.method.param_key_types ? m->as.method.param_key_types[p] : TY_INT;
+                bool is_bor = m->as.method.param_is_borrowed ? m->as.method.param_is_borrowed[p] : (p == 0);
+                bool is_heap = is_map || is_arr || (cls && is_heap_class_or_enum(stack->ct, cls)) || type_desc_needs_cleanup(ptd);
+                if (is_heap || is_bor) {
+                    own_scope_add_var_desc(stack, s, m->as.method.param_names[p], cls, m->as.method.param_lines ? m->as.method.param_lines[p] : m->line, m->as.method.param_cols ? m->as.method.param_cols[p] : m->col, true, is_bor, is_arr, is_map, kt, ptd, -1);
+                }
+            }
+        } else if (stack->current_function->type == NODE_FUNCTION) {
+            AstNode *f = stack->current_function;
+            for (int p = 0; p < f->as.function.param_count; p++) {
+                bool is_map = f->as.function.param_is_map ? f->as.function.param_is_map[p] : false;
+                bool is_arr = f->as.function.param_is_array ? f->as.function.param_is_array[p] : false;
+                const char *cls = f->as.function.param_class_names ? f->as.function.param_class_names[p] : NULL;
+                TypeDesc *ptd = f->as.function.param_type_descs ? f->as.function.param_type_descs[p] : NULL;
+                Type kt = f->as.function.param_key_types ? f->as.function.param_key_types[p] : TY_INT;
+                bool is_bor = f->as.function.param_is_borrowed ? f->as.function.param_is_borrowed[p] : false;
+                bool is_heap = is_map || is_arr || (cls && is_heap_class_or_enum(stack->ct, cls)) || type_desc_needs_cleanup(ptd);
+                if (is_heap || is_bor) {
+                    own_scope_add_var_desc(stack, s, f->as.function.param_names[p], cls, f->as.function.param_lines ? f->as.function.param_lines[p] : f->line, f->as.function.param_cols ? f->as.function.param_cols[p] : f->col, true, is_bor, is_arr, is_map, kt, ptd, -1);
+                }
+            }
+        }
+    }
+
+    for (int i = 0; i < block_node->as.block.count; i++) {
+        analyze_own_stmt(stack, block_node->as.block.stmts[i]);
     }
 
     for (int i = 0; i < s->count; i++) {
         if (!is_var_transferred(stack, &s->vars[i])) {
-            add_free_release_to_node_map(stack, block_node, s->vars[i].name, s->vars[i].class_name, s->vars[i].is_array, s->vars[i].is_map, s->vars[i].key_type);
+            add_free_release_to_node_desc(stack, block_node, s->vars[i].name, s->vars[i].class_name, s->vars[i].is_array, s->vars[i].is_map, s->vars[i].key_type, s->vars[i].type_desc);
         }
     }
 
@@ -1155,6 +1638,7 @@ static void analyze_own_node(OwnScopeStack *stack, AstNode *node) {
                     AstNode *m_node = cls->as.class_decl.methods[m];
                     stack->current_function = m_node;
                     stack->moved_count = 0;
+                    stack->loop_depth = 0;
                     analyze_own_block(stack, m_node->as.method.body, false, true);
                 }
             }
@@ -1164,6 +1648,7 @@ static void analyze_own_node(OwnScopeStack *stack, AstNode *node) {
                 AstNode *fn = node->as.program.functions[f];
                 stack->current_function = fn;
                 stack->moved_count = 0;
+                stack->loop_depth = 0;
                 analyze_own_block(stack, fn->as.function.body, false, true);
             }
             stack->current_function = NULL;
@@ -1183,73 +1668,72 @@ static void analyze_own_node(OwnScopeStack *stack, AstNode *node) {
         }
 
         case NODE_IF: {
+            stack->in_condition++;
             analyze_own_node(stack, node->as.if_stmt.cond);
+            stack->in_condition--;
 
             int orig_moved_count = stack->moved_count;
-            MovedVar orig_moved[128];
-            memcpy(orig_moved, stack->moved, orig_moved_count * sizeof(MovedVar));
+            MovedVar *orig_moved = snapshot_moved_vars(stack, orig_moved_count);
 
             bool then_term = is_block_terminator(node->as.if_stmt.then_b);
             if (node->as.if_stmt.then_b) {
                 if (node->as.if_stmt.then_b->type == NODE_BLOCK) {
                     analyze_own_block(stack, node->as.if_stmt.then_b, false, false);
                 } else {
-                    analyze_own_node(stack, node->as.if_stmt.then_b);
+                    analyze_own_stmt(stack, node->as.if_stmt.then_b);
                 }
             }
 
             int then_moved_count = stack->moved_count;
-            MovedVar then_moved[128];
-            memcpy(then_moved, stack->moved, then_moved_count * sizeof(MovedVar));
+            MovedVar *then_moved = snapshot_moved_vars(stack, then_moved_count);
 
             // Restore moved state before else branch
-            stack->moved_count = orig_moved_count;
-            memcpy(stack->moved, orig_moved, orig_moved_count * sizeof(MovedVar));
+            restore_moved_snapshot(stack, orig_moved, orig_moved_count);
 
             bool else_term = is_block_terminator(node->as.if_stmt.else_b);
             if (node->as.if_stmt.else_b) {
                 if (node->as.if_stmt.else_b->type == NODE_BLOCK) {
                     analyze_own_block(stack, node->as.if_stmt.else_b, false, false);
                 } else {
-                    analyze_own_node(stack, node->as.if_stmt.else_b);
+                    analyze_own_stmt(stack, node->as.if_stmt.else_b);
                 }
             }
 
             int else_moved_count = stack->moved_count;
-            MovedVar else_moved[128];
-            memcpy(else_moved, stack->moved, else_moved_count * sizeof(MovedVar));
+            MovedVar *else_moved = snapshot_moved_vars(stack, else_moved_count);
 
             if (then_term && else_term) {
-                stack->moved_count = orig_moved_count;
-                memcpy(stack->moved, orig_moved, orig_moved_count * sizeof(MovedVar));
+                restore_moved_snapshot(stack, orig_moved, orig_moved_count);
             } else if (then_term) {
-                stack->moved_count = else_moved_count;
-                memcpy(stack->moved, else_moved, else_moved_count * sizeof(MovedVar));
+                restore_moved_snapshot(stack, else_moved, else_moved_count);
             } else if (else_term || !node->as.if_stmt.else_b) {
                 if (else_term) {
-                    stack->moved_count = then_moved_count;
-                    memcpy(stack->moved, then_moved, then_moved_count * sizeof(MovedVar));
+                    restore_moved_snapshot(stack, then_moved, then_moved_count);
                 } else {
-                    stack->moved_count = orig_moved_count;
-                    memcpy(stack->moved, orig_moved, orig_moved_count * sizeof(MovedVar));
+                    restore_moved_snapshot(stack, orig_moved, orig_moved_count);
                     for (int i = orig_moved_count; i < then_moved_count; i++) {
+                        if (!find_own_var(stack, then_moved[i].name, NULL, NULL)) continue;
                         mark_moved(stack, then_moved[i].name, then_moved[i].move_line, then_moved[i].move_col, then_moved[i].dest_name, true);
                     }
                 }
             } else {
-                stack->moved_count = orig_moved_count;
-                memcpy(stack->moved, orig_moved, orig_moved_count * sizeof(MovedVar));
+                restore_moved_snapshot(stack, orig_moved, orig_moved_count);
                 for (int i = orig_moved_count; i < then_moved_count; i++) {
+                    if (!find_own_var(stack, then_moved[i].name, NULL, NULL)) continue;
                     bool in_else = false;
+                    bool else_is_cond = false;
                     for (int j = orig_moved_count; j < else_moved_count; j++) {
                         if (strcmp(then_moved[i].name, else_moved[j].name) == 0) {
                             in_else = true;
+                            else_is_cond = else_moved[j].is_conditional;
                             break;
                         }
                     }
-                    mark_moved(stack, then_moved[i].name, then_moved[i].move_line, then_moved[i].move_col, then_moved[i].dest_name, !in_else);
+                    bool is_cond = !in_else || then_moved[i].is_conditional || else_is_cond;
+                    mark_moved(stack, then_moved[i].name, then_moved[i].move_line, then_moved[i].move_col, then_moved[i].dest_name, is_cond);
                 }
                 for (int j = orig_moved_count; j < else_moved_count; j++) {
+                    if (!find_own_var(stack, else_moved[j].name, NULL, NULL)) continue;
                     bool in_then = false;
                     for (int i = orig_moved_count; i < then_moved_count; i++) {
                         if (strcmp(else_moved[j].name, then_moved[i].name) == 0) {
@@ -1266,32 +1750,42 @@ static void analyze_own_node(OwnScopeStack *stack, AstNode *node) {
         }
 
         case NODE_WHILE:
+            stack->loop_depth++;
+            stack->in_condition++;
             analyze_own_node(stack, node->as.while_stmt.cond);
+            stack->in_condition--;
             if (node->as.while_stmt.body) {
                 if (node->as.while_stmt.body->type == NODE_BLOCK) {
                     analyze_own_block(stack, node->as.while_stmt.body, true, false);
                 } else {
-                    analyze_own_node(stack, node->as.while_stmt.body);
+                    analyze_own_stmt(stack, node->as.while_stmt.body);
                 }
             }
+            stack->loop_depth--;
             break;
 
         case NODE_FOR: {
             push_own_scope(stack, node, true);
-            if (node->as.for_stmt.init) analyze_own_node(stack, node->as.for_stmt.init);
-            if (node->as.for_stmt.cond) analyze_own_node(stack, node->as.for_stmt.cond);
-            if (node->as.for_stmt.step) analyze_own_node(stack, node->as.for_stmt.step);
+            if (node->as.for_stmt.init) analyze_own_stmt(stack, node->as.for_stmt.init);
+            stack->loop_depth++;
+            if (node->as.for_stmt.cond) {
+                stack->in_condition++;
+                analyze_own_node(stack, node->as.for_stmt.cond);
+                stack->in_condition--;
+            }
+            if (node->as.for_stmt.step) analyze_own_stmt(stack, node->as.for_stmt.step);
             if (node->as.for_stmt.body) {
                 if (node->as.for_stmt.body->type == NODE_BLOCK) {
                     analyze_own_block(stack, node->as.for_stmt.body, false, false);
                 } else {
-                    analyze_own_node(stack, node->as.for_stmt.body);
+                    analyze_own_stmt(stack, node->as.for_stmt.body);
                 }
             }
+            stack->loop_depth--;
             OwnScope *fs = current_own_scope(stack);
             for (int i = 0; i < fs->count; i++) {
                 if (!is_var_transferred(stack, &fs->vars[i])) {
-                    add_free_release_to_node_map(stack, node, fs->vars[i].name, fs->vars[i].class_name, fs->vars[i].is_array, fs->vars[i].is_map, fs->vars[i].key_type);
+                    add_free_release_to_node_desc(stack, node, fs->vars[i].name, fs->vars[i].class_name, fs->vars[i].is_array, fs->vars[i].is_map, fs->vars[i].key_type, fs->vars[i].type_desc);
                 }
             }
             pop_own_scope(stack);
@@ -1300,6 +1794,7 @@ static void analyze_own_node(OwnScopeStack *stack, AstNode *node) {
 
         case NODE_FOR_EACH: {
             analyze_own_node(stack, node->as.for_each.collection_expr);
+            stack->loop_depth++;
             push_own_scope(stack, node, true);
             OwnScope *s = current_own_scope(stack);
             char *elem_cls = get_expr_class_type(stack, node->as.for_each.collection_expr);
@@ -1311,10 +1806,11 @@ static void analyze_own_node(OwnScopeStack *stack, AstNode *node) {
                 if (node->as.for_each.body->type == NODE_BLOCK) {
                     analyze_own_block(stack, node->as.for_each.body, false, false);
                 } else {
-                    analyze_own_node(stack, node->as.for_each.body);
+                    analyze_own_stmt(stack, node->as.for_each.body);
                 }
             }
             pop_own_scope(stack);
+            stack->loop_depth--;
             break;
         }
 
@@ -1336,13 +1832,66 @@ static void analyze_own_node(OwnScopeStack *stack, AstNode *node) {
                         exit(1);
                     }
 
+                    if (val_arg->type == NODE_MEMBER) {
+                        check_reject_member_move(stack, val_arg);
+                    }
+                    if (val_arg->type == NODE_INDEX) {
+                        check_reject_array_move(stack, val_arg);
+                    }
+
                     if (val_arg->type == NODE_IDENT) {
                         const char *val_name = val_arg->as.ident.name;
                         OwnVar *val_var = find_own_var(stack, val_name, NULL, NULL);
                         if (val_var) {
+                            if (val_var->is_borrowed_param) {
+                                char short_msg[256];
+                                char note_msg[256];
+                                snprintf(short_msg, sizeof(short_msg), "cannot transfer ownership of borrowed value '%s' into array", val_name);
+                                snprintf(note_msg, sizeof(note_msg), "'%s' is a borrowed reference and cannot transfer ownership", val_name);
+                                ErrorLocation primary = {get_error_filename(), val_arg->line, val_arg->col};
+                                ErrorLocation note_loc = {get_error_filename(), val_var->decl_line, val_var->decl_col};
+                                print_formatted_error(
+                                    short_msg,
+                                    primary,
+                                    "move of borrowed value",
+                                    note_msg,
+                                    &note_loc,
+                                    "borrowed value declared here",
+                                    NULL
+                                );
+                                exit(1);
+                            }
                             check_use_var(stack, val_name, val_arg->line, val_arg->col);
                             mark_moved(stack, val_name, val_arg->line, val_arg->col, NULL, false);
                         }
+                    } else if (val_arg->type == NODE_CALL && val_arg->as.call.callee && strcmp(val_arg->as.call.callee, "get") == 0) {
+                        char short_msg[256];
+                        snprintf(short_msg, sizeof(short_msg), "cannot transfer ownership of borrowed value from get() into array");
+                        ErrorLocation primary = {get_error_filename(), val_arg->line, val_arg->col};
+                        print_formatted_error(
+                            short_msg,
+                            primary,
+                            "move of borrowed value",
+                            "get() returns a borrowed reference that cannot be stored as an owned element",
+                            NULL,
+                            NULL,
+                            NULL
+                        );
+                        exit(1);
+                    } else if (val_arg->type == NODE_UNARY && strcmp(val_arg->as.unary.op, "&") == 0) {
+                        char short_msg[256];
+                        snprintf(short_msg, sizeof(short_msg), "cannot transfer ownership of borrowed reference into array");
+                        ErrorLocation primary = {get_error_filename(), val_arg->line, val_arg->col};
+                        print_formatted_error(
+                            short_msg,
+                            primary,
+                            "move of borrowed value",
+                            "borrowed references cannot be stored as owned elements",
+                            NULL,
+                            NULL,
+                            NULL
+                        );
+                        exit(1);
                     }
                 }
                 break;
@@ -1384,13 +1933,66 @@ static void analyze_own_node(OwnScopeStack *stack, AstNode *node) {
                         exit(1);
                     }
 
+                    if (val_arg->type == NODE_MEMBER) {
+                        check_reject_member_move(stack, val_arg);
+                    }
+                    if (val_arg->type == NODE_INDEX) {
+                        check_reject_array_move(stack, val_arg);
+                    }
+
                     if (val_arg->type == NODE_IDENT) {
                         const char *val_name = val_arg->as.ident.name;
                         OwnVar *val_var = find_own_var(stack, val_name, NULL, NULL);
                         if (val_var && (val_var->class_name || val_var->is_array || val_var->is_map)) {
+                            if (val_var->is_borrowed_param) {
+                                char short_msg[256];
+                                char note_msg[256];
+                                snprintf(short_msg, sizeof(short_msg), "cannot transfer ownership of borrowed value '%s' into map", val_name);
+                                snprintf(note_msg, sizeof(note_msg), "'%s' is a borrowed reference and cannot transfer ownership", val_name);
+                                ErrorLocation primary = {get_error_filename(), val_arg->line, val_arg->col};
+                                ErrorLocation note_loc = {get_error_filename(), val_var->decl_line, val_var->decl_col};
+                                print_formatted_error(
+                                    short_msg,
+                                    primary,
+                                    "move of borrowed value",
+                                    note_msg,
+                                    &note_loc,
+                                    "borrowed value declared here",
+                                    NULL
+                                );
+                                exit(1);
+                            }
                             check_use_var(stack, val_name, val_arg->line, val_arg->col);
                             mark_moved(stack, val_name, val_arg->line, val_arg->col, NULL, false);
                         }
+                    } else if (val_arg->type == NODE_CALL && val_arg->as.call.callee && strcmp(val_arg->as.call.callee, "get") == 0) {
+                        char short_msg[256];
+                        snprintf(short_msg, sizeof(short_msg), "cannot transfer ownership of borrowed value from get() into map");
+                        ErrorLocation primary = {get_error_filename(), val_arg->line, val_arg->col};
+                        print_formatted_error(
+                            short_msg,
+                            primary,
+                            "move of borrowed value",
+                            "get() returns a borrowed reference that cannot be stored as an owned value",
+                            NULL,
+                            NULL,
+                            NULL
+                        );
+                        exit(1);
+                    } else if (val_arg->type == NODE_UNARY && strcmp(val_arg->as.unary.op, "&") == 0) {
+                        char short_msg[256];
+                        snprintf(short_msg, sizeof(short_msg), "cannot transfer ownership of borrowed reference into map");
+                        ErrorLocation primary = {get_error_filename(), val_arg->line, val_arg->col};
+                        print_formatted_error(
+                            short_msg,
+                            primary,
+                            "move of borrowed value",
+                            "borrowed references cannot be stored as owned values",
+                            NULL,
+                            NULL,
+                            NULL
+                        );
+                        exit(1);
                     }
                 }
                 break;
@@ -1458,8 +2060,27 @@ static void analyze_own_node(OwnScopeStack *stack, AstNode *node) {
                     OwnVar *arg_var = find_own_var(stack, arg_name, NULL, NULL);
                     if (arg_var) {
                         check_use_var(stack, arg_name, arg->line, arg->col);
-                        bool is_bor = ((fn && i < fn->as.function.param_count && fn->as.function.param_is_borrowed && fn->as.function.param_is_borrowed[i]) || arg_var->is_map);
+                        bool is_bor = ((fn && i < fn->as.function.param_count && fn->as.function.param_is_borrowed && fn->as.function.param_is_borrowed[i]) ||
+                                       (arg_var->is_map && (!fn || strcmp(node->as.call.callee, "get") == 0 || strcmp(node->as.call.callee, "has") == 0 || strcmp(node->as.call.callee, "len") == 0)));
                         if (!is_bor) {
+                            if (arg_var->is_borrowed_param) {
+                                char short_msg[256];
+                                char note_msg[256];
+                                snprintf(short_msg, sizeof(short_msg), "cannot pass borrowed value '%s' to consuming parameter", arg_name);
+                                snprintf(note_msg, sizeof(note_msg), "'%s' is a borrowed parameter (&%s) and cannot transfer ownership", arg_name, arg_var->class_name ? arg_var->class_name : "");
+                                ErrorLocation primary = {get_error_filename(), arg->line, arg->col};
+                                ErrorLocation note_loc = {get_error_filename(), arg_var->decl_line, arg_var->decl_col};
+                                print_formatted_error(
+                                    short_msg,
+                                    primary,
+                                    "move of borrowed value",
+                                    note_msg,
+                                    &note_loc,
+                                    "parameter declared as borrowed here",
+                                    NULL
+                                );
+                                exit(1);
+                            }
                             mark_moved(stack, arg_name, arg->line, arg->col, NULL, false);
                         }
                     }
@@ -1467,18 +2088,64 @@ static void analyze_own_node(OwnScopeStack *stack, AstNode *node) {
                     bool is_bor = (fn && i < fn->as.function.param_count && fn->as.function.param_is_borrowed) ? fn->as.function.param_is_borrowed[i] : false;
                     bool is_class_param = (fn && i < fn->as.function.param_count && fn->as.function.param_types[i] == TY_CLASS && (!fn->as.function.param_is_array || !fn->as.function.param_is_array[i]));
                     if (is_class_param && !is_bor) {
-                        char *elem_cls = get_expr_class_type(stack, arg);
-                        if (elem_cls != NULL) {
-                            const char *arr_n = arg->as.index.array_name;
-                            if (!arr_n && arg->as.index.array_expr && arg->as.index.array_expr->type == NODE_IDENT) {
-                                arr_n = arg->as.index.array_expr->as.ident.name;
-                            }
-                            char short_msg[256];
-                            snprintf(short_msg, sizeof(short_msg), "cannot move out of array element '%s[0]' — array elements can only be borrowed, not moved, in this version of Cco", arr_n ? arr_n : "arr");
-                            ErrorLocation primary = {get_error_filename(), arg->line, arg->col};
-                            print_formatted_error(short_msg, primary, "cannot move out of array element", NULL, NULL, NULL, NULL);
-                            exit(1);
-                        }
+                        check_reject_array_move(stack, arg);
+                    }
+                } else if (arg->type == NODE_MEMBER) {
+                    bool is_bor = (fn && i < fn->as.function.param_count && fn->as.function.param_is_borrowed) ? fn->as.function.param_is_borrowed[i] : false;
+                    bool is_heap_param = false;
+                    if (fn && i < fn->as.function.param_count) {
+                        if (fn->as.function.param_is_array && fn->as.function.param_is_array[i]) is_heap_param = true;
+                        else if (fn->as.function.param_is_map && fn->as.function.param_is_map[i]) is_heap_param = true;
+                        else if (fn->as.function.param_types[i] == TY_CLASS) is_heap_param = true;
+                    }
+                    if (is_heap_param && !is_bor) {
+                        check_reject_member_move(stack, arg);
+                    }
+                } else if (arg->type == NODE_CALL && arg->as.call.callee && strcmp(arg->as.call.callee, "get") == 0) {
+                    bool is_bor = (fn && i < fn->as.function.param_count && fn->as.function.param_is_borrowed) ? fn->as.function.param_is_borrowed[i] : false;
+                    bool is_heap_param = false;
+                    if (fn && i < fn->as.function.param_count) {
+                        if (fn->as.function.param_is_array && fn->as.function.param_is_array[i]) is_heap_param = true;
+                        else if (fn->as.function.param_is_map && fn->as.function.param_is_map[i]) is_heap_param = true;
+                        else if (fn->as.function.param_types[i] == TY_CLASS) is_heap_param = true;
+                    }
+                    if (is_heap_param && !is_bor) {
+                        char short_msg[256];
+                        snprintf(short_msg, sizeof(short_msg), "cannot pass borrowed value from get() to consuming parameter");
+                        ErrorLocation primary = {get_error_filename(), arg->line, arg->col};
+                        print_formatted_error(
+                            short_msg,
+                            primary,
+                            "move of borrowed value",
+                            "get() returns a borrowed reference and cannot transfer ownership",
+                            NULL,
+                            NULL,
+                            NULL
+                        );
+                        exit(1);
+                    }
+                } else if (arg->type == NODE_UNARY && strcmp(arg->as.unary.op, "&") == 0) {
+                    bool is_bor = (fn && i < fn->as.function.param_count && fn->as.function.param_is_borrowed) ? fn->as.function.param_is_borrowed[i] : false;
+                    bool is_heap_param = false;
+                    if (fn && i < fn->as.function.param_count) {
+                        if (fn->as.function.param_is_array && fn->as.function.param_is_array[i]) is_heap_param = true;
+                        else if (fn->as.function.param_is_map && fn->as.function.param_is_map[i]) is_heap_param = true;
+                        else if (fn->as.function.param_types[i] == TY_CLASS) is_heap_param = true;
+                    }
+                    if (is_heap_param && !is_bor) {
+                        char short_msg[256];
+                        snprintf(short_msg, sizeof(short_msg), "cannot pass borrowed reference to consuming parameter");
+                        ErrorLocation primary = {get_error_filename(), arg->line, arg->col};
+                        print_formatted_error(
+                            short_msg,
+                            primary,
+                            "move of borrowed value",
+                            "borrowed references cannot transfer ownership",
+                            NULL,
+                            NULL,
+                            NULL
+                        );
+                        exit(1);
                     }
                 }
             }
@@ -1514,6 +2181,24 @@ static void analyze_own_node(OwnScopeStack *stack, AstNode *node) {
                             }
                         }
                         if (!is_bor) {
+                            if (arg_var->is_borrowed_param) {
+                                char short_msg[256];
+                                char note_msg[256];
+                                snprintf(short_msg, sizeof(short_msg), "cannot pass borrowed value '%s' to consuming parameter", arg_name);
+                                snprintf(note_msg, sizeof(note_msg), "'%s' is a borrowed parameter and cannot transfer ownership", arg_name);
+                                ErrorLocation primary = {get_error_filename(), arg->line, arg->col};
+                                ErrorLocation note_loc = {get_error_filename(), arg_var->decl_line, arg_var->decl_col};
+                                print_formatted_error(
+                                    short_msg,
+                                    primary,
+                                    "move of borrowed value",
+                                    note_msg,
+                                    &note_loc,
+                                    "parameter declared as borrowed here",
+                                    NULL
+                                );
+                                exit(1);
+                            }
                             mark_moved(stack, arg_name, arg->line, arg->col, NULL, false);
                         }
                     }
@@ -1529,18 +2214,79 @@ static void analyze_own_node(OwnScopeStack *stack, AstNode *node) {
                         }
                     }
                     if (is_class_param && !is_bor) {
-                        char *elem_cls = get_expr_class_type(stack, arg);
-                        if (elem_cls != NULL) {
-                            const char *arr_n = arg->as.index.array_name;
-                            if (!arr_n && arg->as.index.array_expr && arg->as.index.array_expr->type == NODE_IDENT) {
-                                arr_n = arg->as.index.array_expr->as.ident.name;
-                            }
-                            char short_msg[256];
-                            snprintf(short_msg, sizeof(short_msg), "cannot move out of array element '%s[0]' — array elements can only be borrowed, not moved, in this version of Cco", arr_n ? arr_n : "arr");
-                            ErrorLocation primary = {get_error_filename(), arg->line, arg->col};
-                            print_formatted_error(short_msg, primary, "cannot move out of array element", NULL, NULL, NULL, NULL);
-                            exit(1);
+                        check_reject_array_move(stack, arg);
+                    }
+                } else if (arg->type == NODE_MEMBER) {
+                    bool is_bor = false;
+                    bool is_heap_param = false;
+                    if (mi && mi->method_node) {
+                        AstNode *mn = mi->method_node;
+                        int param_idx = i + 1;
+                        if (param_idx < mn->as.method.param_count) {
+                            if (mn->as.method.param_is_borrowed) is_bor = mn->as.method.param_is_borrowed[param_idx];
+                            if (mn->as.method.param_is_array && mn->as.method.param_is_array[param_idx]) is_heap_param = true;
+                            else if (mn->as.method.param_is_map && mn->as.method.param_is_map[param_idx]) is_heap_param = true;
+                            else if (mn->as.method.param_types[param_idx] == TY_CLASS) is_heap_param = true;
                         }
+                    }
+                    if (is_heap_param && !is_bor) {
+                        check_reject_member_move(stack, arg);
+                    }
+                } else if (arg->type == NODE_CALL && arg->as.call.callee && strcmp(arg->as.call.callee, "get") == 0) {
+                    bool is_bor = false;
+                    bool is_heap_param = false;
+                    if (mi && mi->method_node) {
+                        AstNode *mn = mi->method_node;
+                        int param_idx = i + 1;
+                        if (param_idx < mn->as.method.param_count) {
+                            if (mn->as.method.param_is_borrowed) is_bor = mn->as.method.param_is_borrowed[param_idx];
+                            if (mn->as.method.param_is_array && mn->as.method.param_is_array[param_idx]) is_heap_param = true;
+                            else if (mn->as.method.param_is_map && mn->as.method.param_is_map[param_idx]) is_heap_param = true;
+                            else if (mn->as.method.param_types[param_idx] == TY_CLASS) is_heap_param = true;
+                        }
+                    }
+                    if (is_heap_param && !is_bor) {
+                        char short_msg[256];
+                        snprintf(short_msg, sizeof(short_msg), "cannot pass borrowed value from get() to consuming parameter");
+                        ErrorLocation primary = {get_error_filename(), arg->line, arg->col};
+                        print_formatted_error(
+                            short_msg,
+                            primary,
+                            "move of borrowed value",
+                            "get() returns a borrowed reference and cannot transfer ownership",
+                            NULL,
+                            NULL,
+                            NULL
+                        );
+                        exit(1);
+                    }
+                } else if (arg->type == NODE_UNARY && strcmp(arg->as.unary.op, "&") == 0) {
+                    bool is_bor = false;
+                    bool is_heap_param = false;
+                    if (mi && mi->method_node) {
+                        AstNode *mn = mi->method_node;
+                        int param_idx = i + 1;
+                        if (param_idx < mn->as.method.param_count) {
+                            if (mn->as.method.param_is_borrowed) is_bor = mn->as.method.param_is_borrowed[param_idx];
+                            if (mn->as.method.param_is_array && mn->as.method.param_is_array[param_idx]) is_heap_param = true;
+                            else if (mn->as.method.param_is_map && mn->as.method.param_is_map[param_idx]) is_heap_param = true;
+                            else if (mn->as.method.param_types[param_idx] == TY_CLASS) is_heap_param = true;
+                        }
+                    }
+                    if (is_heap_param && !is_bor) {
+                        char short_msg[256];
+                        snprintf(short_msg, sizeof(short_msg), "cannot pass borrowed reference to consuming parameter");
+                        ErrorLocation primary = {get_error_filename(), arg->line, arg->col};
+                        print_formatted_error(
+                            short_msg,
+                            primary,
+                            "move of borrowed value",
+                            "borrowed references cannot transfer ownership",
+                            NULL,
+                            NULL,
+                            NULL
+                        );
+                        exit(1);
                     }
                 }
             }
@@ -1581,10 +2327,59 @@ static void analyze_own_node(OwnScopeStack *stack, AstNode *node) {
                 if (val && val->type == NODE_IDENT) {
                     const char *arg_name = val->as.ident.name;
                     OwnVar *arg_var = find_own_var(stack, arg_name, NULL, NULL);
-                    if (arg_var && !arg_var->is_borrowed_param) {
+                    if (arg_var && arg_var->is_borrowed_param && (arg_var->class_name || arg_var->is_array || arg_var->is_map)) {
+                        char short_msg[256];
+                        char note_msg[256];
+                        snprintf(short_msg, sizeof(short_msg), "cannot transfer ownership of borrowed value '%s' into class field", arg_name);
+                        snprintf(note_msg, sizeof(note_msg), "'%s' is a borrowed reference and cannot transfer ownership", arg_name);
+                        ErrorLocation primary = {get_error_filename(), val->line, val->col};
+                        ErrorLocation note_loc = {get_error_filename(), arg_var->decl_line, arg_var->decl_col};
+                        print_formatted_error(
+                            short_msg,
+                            primary,
+                            "move of borrowed value",
+                            note_msg,
+                            &note_loc,
+                            "borrowed value declared here",
+                            NULL
+                        );
+                        exit(1);
+                    } else if (arg_var && !arg_var->is_borrowed_param) {
                         check_use_var(stack, arg_name, val->line, val->col);
                         mark_moved(stack, arg_name, val->line, val->col, NULL, false);
                     }
+                } else if (val && val->type == NODE_CALL && val->as.call.callee && strcmp(val->as.call.callee, "get") == 0) {
+                    char short_msg[256];
+                    snprintf(short_msg, sizeof(short_msg), "cannot transfer ownership of borrowed value from get() into class field");
+                    ErrorLocation primary = {get_error_filename(), val->line, val->col};
+                    print_formatted_error(
+                        short_msg,
+                        primary,
+                        "move of borrowed value",
+                        "get() returns a borrowed reference that cannot be stored as an owned field",
+                        NULL,
+                        NULL,
+                        NULL
+                    );
+                    exit(1);
+                } else if (val && val->type == NODE_UNARY && strcmp(val->as.unary.op, "&") == 0) {
+                    char short_msg[256];
+                    snprintf(short_msg, sizeof(short_msg), "cannot transfer ownership of borrowed reference into class field");
+                    ErrorLocation primary = {get_error_filename(), val->line, val->col};
+                    print_formatted_error(
+                        short_msg,
+                        primary,
+                        "move of borrowed value",
+                        "borrowed references cannot be stored as owned fields",
+                        NULL,
+                        NULL,
+                        NULL
+                    );
+                    exit(1);
+                } else if (val && val->type == NODE_MEMBER) {
+                    check_reject_member_move(stack, val);
+                } else if (val && val->type == NODE_INDEX) {
+                    check_reject_array_move(stack, val);
                 }
             }
             break;
@@ -1593,6 +2388,13 @@ static void analyze_own_node(OwnScopeStack *stack, AstNode *node) {
         case NODE_RETURN: {
             if (node->as.return_stmt.value) {
                 analyze_own_node(stack, node->as.return_stmt.value);
+            }
+
+            if (node->as.return_stmt.value && node->as.return_stmt.value->type == NODE_MEMBER) {
+                check_reject_member_move(stack, node->as.return_stmt.value);
+            }
+            if (node->as.return_stmt.value && node->as.return_stmt.value->type == NODE_INDEX) {
+                check_reject_array_move(stack, node->as.return_stmt.value);
             }
 
             if (node->as.return_stmt.value && node->as.return_stmt.value->type == NODE_IDENT) {
@@ -1605,7 +2407,11 @@ static void analyze_own_node(OwnScopeStack *stack, AstNode *node) {
                         char short_msg[256];
                         char note_msg[256];
                         snprintf(short_msg, sizeof(short_msg), "cannot return borrowed value '%s'", ret_var);
-                        snprintf(note_msg, sizeof(note_msg), "'%s' is a borrowed parameter (&%s) — this function does not own it and cannot transfer ownership to the caller", ret_var, v->class_name ? v->class_name : "");
+                        if (v->class_name) {
+                            snprintf(note_msg, sizeof(note_msg), "'%s' is a borrowed parameter (&%s) — this function does not own it and cannot transfer ownership to the caller", ret_var, v->class_name);
+                        } else {
+                            snprintf(note_msg, sizeof(note_msg), "'%s' is a borrowed parameter — this function does not own it and cannot transfer ownership to the caller", ret_var);
+                        }
                         ErrorLocation primary = {get_error_filename(), node->as.return_stmt.value->line, node->as.return_stmt.value->col};
                         ErrorLocation note_loc = {get_error_filename(), v->decl_line, v->decl_col};
                         print_formatted_error(
@@ -1617,16 +2423,45 @@ static void analyze_own_node(OwnScopeStack *stack, AstNode *node) {
                             "parameter declared as borrowed here",
                             NULL
                         );
+                        exit(1);
                     }
                     mark_moved(stack, ret_var, node->as.return_stmt.value->line, node->as.return_stmt.value->col, NULL, false);
                 }
+            } else if (node->as.return_stmt.value && node->as.return_stmt.value->type == NODE_CALL && node->as.return_stmt.value->as.call.callee && strcmp(node->as.return_stmt.value->as.call.callee, "get") == 0) {
+                char short_msg[256];
+                snprintf(short_msg, sizeof(short_msg), "cannot return borrowed value from get()");
+                ErrorLocation primary = {get_error_filename(), node->as.return_stmt.value->line, node->as.return_stmt.value->col};
+                print_formatted_error(
+                    short_msg,
+                    primary,
+                    "return of borrowed value",
+                    "get() returns a borrowed reference that cannot be transferred to the caller",
+                    NULL,
+                    NULL,
+                    NULL
+                );
+                exit(1);
+            } else if (node->as.return_stmt.value && node->as.return_stmt.value->type == NODE_UNARY && strcmp(node->as.return_stmt.value->as.unary.op, "&") == 0) {
+                char short_msg[256];
+                snprintf(short_msg, sizeof(short_msg), "cannot return borrowed reference");
+                ErrorLocation primary = {get_error_filename(), node->as.return_stmt.value->line, node->as.return_stmt.value->col};
+                print_formatted_error(
+                    short_msg,
+                    primary,
+                    "return of borrowed value",
+                    "borrowed references cannot be transferred to the caller",
+                    NULL,
+                    NULL,
+                    NULL
+                );
+                exit(1);
             }
 
             for (int s_idx = stack->depth - 1; s_idx >= 0; s_idx--) {
                 OwnScope *s = &stack->scopes[s_idx];
                 for (int i = 0; i < s->count; i++) {
                     if (!is_var_transferred(stack, &s->vars[i])) {
-                        add_free_release_to_node_map(stack, node, s->vars[i].name, s->vars[i].class_name, s->vars[i].is_array, s->vars[i].is_map, s->vars[i].key_type);
+                        add_free_release_to_node_desc(stack, node, s->vars[i].name, s->vars[i].class_name, s->vars[i].is_array, s->vars[i].is_map, s->vars[i].key_type, s->vars[i].type_desc);
                     }
                 }
             }
@@ -1635,11 +2470,30 @@ static void analyze_own_node(OwnScopeStack *stack, AstNode *node) {
 
         case NODE_BREAK:
         case NODE_CONTINUE: {
+            if (stack->loop_depth <= 0) {
+                const char *stmt_name = (node->type == NODE_BREAK) ? "break" : "continue";
+                char short_msg[256];
+                snprintf(short_msg, sizeof(short_msg), "'%s' statement outside of loop", stmt_name);
+                ErrorLocation primary = {get_error_filename(), node->line, node->col};
+                print_formatted_error(
+                    short_msg,
+                    primary,
+                    "cannot use outside of loop",
+                    NULL,
+                    NULL,
+                    NULL,
+                    NULL
+                );
+            }
             for (int s_idx = stack->depth - 1; s_idx >= 0; s_idx--) {
                 OwnScope *s = &stack->scopes[s_idx];
+                if (s->block_node && s->block_node->type == NODE_FOR) {
+                    if (s->is_loop_scope) break;
+                    continue;
+                }
                 for (int i = 0; i < s->count; i++) {
                     if (!is_var_transferred(stack, &s->vars[i])) {
-                        add_free_release_to_node_map(stack, node, s->vars[i].name, s->vars[i].class_name, s->vars[i].is_array, s->vars[i].is_map, s->vars[i].key_type);
+                        add_free_release_to_node_desc(stack, node, s->vars[i].name, s->vars[i].class_name, s->vars[i].is_array, s->vars[i].is_map, s->vars[i].key_type, s->vars[i].type_desc);
                     }
                 }
                 if (s->is_loop_scope) break;
@@ -1768,10 +2622,16 @@ static void analyze_own_node(OwnScopeStack *stack, AstNode *node) {
 
             // 4. Analyze each arm body with bound variables registered as borrowed
             int orig_moved_count = stack->moved_count;
-            MovedVar orig_moved[128];
-            memcpy(orig_moved, stack->moved, orig_moved_count * sizeof(MovedVar));
+            MovedVar *orig_moved = snapshot_moved_vars(stack, orig_moved_count);
 
-            for (int a = 0; a < node->as.match_stmt.arm_count; a++) {
+            int arm_count = node->as.match_stmt.arm_count;
+            MovedVar **arm_moved_snaps = (MovedVar **)arena_alloc_array(stack->arena, arm_count > 0 ? arm_count : 1, sizeof(MovedVar *));
+            int *arm_moved_counts = (int *)arena_alloc_array(stack->arena, arm_count > 0 ? arm_count : 1, sizeof(int));
+            bool *arm_terms = (bool *)arena_alloc_array(stack->arena, arm_count > 0 ? arm_count : 1, sizeof(bool));
+
+            for (int a = 0; a < arm_count; a++) {
+                restore_moved_snapshot(stack, orig_moved, orig_moved_count);
+
                 AstNode *arm = node->as.match_stmt.arms[a];
                 push_own_scope(stack, arm->as.match_arm.body, false);
                 OwnScope *s = current_own_scope(stack);
@@ -1794,23 +2654,71 @@ static void analyze_own_node(OwnScopeStack *stack, AstNode *node) {
                 }
 
                 // Analyze statements inside arm body
-                if (arm->as.match_arm.body && arm->as.match_arm.body->type == NODE_BLOCK) {
-                    for (int st = 0; st < arm->as.match_arm.body->as.block.count; st++) {
-                        analyze_own_node(stack, arm->as.match_arm.body->as.block.stmts[st]);
-                    }
-
-                    // Emit frees for any owned allocations created inside the arm
-                    for (int i = 0; i < s->count; i++) {
-                        if (!s->vars[i].is_param && !s->vars[i].is_borrowed_param && !is_var_transferred(stack, &s->vars[i])) {
-                            add_free_release_to_node_map(stack, arm->as.match_arm.body, s->vars[i].name, s->vars[i].class_name, s->vars[i].is_array, s->vars[i].is_map, s->vars[i].key_type);
+                if (arm->as.match_arm.body) {
+                    if (arm->as.match_arm.body->type == NODE_BLOCK) {
+                        for (int st = 0; st < arm->as.match_arm.body->as.block.count; st++) {
+                            analyze_own_stmt(stack, arm->as.match_arm.body->as.block.stmts[st]);
                         }
+
+                        // Emit frees for any owned allocations created inside the arm
+                        for (int i = 0; i < s->count; i++) {
+                            if (!s->vars[i].is_param && !s->vars[i].is_borrowed_param && !is_var_transferred(stack, &s->vars[i])) {
+                                add_free_release_to_node_desc(stack, arm->as.match_arm.body, s->vars[i].name, s->vars[i].class_name, s->vars[i].is_array, s->vars[i].is_map, s->vars[i].key_type, s->vars[i].type_desc);
+                            }
+                        }
+                    } else {
+                        analyze_own_stmt(stack, arm->as.match_arm.body);
                     }
                 }
                 pop_own_scope(stack);
 
-                // Match is borrow-only: restore moved state across arms
-                stack->moved_count = orig_moved_count;
-                memcpy(stack->moved, orig_moved, orig_moved_count * sizeof(MovedVar));
+                arm_terms[a] = is_match_arm_terminator(arm->as.match_arm.body);
+                arm_moved_counts[a] = stack->moved_count;
+                arm_moved_snaps[a] = snapshot_moved_vars(stack, arm_moved_counts[a]);
+            }
+
+            int non_term_count = 0;
+            for (int a = 0; a < arm_count; a++) {
+                if (!arm_terms[a]) non_term_count++;
+            }
+
+            restore_moved_snapshot(stack, orig_moved, orig_moved_count);
+
+            if (non_term_count > 0) {
+                for (int a = 0; a < arm_count; a++) {
+                    if (arm_terms[a]) continue;
+                    for (int i = orig_moved_count; i < arm_moved_counts[a]; i++) {
+                        const char *var_name = arm_moved_snaps[a][i].name;
+                        if (!find_own_var(stack, var_name, NULL, NULL)) continue;
+
+                        bool already_reconciled = false;
+                        for (int m = orig_moved_count; m < stack->moved_count; m++) {
+                            if (strcmp(stack->moved[m].name, var_name) == 0) {
+                                already_reconciled = true;
+                                break;
+                            }
+                        }
+                        if (already_reconciled) continue;
+
+                        int moved_in_arms = 0;
+                        bool any_arm_conditional = false;
+                        for (int b = 0; b < arm_count; b++) {
+                            if (arm_terms[b]) continue;
+                            for (int j = orig_moved_count; j < arm_moved_counts[b]; j++) {
+                                if (strcmp(arm_moved_snaps[b][j].name, var_name) == 0) {
+                                    moved_in_arms++;
+                                    if (arm_moved_snaps[b][j].is_conditional) {
+                                        any_arm_conditional = true;
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+
+                        bool is_cond = (moved_in_arms < non_term_count) || any_arm_conditional;
+                        mark_moved(stack, var_name, arm_moved_snaps[a][i].move_line, arm_moved_snaps[a][i].move_col, arm_moved_snaps[a][i].dest_name, is_cond);
+                    }
+                }
             }
             break;
         }
@@ -1838,8 +2746,15 @@ static void analyze_own_node(OwnScopeStack *stack, AstNode *node) {
             }
             break;
         case NODE_BINARY:
-            analyze_own_node(stack, node->as.binary.left);
-            analyze_own_node(stack, node->as.binary.right);
+            if (strcmp(node->as.binary.op, "&&") == 0 || strcmp(node->as.binary.op, "||") == 0) {
+                analyze_own_node(stack, node->as.binary.left);
+                stack->in_condition++;
+                analyze_own_node(stack, node->as.binary.right);
+                stack->in_condition--;
+            } else {
+                analyze_own_node(stack, node->as.binary.left);
+                analyze_own_node(stack, node->as.binary.right);
+            }
             break;
         case NODE_UNARY:
             analyze_own_node(stack, node->as.unary.operand);
@@ -1867,6 +2782,7 @@ static void analyze_ownership(AstNode *program, AstArena *arena) {
 }
 
 void analyze_scopes(AstNode *program, AstArena *arena) {
+    s_current_program = program;
     ScopeStack stack;
     stack.depth = 0;
     stack.arena = arena;

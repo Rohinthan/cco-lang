@@ -18,12 +18,46 @@ typedef enum {
     TY_ENUM
 } Type;
 
+typedef enum {
+    TYPEDESC_PRIMITIVE,
+    TYPEDESC_CLASS,
+    TYPEDESC_ENUM,
+    TYPEDESC_NAMED,
+    TYPEDESC_ARRAY,
+    TYPEDESC_MAP
+} TypeDescKind;
+
+typedef struct TypeDesc TypeDesc;
+
+struct TypeDesc {
+    TypeDescKind kind;
+    union {
+        struct {
+            TypeDesc *elem_type;
+        } array_desc;
+
+        struct {
+            TypeDesc *key_type;
+            TypeDesc *val_type;
+        } map_desc;
+
+        struct {
+            const char *name;
+        } named_desc;
+
+        struct {
+            Type primitive_kind;
+        } primitive_desc;
+    } as;
+};
+
 typedef struct RefRelease {
     char *var_name;
     char *class_name;
     bool is_array;
     bool is_map;
     Type key_type;
+    TypeDesc *type_desc;
 } RefRelease;
 
 typedef enum {
@@ -97,6 +131,8 @@ struct AstNode {
     // Scope Analysis annotations (ownership based)
     RefRelease *releases_to_emit; // Class vars to emit _free() for
     int releases_count;
+    char **nulls_to_emit;         // Variable names to set to NULL after move (drop flag)
+    int nulls_count;
     bool is_moved_from;           // True if variable was moved out
     int move_line;                // Line number where move occurred
 
@@ -182,6 +218,7 @@ struct AstNode {
             bool is_map;
             Type key_type;
             char *class_name;
+            TypeDesc *type_desc;
         } field;
 
         struct {
@@ -194,6 +231,7 @@ struct AstNode {
             Type *param_key_types;
             char **param_class_names;
             bool *param_is_borrowed;
+            TypeDesc **param_type_descs;
             int *param_lines;
             int *param_cols;
             int param_count;
@@ -202,6 +240,7 @@ struct AstNode {
             bool return_is_map;
             Type return_key_type;
             char *return_class_name;
+            TypeDesc *return_type_desc;
             bool returns_heap_pointer;
             AstNode *body;
         } method;
@@ -221,6 +260,7 @@ struct AstNode {
             Type *param_key_types;
             char **param_class_names;
             bool *param_is_borrowed;
+            TypeDesc **param_type_descs;
             int *param_lines;
             int *param_cols;
             int param_count;
@@ -229,6 +269,7 @@ struct AstNode {
             bool return_is_map;
             Type return_key_type;
             char *return_class_name;
+            TypeDesc *return_type_desc;
         } interface_method;
 
         struct {
@@ -247,6 +288,7 @@ struct AstNode {
             bool *param_is_borrowed;
             bool *param_is_impl_trait;
             char **param_impl_trait_names;
+            TypeDesc **param_type_descs;
             int *param_lines;
             int *param_cols;
             int param_count;
@@ -255,6 +297,7 @@ struct AstNode {
             bool return_is_map;
             Type return_key_type;
             char *return_class_name;
+            TypeDesc *return_type_desc;
             bool returns_heap_pointer;
             bool is_operator;
             char *operator_symbol;
@@ -279,6 +322,7 @@ struct AstNode {
             AstNode *value;
             bool retain_rhs;
             bool has_explicit_type;
+            TypeDesc *type_desc;
         } let;
 
         struct {
@@ -293,6 +337,7 @@ struct AstNode {
             char *class_name;
             bool retain_rhs;
             bool release_old;
+            TypeDesc *type_desc;
         } assign;
 
         struct {
@@ -302,6 +347,9 @@ struct AstNode {
             char *field_class_name;
             bool retain_rhs;
             bool release_old;
+            bool field_is_array;
+            bool field_is_map;
+            TypeDesc *field_type_desc;
         } member_assign;
 
         struct {
@@ -418,6 +466,7 @@ struct AstNode {
             bool is_list;
             bool is_map;
             Type key_type;
+            TypeDesc *type_desc;
         } alloc;
 
         struct {
@@ -441,5 +490,15 @@ char *arena_strdup(AstArena *arena, const char *str);
 void **arena_alloc_array(AstArena *arena, int count, size_t elem_size);
 
 const char *type_to_string(Type type);
+
+// TypeDesc constructors and operations
+TypeDesc *type_desc_primitive(AstArena *arena, Type primitive);
+TypeDesc *type_desc_named(AstArena *arena, const char *name);
+TypeDesc *type_desc_array(AstArena *arena, TypeDesc *elem_type);
+TypeDesc *type_desc_map(AstArena *arena, TypeDesc *key_type, TypeDesc *val_type);
+bool type_desc_equals(const TypeDesc *a, const TypeDesc *b);
+bool type_desc_is_compatible(const TypeDesc *expected, const TypeDesc *actual);
+char *type_desc_to_string(AstArena *arena, const TypeDesc *td);
+TypeDesc *type_desc_clone(AstArena *arena, const TypeDesc *td);
 
 #endif // AST_H

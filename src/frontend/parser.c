@@ -44,8 +44,120 @@ static void error_at(Token token, const char *message) {
     fatal_parser_error(token.line, token.col, tok_str, message);
 }
 
+static Token consume_semicolon(Parser *p, const char *stmt_desc) {
+    if (check(p, TOKEN_SEMICOLON)) {
+        Token semi = advance(p);
+        while (check(p, TOKEN_SEMICOLON)) {
+            advance(p);
+        }
+        return semi;
+    }
+
+    Token prev = (p->current > 0) ? previous(p) : (Token){0};
+    Token next = peek(p);
+
+    if (stmt_desc && strcmp(stmt_desc, "for condition") == 0) {
+        // In for (init; cond; step), semicolons are mandatory delimiters separating clauses
+    } else {
+        // Statement termination: newline between prev and next, closing brace, or EOF
+        if (next.line > prev.line || next.type == TOKEN_RBRACE || next.type == TOKEN_EOF) {
+            return (Token){0};
+        }
+    }
+
+    Diagnostic diag;
+    memset(&diag, 0, sizeof(diag));
+    diag.severity = DIAG_ERROR;
+    diag.code = "E1001";
+
+    static char msg[256];
+    if (stmt_desc && stmt_desc[0] != '\0') {
+        snprintf(msg, sizeof(msg), "expected ';' after %s", stmt_desc);
+    } else {
+        snprintf(msg, sizeof(msg), "expected ';'");
+    }
+    diag.message = msg;
+
+    // Anchor primary location to the end of the previous statement token
+    diag.primary_loc.filename = get_error_filename();
+    diag.primary_loc.line = prev.end_line > 0 ? prev.end_line : (prev.line > 0 ? prev.line : next.line);
+    diag.primary_loc.col = prev.end_col > 0 ? prev.end_col : (prev.col > 0 ? (prev.col + (int)strlen(prev.lexeme ? prev.lexeme : "")) : next.col);
+    diag.primary_label = "expected ';' at the end of this statement";
+
+    static char help_buf[128];
+    if (prev.lexeme && prev.lexeme[0] != '\0') {
+        snprintf(help_buf, sizeof(help_buf), "add ';' after `%s`", prev.lexeme);
+        diag.help = help_buf;
+    } else {
+        diag.help = "add ';' here";
+    }
+
+    if (next.type == TOKEN_EOF) {
+        diag.note = "reached end of file before statement was terminated with ';'";
+    } else if (next.line > prev.line) {
+        diag.secondary_loc.filename = get_error_filename();
+        diag.secondary_loc.line = next.line;
+        diag.secondary_loc.col = next.col;
+        diag.secondary_note = "next statement begins here";
+        diag.secondary_label = "next statement starts here";
+    } else {
+        diag.secondary_loc.filename = get_error_filename();
+        diag.secondary_loc.line = next.line;
+        diag.secondary_loc.col = next.col;
+        diag.secondary_note = "next token starts here on the same line";
+        diag.secondary_label = "unexpected token";
+    }
+
+    emit_diagnostic(&diag);
+    return (Token){0};
+}
+
 static Token consume(Parser *p, TokenType type, const char *message) {
     if (check(p, type)) return advance(p);
+
+    if (type == TOKEN_SEMICOLON) {
+        const char *desc = "statement";
+        const char *prefix = "Expected ';' after ";
+        size_t plen = strlen(prefix);
+        if (strncmp(message, prefix, plen) == 0) {
+            desc = message + plen;
+        }
+        return consume_semicolon(p, desc);
+    }
+
+    if (type == TOKEN_RPAREN || type == TOKEN_RBRACE || type == TOKEN_RBRACKET) {
+        Token prev = (p->current > 0) ? previous(p) : (Token){0};
+        Token next = peek(p);
+        Diagnostic diag;
+        memset(&diag, 0, sizeof(diag));
+        diag.severity = DIAG_ERROR;
+        diag.code = "E1003";
+        const char *delim = (type == TOKEN_RPAREN) ? ")" : ((type == TOKEN_RBRACE) ? "}" : "]");
+        static char msg[256];
+        snprintf(msg, sizeof(msg), "expected '%s'", delim);
+        diag.message = msg;
+        diag.primary_loc.filename = get_error_filename();
+        diag.primary_loc.line = prev.end_line > 0 ? prev.end_line : prev.line;
+        diag.primary_loc.col = prev.end_col > 0 ? prev.end_col : (prev.col + (int)strlen(prev.lexeme ? prev.lexeme : ""));
+        static char label_buf[64];
+        snprintf(label_buf, sizeof(label_buf), "expected '%s' here", delim);
+        diag.primary_label = label_buf;
+        static char help_buf[64];
+        snprintf(help_buf, sizeof(help_buf), "add '%s' here", delim);
+        diag.help = help_buf;
+        if (next.line > prev.line || next.type == TOKEN_EOF) {
+            diag.secondary_note = (next.type == TOKEN_EOF) ? "reached end of file without closing delimiter" : "closing delimiter missing before this statement";
+            if (next.type != TOKEN_EOF) {
+                diag.secondary_loc.filename = get_error_filename();
+                diag.secondary_loc.line = next.line;
+                diag.secondary_loc.col = next.col;
+                diag.secondary_label = "next statement begins here";
+            }
+        }
+        emit_diagnostic(&diag);
+        return (Token){0};
+    }
+
     error_at(peek(p), message);
     return (Token){0};
 }
@@ -63,15 +175,12 @@ static AstNode *parse_expr(Parser *p);
 static AstNode *parse_block(Parser *p);
 static AstNode *parse_statement(Parser *p);
 
-static Type parse_type_full(Parser *p, char **out_class_name, bool *out_is_borrowed, bool *out_is_array, bool *out_is_map, Type *out_key_type, bool *out_is_impl_trait, bool allow_self, bool allow_impl) {
-    if (out_class_name) *out_class_name = NULL;
+static TypeDesc *parse_type_desc(Parser *p, bool *out_is_borrowed, bool *out_is_impl_trait, bool allow_self, bool allow_impl) {
     if (out_is_borrowed) *out_is_borrowed = false;
-    if (out_is_array) *out_is_array = false;
-    if (out_is_map) *out_is_map = false;
-    if (out_key_type) *out_key_type = TY_INT;
     if (out_is_impl_trait) *out_is_impl_trait = false;
 
     bool is_borrowed = match(p, TOKEN_AMP);
+    if (out_is_borrowed) *out_is_borrowed = is_borrowed;
 
     if (match(p, TOKEN_IMPL)) {
         if (!allow_impl) {
@@ -79,18 +188,18 @@ static Type parse_type_full(Parser *p, char **out_class_name, bool *out_is_borro
         }
         Token iface_tok = consume(p, TOKEN_IDENT, "Expected interface name after 'impl'");
         if (out_is_impl_trait) *out_is_impl_trait = true;
-        if (out_class_name) *out_class_name = arena_strdup(p->arena, iface_tok.lexeme);
-        if (out_is_borrowed) *out_is_borrowed = is_borrowed;
-        return TY_CLASS;
+        return type_desc_named(p->arena, iface_tok.lexeme);
     }
+
+    TypeDesc *base = NULL;
 
     if (match(p, TOKEN_MAP)) {
         consume(p, TOKEN_LBRACKET, "Expected '[' after 'map'");
-        Type key_t = TY_INT;
+        TypeDesc *key_desc = NULL;
         if (match(p, TOKEN_TYPE_INT)) {
-            key_t = TY_INT;
+            key_desc = type_desc_primitive(p->arena, TY_INT);
         } else if (match(p, TOKEN_TYPE_STRING)) {
-            key_t = TY_STRING;
+            key_desc = type_desc_primitive(p->arena, TY_STRING);
         } else {
             Token err_tok = peek(p);
             const char *got_name = err_tok.lexeme ? err_tok.lexeme : "unknown";
@@ -115,51 +224,113 @@ static Type parse_type_full(Parser *p, char **out_class_name, bool *out_is_borro
         }
         consume(p, TOKEN_RBRACKET, "Expected ']' after map key type");
 
-        Type val_t = parse_type_full(p, out_class_name, out_is_borrowed, out_is_array, NULL, NULL, NULL, allow_self, false);
-        if (out_is_map) *out_is_map = true;
-        if (out_key_type) *out_key_type = key_t;
-        return val_t;
-    }
-
-    Type t = TY_VOID;
-    if (match(p, TOKEN_TYPE_INT)) t = TY_INT;
-    else if (match(p, TOKEN_TYPE_FLOAT)) t = TY_FLOAT;
-    else if (match(p, TOKEN_TYPE_CHAR)) t = TY_CHAR;
-    else if (match(p, TOKEN_TYPE_BOOL)) t = TY_BOOL;
-    else if (match(p, TOKEN_TYPE_STRING)) t = TY_STRING;
-    else if (match(p, TOKEN_TYPE_VOID)) t = TY_VOID;
-    else if (match(p, TOKEN_SELF_TYPE)) {
+        TypeDesc *val_desc = parse_type_desc(p, NULL, NULL, allow_self, false);
+        base = type_desc_map(p->arena, key_desc, val_desc);
+    } else if (match(p, TOKEN_LPAREN)) {
+        base = parse_type_desc(p, NULL, NULL, allow_self, allow_impl);
+        consume(p, TOKEN_RPAREN, "Expected ')' after parenthesized type");
+    } else if (match(p, TOKEN_TYPE_INT)) {
+        base = type_desc_primitive(p->arena, TY_INT);
+    } else if (match(p, TOKEN_TYPE_FLOAT)) {
+        base = type_desc_primitive(p->arena, TY_FLOAT);
+    } else if (match(p, TOKEN_TYPE_CHAR)) {
+        base = type_desc_primitive(p->arena, TY_CHAR);
+    } else if (match(p, TOKEN_TYPE_BOOL)) {
+        base = type_desc_primitive(p->arena, TY_BOOL);
+    } else if (match(p, TOKEN_TYPE_STRING)) {
+        base = type_desc_primitive(p->arena, TY_STRING);
+    } else if (match(p, TOKEN_TYPE_VOID)) {
+        base = type_desc_primitive(p->arena, TY_VOID);
+    } else if (match(p, TOKEN_SELF_TYPE)) {
         if (!allow_self) {
             fatal_parser_error(previous(p).line, previous(p).col, "Self", "'Self' is only allowed in interface method signatures");
         }
-        if (out_class_name) {
-            *out_class_name = arena_strdup(p->arena, "Self");
-        }
-        if (out_is_borrowed) {
-            *out_is_borrowed = is_borrowed;
-        }
-        t = TY_CLASS;
-    }
-    else if (match(p, TOKEN_IDENT)) {
+        base = type_desc_named(p->arena, "Self");
+    } else if (match(p, TOKEN_IDENT)) {
         Token tok = previous(p);
-        if (out_class_name) {
-            *out_class_name = arena_strdup(p->arena, tok.lexeme);
-        }
-        if (out_is_borrowed) {
-            *out_is_borrowed = is_borrowed;
-        }
-        t = TY_CLASS;
+        base = type_desc_named(p->arena, tok.lexeme);
     } else {
         error_at(peek(p), "Expected type specification (int, float, char, bool, string, void, or class identifier)");
-        return TY_VOID;
+        base = type_desc_primitive(p->arena, TY_VOID);
     }
 
-    if (match(p, TOKEN_LBRACKET)) {
+    while (match(p, TOKEN_LBRACKET)) {
         consume(p, TOKEN_RBRACKET, "Expected ']' after '[' in array type");
-        if (out_is_array) *out_is_array = true;
+        base = type_desc_array(p->arena, base);
     }
 
-    return t;
+    return base;
+}
+
+static Type type_desc_to_flat(TypeDesc *td, char **out_class_name, bool *out_is_array, bool *out_is_map, Type *out_key_type, AstArena *arena) {
+    if (out_class_name) *out_class_name = NULL;
+    if (out_is_array) *out_is_array = false;
+    if (out_is_map) *out_is_map = false;
+    if (out_key_type) *out_key_type = TY_INT;
+
+    if (!td) return TY_VOID;
+
+    if (td->kind == TYPEDESC_MAP) {
+        if (out_is_map) *out_is_map = true;
+        if (out_key_type && td->as.map_desc.key_type && td->as.map_desc.key_type->kind == TYPEDESC_PRIMITIVE) {
+            *out_key_type = td->as.map_desc.key_type->as.primitive_desc.primitive_kind;
+        }
+        TypeDesc *v = td->as.map_desc.val_type;
+        if (!v) return TY_VOID;
+        if (v->kind == TYPEDESC_PRIMITIVE) return v->as.primitive_desc.primitive_kind;
+        if (v->kind == TYPEDESC_CLASS || v->kind == TYPEDESC_ENUM || v->kind == TYPEDESC_NAMED) {
+            if (out_class_name) *out_class_name = arena_strdup(arena, v->as.named_desc.name);
+            return TY_CLASS;
+        }
+        if (v->kind == TYPEDESC_ARRAY) {
+            TypeDesc *elem = v->as.array_desc.elem_type;
+            if (elem && (elem->kind == TYPEDESC_CLASS || elem->kind == TYPEDESC_NAMED || elem->kind == TYPEDESC_ENUM)) {
+                if (out_class_name) *out_class_name = arena_strdup(arena, elem->as.named_desc.name);
+            }
+            return TY_CLASS;
+        }
+        if (v->kind == TYPEDESC_MAP) {
+            TypeDesc *inner_v = v->as.map_desc.val_type;
+            if (inner_v && (inner_v->kind == TYPEDESC_CLASS || inner_v->kind == TYPEDESC_NAMED || inner_v->kind == TYPEDESC_ENUM)) {
+                if (out_class_name) *out_class_name = arena_strdup(arena, inner_v->as.named_desc.name);
+            }
+            return TY_CLASS;
+        }
+        return TY_CLASS;
+    }
+
+    if (td->kind == TYPEDESC_ARRAY) {
+        if (out_is_array) *out_is_array = true;
+        TypeDesc *elem = td->as.array_desc.elem_type;
+        if (!elem) return TY_VOID;
+        if (elem->kind == TYPEDESC_PRIMITIVE) return elem->as.primitive_desc.primitive_kind;
+        if (elem->kind == TYPEDESC_CLASS || elem->kind == TYPEDESC_ENUM || elem->kind == TYPEDESC_NAMED) {
+            if (out_class_name) *out_class_name = arena_strdup(arena, elem->as.named_desc.name);
+            return TY_CLASS;
+        }
+        if (elem->kind == TYPEDESC_MAP) return TY_MAP;
+        return TY_CLASS;
+    }
+
+    if (td->kind == TYPEDESC_PRIMITIVE) {
+        return td->as.primitive_desc.primitive_kind;
+    }
+
+    if (td->kind == TYPEDESC_CLASS || td->kind == TYPEDESC_ENUM || td->kind == TYPEDESC_NAMED) {
+        if (out_class_name) *out_class_name = arena_strdup(arena, td->as.named_desc.name);
+        return TY_CLASS;
+    }
+
+    return TY_VOID;
+}
+
+static Type parse_type_full(Parser *p, char **out_class_name, bool *out_is_borrowed, bool *out_is_array, bool *out_is_map, Type *out_key_type, bool *out_is_impl_trait, bool allow_self, bool allow_impl) {
+    bool is_bor = false;
+    bool is_impl = false;
+    TypeDesc *td = parse_type_desc(p, &is_bor, &is_impl, allow_self, allow_impl);
+    if (out_is_borrowed) *out_is_borrowed = is_bor;
+    if (out_is_impl_trait) *out_is_impl_trait = is_impl;
+    return type_desc_to_flat(td, out_class_name, out_is_array, out_is_map, out_key_type, p->arena);
 }
 
 static Type parse_type_with_class(Parser *p, char **out_class_name, bool *out_is_borrowed, bool *out_is_array, bool *out_is_map, Type *out_key_type) {
@@ -371,7 +542,10 @@ static AstNode *parse_primary(Parser *p) {
         Token tok = previous(p);
         consume(p, TOKEN_LPAREN, "Expected '(' after 'alloc'");
         char *alloc_cls = NULL;
-        Type elem_type = parse_type_with_class(p, &alloc_cls, NULL, NULL, NULL, NULL);
+        bool is_arr = false, is_map = false;
+        Type key_t = TY_INT;
+        TypeDesc *elem_td = parse_type_desc(p, NULL, NULL, false, false);
+        Type elem_type = type_desc_to_flat(elem_td, &alloc_cls, &is_arr, &is_map, &key_t, p->arena);
         consume(p, TOKEN_COMMA, "Expected ',' after alloc type");
         AstNode *count_expr = parse_expr(p);
         consume(p, TOKEN_RPAREN, "Expected ')' after alloc count expression");
@@ -381,6 +555,7 @@ static AstNode *parse_primary(Parser *p) {
         node->as.alloc.class_name = alloc_cls;
         node->as.alloc.count_expr = count_expr;
         node->as.alloc.is_list = false;
+        node->as.alloc.type_desc = type_desc_array(p->arena, elem_td);
         return node;
     }
 
@@ -388,7 +563,10 @@ static AstNode *parse_primary(Parser *p) {
         Token tok = previous(p);
         consume(p, TOKEN_LPAREN, "Expected '(' after 'list_new'");
         char *alloc_cls = NULL;
-        Type elem_type = parse_type_with_class(p, &alloc_cls, NULL, NULL, NULL, NULL);
+        bool is_arr = false, is_map = false;
+        Type key_t = TY_INT;
+        TypeDesc *elem_td = parse_type_desc(p, NULL, NULL, false, false);
+        Type elem_type = type_desc_to_flat(elem_td, &alloc_cls, &is_arr, &is_map, &key_t, p->arena);
         consume(p, TOKEN_RPAREN, "Expected ')' after list_new type");
 
         AstNode *node = arena_alloc_node(p->arena, NODE_ALLOC, tok.line, tok.col);
@@ -397,6 +575,7 @@ static AstNode *parse_primary(Parser *p) {
         node->as.alloc.count_expr = NULL;
         node->as.alloc.is_list = true;
         node->as.alloc.is_map = false;
+        node->as.alloc.type_desc = type_desc_array(p->arena, elem_td);
         return node;
     }
 
@@ -404,10 +583,13 @@ static AstNode *parse_primary(Parser *p) {
         Token tok = previous(p);
         consume(p, TOKEN_LPAREN, "Expected '(' after 'map_new'");
         Type key_t = TY_INT;
+        TypeDesc *key_td = NULL;
         if (match(p, TOKEN_TYPE_INT)) {
             key_t = TY_INT;
+            key_td = type_desc_primitive(p->arena, TY_INT);
         } else if (match(p, TOKEN_TYPE_STRING)) {
             key_t = TY_STRING;
+            key_td = type_desc_primitive(p->arena, TY_STRING);
         } else {
             Token err_tok = peek(p);
             const char *got_name = err_tok.lexeme ? err_tok.lexeme : "unknown";
@@ -432,7 +614,10 @@ static AstNode *parse_primary(Parser *p) {
         }
         consume(p, TOKEN_COMMA, "Expected ',' after key type in map_new");
         char *alloc_cls = NULL;
-        Type elem_type = parse_type_with_class(p, &alloc_cls, NULL, NULL, NULL, NULL);
+        bool is_arr = false, is_map = false;
+        Type elem_key_t = TY_INT;
+        TypeDesc *val_td = parse_type_desc(p, NULL, NULL, false, false);
+        Type elem_type = type_desc_to_flat(val_td, &alloc_cls, &is_arr, &is_map, &elem_key_t, p->arena);
         consume(p, TOKEN_RPAREN, "Expected ')' after map_new types");
 
         AstNode *node = arena_alloc_node(p->arena, NODE_ALLOC, tok.line, tok.col);
@@ -442,6 +627,7 @@ static AstNode *parse_primary(Parser *p) {
         node->as.alloc.is_list = false;
         node->as.alloc.is_map = true;
         node->as.alloc.key_type = key_t;
+        node->as.alloc.type_desc = type_desc_map(p->arena, key_td, val_td);
         return node;
     }
 
@@ -554,7 +740,8 @@ static AstNode *parse_call_or_index(Parser *p) {
     while (true) {
         if (match(p, TOKEN_DOT)) {
             Token m_tok = consume(p, TOKEN_IDENT, "Expected field or method name after '.'");
-            if (match(p, TOKEN_LPAREN)) {
+            if (check(p, TOKEN_LPAREN) && peek(p).line == previous(p).line) {
+                advance(p);
                 // Method call: expr.method(args)
                 AstNode **args = NULL;
                 int arg_count = 0;
@@ -587,7 +774,8 @@ static AstNode *parse_call_or_index(Parser *p) {
                 m_node->as.member.member_name = arena_strdup(p->arena, m_tok.lexeme);
                 expr = m_node;
             }
-        } else if (match(p, TOKEN_LPAREN)) {
+        } else if (check(p, TOKEN_LPAREN) && peek(p).line == previous(p).line) {
+            advance(p);
             // Function call
             if (expr->type != NODE_IDENT) {
                 error_at(previous(p), "Expected identifier before '(' in call");
@@ -616,7 +804,8 @@ static AstNode *parse_call_or_index(Parser *p) {
             call_node->as.call.args = args;
             call_node->as.call.arg_count = arg_count;
             expr = call_node;
-        } else if (match(p, TOKEN_LBRACKET)) {
+        } else if (check(p, TOKEN_LBRACKET) && peek(p).line == previous(p).line) {
+            advance(p);
             // Array indexing
             AstNode *array_expr = expr;
             char *arr_name = NULL;
@@ -780,9 +969,11 @@ static AstNode *parse_let_stmt(Parser *p) {
     bool is_array = false;
     bool is_map = false;
     Type key_type = TY_INT;
+    TypeDesc *type_desc = NULL;
     if (match(p, TOKEN_COLON)) {
         has_explicit_type = true;
-        var_type = parse_type_with_class(p, &class_name, NULL, &is_array, &is_map, &key_type);
+        type_desc = parse_type_desc(p, NULL, NULL, false, false);
+        var_type = type_desc_to_flat(type_desc, &class_name, &is_array, &is_map, &key_type, p->arena);
     }
 
     consume(p, TOKEN_ASSIGN, "Expected '=' in variable declaration");
@@ -808,6 +999,7 @@ static AstNode *parse_let_stmt(Parser *p) {
     node->as.let.class_name = class_name;
     node->as.let.value = value;
     node->as.let.has_explicit_type = has_explicit_type;
+    node->as.let.type_desc = type_desc;
     return node;
 }
 
@@ -820,7 +1012,8 @@ static AstNode *parse_assign_or_expr_stmt(Parser *p) {
         bool is_array = false;
         bool is_map = false;
         Type key_type = TY_INT;
-        Type var_type = parse_type_with_class(p, &class_name, NULL, &is_array, &is_map, &key_type);
+        TypeDesc *type_desc = parse_type_desc(p, NULL, NULL, false, false);
+        Type var_type = type_desc_to_flat(type_desc, &class_name, &is_array, &is_map, &key_type, p->arena);
 
         consume(p, TOKEN_ASSIGN, "Expected '=' in variable declaration");
         AstNode *value = parse_expr(p);
@@ -835,6 +1028,7 @@ static AstNode *parse_assign_or_expr_stmt(Parser *p) {
         node->as.let.class_name = class_name;
         node->as.let.value = value;
         node->as.let.has_explicit_type = has_explicit_type;
+        node->as.let.type_desc = type_desc;
         return node;
     }
 
@@ -1060,11 +1254,25 @@ static AstNode *parse_for_stmt(Parser *p) {
     return node;
 }
 
+static bool is_statement_start_token(TokenType type) {
+    return type == TOKEN_LET || type == TOKEN_IF || type == TOKEN_WHILE ||
+           type == TOKEN_FOR || type == TOKEN_MATCH || type == TOKEN_RETURN ||
+           type == TOKEN_BREAK || type == TOKEN_CONTINUE || type == TOKEN_PRINT ||
+           type == TOKEN_FN || type == TOKEN_CLASS || type == TOKEN_STRUCT ||
+           type == TOKEN_ENUM || type == TOKEN_INTERFACE || type == TOKEN_IMPL ||
+           type == TOKEN_IMPORT;
+}
+
 static AstNode *parse_return_stmt(Parser *p) {
     Token tok = consume(p, TOKEN_RETURN, "Expected 'return'");
     AstNode *val = NULL;
     if (!check(p, TOKEN_SEMICOLON)) {
-        val = parse_expr(p);
+        Token next = peek(p);
+        bool is_bare = (next.line > tok.line) || (next.type == TOKEN_RBRACE) ||
+                       (next.type == TOKEN_EOF) || is_statement_start_token(next.type);
+        if (!is_bare) {
+            val = parse_expr(p);
+        }
     }
     consume(p, TOKEN_SEMICOLON, "Expected ';' after return");
 
@@ -1354,6 +1562,7 @@ static AstNode *parse_class(Parser *p) {
             char **param_class_names = NULL;
             bool *param_is_borrowed = NULL;
             bool *param_is_array = NULL;
+            TypeDesc **param_type_descs = NULL;
             int *param_lines = NULL;
             int *param_cols = NULL;
             int param_count = 0;
@@ -1370,6 +1579,7 @@ static AstNode *parse_class(Parser *p) {
                     param_class_names = (char **)arena_alloc_array(p->arena, param_cap, sizeof(char *));
                     param_is_borrowed = (bool *)arena_alloc_array(p->arena, param_cap, sizeof(bool));
                     param_is_array = (bool *)arena_alloc_array(p->arena, param_cap, sizeof(bool));
+                    param_type_descs = (TypeDesc **)arena_alloc_array(p->arena, param_cap, sizeof(TypeDesc *));
 
                     param_lines = (int *)arena_alloc_array(p->arena, param_cap, sizeof(int));
                     param_cols = (int *)arena_alloc_array(p->arena, param_cap, sizeof(int));
@@ -1379,6 +1589,7 @@ static AstNode *parse_class(Parser *p) {
                     param_class_names[0] = arena_strdup(p->arena, name_tok.lexeme);
                     param_is_borrowed[0] = true; // self is borrowed by default
                     param_is_array[0] = false;
+                    param_type_descs[0] = type_desc_named(p->arena, name_tok.lexeme);
                     param_lines[0] = self_tok.line;
                     param_cols[0] = self_tok.col;
                     param_count = 1;
@@ -1390,7 +1601,10 @@ static AstNode *parse_class(Parser *p) {
                             char *p_cls = NULL;
                             bool p_borrowed = false;
                             bool p_is_arr = false;
-                            Type p_type = parse_type_with_class(p, &p_cls, &p_borrowed, &p_is_arr, NULL, NULL);
+                            bool p_is_map = false;
+                            Type p_key_t = TY_INT;
+                            TypeDesc *p_td = parse_type_desc(p, &p_borrowed, NULL, false, false);
+                            Type p_type = type_desc_to_flat(p_td, &p_cls, &p_is_arr, &p_is_map, &p_key_t, p->arena);
 
                             if (param_count >= param_cap) {
                                 param_cap *= 2;
@@ -1399,6 +1613,7 @@ static AstNode *parse_class(Parser *p) {
                                 char **n_cls = (char **)arena_alloc_array(p->arena, param_cap, sizeof(char *));
                                 bool *n_bor = (bool *)arena_alloc_array(p->arena, param_cap, sizeof(bool));
                                 bool *n_arr = (bool *)arena_alloc_array(p->arena, param_cap, sizeof(bool));
+                                TypeDesc **n_tds = (TypeDesc **)arena_alloc_array(p->arena, param_cap, sizeof(TypeDesc *));
                                 int *n_lines = (int *)arena_alloc_array(p->arena, param_cap, sizeof(int));
                                 int *n_cols = (int *)arena_alloc_array(p->arena, param_cap, sizeof(int));
                                 memcpy(n_names, param_names, param_count * sizeof(char *));
@@ -1406,6 +1621,7 @@ static AstNode *parse_class(Parser *p) {
                                 memcpy(n_cls, param_class_names, param_count * sizeof(char *));
                                 memcpy(n_bor, param_is_borrowed, param_count * sizeof(bool));
                                 memcpy(n_arr, param_is_array, param_count * sizeof(bool));
+                                memcpy(n_tds, param_type_descs, param_count * sizeof(TypeDesc *));
                                 memcpy(n_lines, param_lines, param_count * sizeof(int));
                                 memcpy(n_cols, param_cols, param_count * sizeof(int));
                                 param_names = n_names;
@@ -1413,6 +1629,7 @@ static AstNode *parse_class(Parser *p) {
                                 param_class_names = n_cls;
                                 param_is_borrowed = n_bor;
                                 param_is_array = n_arr;
+                                param_type_descs = n_tds;
                                 param_lines = n_lines;
                                 param_cols = n_cols;
                             }
@@ -1421,6 +1638,7 @@ static AstNode *parse_class(Parser *p) {
                             param_class_names[param_count] = p_cls;
                             param_is_borrowed[param_count] = p_borrowed;
                             param_is_array[param_count] = p_is_arr;
+                            param_type_descs[param_count] = p_td;
                             param_lines[param_count] = p_name.line;
                             param_cols[param_count] = p_name.col;
                             param_count++;
@@ -1434,7 +1652,10 @@ static AstNode *parse_class(Parser *p) {
                         char *p_cls = NULL;
                         bool p_borrowed = false;
                         bool p_is_arr = false;
-                        Type p_type = parse_type_with_class(p, &p_cls, &p_borrowed, &p_is_arr, NULL, NULL);
+                        bool p_is_map = false;
+                        Type p_key_t = TY_INT;
+                        TypeDesc *p_td = parse_type_desc(p, &p_borrowed, NULL, false, false);
+                        Type p_type = type_desc_to_flat(p_td, &p_cls, &p_is_arr, &p_is_map, &p_key_t, p->arena);
 
                         if (param_count >= param_cap) {
                             param_cap = param_cap == 0 ? 4 : param_cap * 2;
@@ -1443,6 +1664,7 @@ static AstNode *parse_class(Parser *p) {
                             char **n_cls = (char **)arena_alloc_array(p->arena, param_cap, sizeof(char *));
                             bool *n_bor = (bool *)arena_alloc_array(p->arena, param_cap, sizeof(bool));
                             bool *n_arr = (bool *)arena_alloc_array(p->arena, param_cap, sizeof(bool));
+                            TypeDesc **n_tds = (TypeDesc **)arena_alloc_array(p->arena, param_cap, sizeof(TypeDesc *));
                             int *n_lines = (int *)arena_alloc_array(p->arena, param_cap, sizeof(int));
                             int *n_cols = (int *)arena_alloc_array(p->arena, param_cap, sizeof(int));
                             if (param_names) {
@@ -1451,6 +1673,7 @@ static AstNode *parse_class(Parser *p) {
                                 memcpy(n_cls, param_class_names, param_count * sizeof(char *));
                                 memcpy(n_bor, param_is_borrowed, param_count * sizeof(bool));
                                 if (param_is_array) memcpy(n_arr, param_is_array, param_count * sizeof(bool));
+                                if (param_type_descs) memcpy(n_tds, param_type_descs, param_count * sizeof(TypeDesc *));
                                 memcpy(n_lines, param_lines, param_count * sizeof(int));
                                 memcpy(n_cols, param_cols, param_count * sizeof(int));
                             }
@@ -1459,6 +1682,7 @@ static AstNode *parse_class(Parser *p) {
                             param_class_names = n_cls;
                             param_is_borrowed = n_bor;
                             param_is_array = n_arr;
+                            param_type_descs = n_tds;
                             param_lines = n_lines;
                             param_cols = n_cols;
                         }
@@ -1467,6 +1691,7 @@ static AstNode *parse_class(Parser *p) {
                         param_class_names[param_count] = p_cls;
                         param_is_borrowed[param_count] = p_borrowed;
                         param_is_array[param_count] = p_is_arr;
+                        param_type_descs[param_count] = p_td;
                         param_lines[param_count] = p_name.line;
                         param_cols[param_count] = p_name.col;
                         param_count++;
@@ -1480,7 +1705,8 @@ static AstNode *parse_class(Parser *p) {
             bool ret_is_arr = false;
             bool ret_is_map = false;
             Type ret_key_t = TY_INT;
-            Type ret_type = parse_type_with_class(p, &ret_cls, NULL, &ret_is_arr, &ret_is_map, &ret_key_t);
+            TypeDesc *ret_td = parse_type_desc(p, NULL, NULL, false, false);
+            Type ret_type = type_desc_to_flat(ret_td, &ret_cls, &ret_is_arr, &ret_is_map, &ret_key_t, p->arena);
             AstNode *body = NULL;
             if (match(p, TOKEN_ASSIGN)) {
                 AstNode *expr = parse_expr(p);
@@ -1506,6 +1732,7 @@ static AstNode *parse_class(Parser *p) {
             m_node->as.method.param_key_types = NULL;
             m_node->as.method.param_class_names = param_class_names;
             m_node->as.method.param_is_borrowed = param_is_borrowed;
+            m_node->as.method.param_type_descs = param_type_descs;
             m_node->as.method.param_lines = param_lines;
             m_node->as.method.param_cols = param_cols;
             m_node->as.method.param_count = param_count;
@@ -1514,6 +1741,7 @@ static AstNode *parse_class(Parser *p) {
             m_node->as.method.return_is_map = ret_is_map;
             m_node->as.method.return_key_type = ret_key_t;
             m_node->as.method.return_class_name = ret_cls;
+            m_node->as.method.return_type_desc = ret_td;
             m_node->as.method.body = body;
 
 
@@ -1532,7 +1760,8 @@ static AstNode *parse_class(Parser *p) {
             bool f_is_arr = false;
             bool f_is_map = false;
             Type f_key_type = TY_INT;
-            Type f_type = parse_type_with_class(p, &f_cls, NULL, &f_is_arr, &f_is_map, &f_key_type);
+            TypeDesc *f_td = parse_type_desc(p, NULL, NULL, false, false);
+            Type f_type = type_desc_to_flat(f_td, &f_cls, &f_is_arr, &f_is_map, &f_key_type, p->arena);
             consume(p, TOKEN_SEMICOLON, "Expected ';' after field declaration");
 
             AstNode *f_node = arena_alloc_node(p->arena, NODE_FIELD, f_name.line, f_name.col);
@@ -1542,6 +1771,7 @@ static AstNode *parse_class(Parser *p) {
             f_node->as.field.is_map = f_is_map;
             f_node->as.field.key_type = f_key_type;
             f_node->as.field.class_name = f_cls;
+            f_node->as.field.type_desc = f_td;
 
             if (field_count >= field_cap) {
                 field_cap = field_cap == 0 ? 4 : field_cap * 2;
@@ -1790,6 +2020,7 @@ static AstNode *parse_function(Parser *p) {
     bool *param_is_borrowed = NULL;
     bool *param_is_impl_trait = NULL;
     char **param_impl_trait_names = NULL;
+    TypeDesc **param_type_descs = NULL;
     int *param_lines = NULL;
     int *param_cols = NULL;
     int param_count = 0;
@@ -1805,7 +2036,8 @@ static AstNode *parse_function(Parser *p) {
             bool p_is_map = false;
             Type p_key_t = TY_INT;
             bool p_is_impl = false;
-            Type p_type = parse_type_full(p, &p_cls, &p_borrowed, &p_is_arr, &p_is_map, &p_key_t, &p_is_impl, false, true);
+            TypeDesc *p_td = parse_type_desc(p, &p_borrowed, &p_is_impl, false, true);
+            Type p_type = type_desc_to_flat(p_td, &p_cls, &p_is_arr, &p_is_map, &p_key_t, p->arena);
 
             if (param_count >= param_cap) {
                 param_cap = param_cap == 0 ? 4 : param_cap * 2;
@@ -1818,6 +2050,7 @@ static AstNode *parse_function(Parser *p) {
                 bool *new_bor = (bool *)arena_alloc_array(p->arena, param_cap, sizeof(bool));
                 bool *new_impl = (bool *)arena_alloc_array(p->arena, param_cap, sizeof(bool));
                 char **new_impl_names = (char **)arena_alloc_array(p->arena, param_cap, sizeof(char *));
+                TypeDesc **new_tds = (TypeDesc **)arena_alloc_array(p->arena, param_cap, sizeof(TypeDesc *));
                 int *new_lines = (int *)arena_alloc_array(p->arena, param_cap, sizeof(int));
                 int *new_cols = (int *)arena_alloc_array(p->arena, param_cap, sizeof(int));
                 if (param_names) {
@@ -1830,6 +2063,7 @@ static AstNode *parse_function(Parser *p) {
                     memcpy(new_bor, param_is_borrowed, param_count * sizeof(bool));
                     if (param_is_impl_trait) memcpy(new_impl, param_is_impl_trait, param_count * sizeof(bool));
                     if (param_impl_trait_names) memcpy(new_impl_names, param_impl_trait_names, param_count * sizeof(char *));
+                    if (param_type_descs) memcpy(new_tds, param_type_descs, param_count * sizeof(TypeDesc *));
                     memcpy(new_lines, param_lines, param_count * sizeof(int));
                     memcpy(new_cols, param_cols, param_count * sizeof(int));
                 }
@@ -1842,6 +2076,7 @@ static AstNode *parse_function(Parser *p) {
                 param_is_borrowed = new_bor;
                 param_is_impl_trait = new_impl;
                 param_impl_trait_names = new_impl_names;
+                param_type_descs = new_tds;
                 param_lines = new_lines;
                 param_cols = new_cols;
             }
@@ -1854,6 +2089,7 @@ static AstNode *parse_function(Parser *p) {
             param_is_borrowed[param_count] = p_borrowed;
             param_is_impl_trait[param_count] = p_is_impl;
             param_impl_trait_names[param_count] = p_is_impl ? p_cls : NULL;
+            param_type_descs[param_count] = p_td;
             param_lines[param_count] = p_name.line;
             param_cols[param_count] = p_name.col;
             param_count++;
@@ -1866,7 +2102,8 @@ static AstNode *parse_function(Parser *p) {
     bool ret_is_arr = false;
     bool ret_is_map = false;
     Type ret_key_t = TY_INT;
-    Type return_type = parse_type_with_class(p, &ret_cls, NULL, &ret_is_arr, &ret_is_map, &ret_key_t);
+    TypeDesc *ret_td = parse_type_desc(p, NULL, NULL, false, false);
+    Type return_type = type_desc_to_flat(ret_td, &ret_cls, &ret_is_arr, &ret_is_map, &ret_key_t, p->arena);
     AstNode *body = NULL;
     if (match(p, TOKEN_ASSIGN)) {
         AstNode *expr = parse_expr(p);
@@ -1895,6 +2132,7 @@ static AstNode *parse_function(Parser *p) {
     node->as.function.param_is_borrowed = param_is_borrowed;
     node->as.function.param_is_impl_trait = param_is_impl_trait;
     node->as.function.param_impl_trait_names = param_impl_trait_names;
+    node->as.function.param_type_descs = param_type_descs;
     node->as.function.param_lines = param_lines;
     node->as.function.param_cols = param_cols;
     node->as.function.param_count = param_count;
@@ -1903,6 +2141,7 @@ static AstNode *parse_function(Parser *p) {
     node->as.function.return_is_map = ret_is_map;
     node->as.function.return_key_type = ret_key_t;
     node->as.function.return_class_name = ret_cls;
+    node->as.function.return_type_desc = ret_td;
     node->as.function.body = body;
     return node;
 }
@@ -1930,6 +2169,7 @@ static AstNode *parse_interface(Parser *p) {
         bool *param_is_array = (bool *)arena_alloc_array(p->arena, param_cap, sizeof(bool));
         char **param_class_names = (char **)arena_alloc_array(p->arena, param_cap, sizeof(char *));
         bool *param_is_borrowed = (bool *)arena_alloc_array(p->arena, param_cap, sizeof(bool));
+        TypeDesc **param_type_descs = (TypeDesc **)arena_alloc_array(p->arena, param_cap, sizeof(TypeDesc *));
         int *param_lines = (int *)arena_alloc_array(p->arena, param_cap, sizeof(int));
         int *param_cols = (int *)arena_alloc_array(p->arena, param_cap, sizeof(int));
 
@@ -1938,6 +2178,7 @@ static AstNode *parse_interface(Parser *p) {
         param_class_names[0] = arena_strdup(p->arena, "Self");
         param_is_borrowed[0] = true;
         param_is_array[0] = false;
+        param_type_descs[0] = type_desc_named(p->arena, "Self");
         param_lines[0] = self_tok.line;
         param_cols[0] = self_tok.col;
         int param_count = 1;
@@ -1951,7 +2192,8 @@ static AstNode *parse_interface(Parser *p) {
                 bool p_is_arr = false;
                 bool p_is_map = false;
                 Type p_key_t = TY_INT;
-                Type p_type = parse_type_full(p, &p_cls, &p_borrowed, &p_is_arr, &p_is_map, &p_key_t, NULL, true, false);
+                TypeDesc *p_td = parse_type_desc(p, &p_borrowed, NULL, true, false);
+                Type p_type = type_desc_to_flat(p_td, &p_cls, &p_is_arr, &p_is_map, &p_key_t, p->arena);
 
                 if (param_count >= param_cap) {
                     param_cap = param_cap * 2;
@@ -1960,6 +2202,7 @@ static AstNode *parse_interface(Parser *p) {
                     bool *new_arr = (bool *)arena_alloc_array(p->arena, param_cap, sizeof(bool));
                     char **new_cls = (char **)arena_alloc_array(p->arena, param_cap, sizeof(char *));
                     bool *new_bor = (bool *)arena_alloc_array(p->arena, param_cap, sizeof(bool));
+                    TypeDesc **new_tds = (TypeDesc **)arena_alloc_array(p->arena, param_cap, sizeof(TypeDesc *));
                     int *new_lines = (int *)arena_alloc_array(p->arena, param_cap, sizeof(int));
                     int *new_cols = (int *)arena_alloc_array(p->arena, param_cap, sizeof(int));
                     memcpy(new_names, param_names, param_count * sizeof(char *));
@@ -1967,6 +2210,7 @@ static AstNode *parse_interface(Parser *p) {
                     memcpy(new_arr, param_is_array, param_count * sizeof(bool));
                     memcpy(new_cls, param_class_names, param_count * sizeof(char *));
                     memcpy(new_bor, param_is_borrowed, param_count * sizeof(bool));
+                    memcpy(new_tds, param_type_descs, param_count * sizeof(TypeDesc *));
                     memcpy(new_lines, param_lines, param_count * sizeof(int));
                     memcpy(new_cols, param_cols, param_count * sizeof(int));
                     param_names = new_names;
@@ -1974,6 +2218,7 @@ static AstNode *parse_interface(Parser *p) {
                     param_is_array = new_arr;
                     param_class_names = new_cls;
                     param_is_borrowed = new_bor;
+                    param_type_descs = new_tds;
                     param_lines = new_lines;
                     param_cols = new_cols;
                 }
@@ -1982,6 +2227,7 @@ static AstNode *parse_interface(Parser *p) {
                 param_is_array[param_count] = p_is_arr;
                 param_class_names[param_count] = p_cls;
                 param_is_borrowed[param_count] = p_borrowed;
+                param_type_descs[param_count] = p_td;
                 param_lines[param_count] = p_name.line;
                 param_cols[param_count] = p_name.col;
                 param_count++;
@@ -1996,7 +2242,8 @@ static AstNode *parse_interface(Parser *p) {
         bool ret_is_arr = false;
         bool ret_is_map = false;
         Type ret_key_t = TY_INT;
-        Type ret_type = parse_type_full(p, &ret_cls, &ret_borrowed, &ret_is_arr, &ret_is_map, &ret_key_t, NULL, true, false);
+        TypeDesc *ret_td = parse_type_desc(p, &ret_borrowed, NULL, true, false);
+        Type ret_type = type_desc_to_flat(ret_td, &ret_cls, &ret_is_arr, &ret_is_map, &ret_key_t, p->arena);
 
         consume(p, TOKEN_SEMICOLON, "Expected ';' after interface method signature");
 
@@ -2007,6 +2254,7 @@ static AstNode *parse_interface(Parser *p) {
         m_node->as.interface_method.param_is_array = param_is_array;
         m_node->as.interface_method.param_class_names = param_class_names;
         m_node->as.interface_method.param_is_borrowed = param_is_borrowed;
+        m_node->as.interface_method.param_type_descs = param_type_descs;
         m_node->as.interface_method.param_lines = param_lines;
         m_node->as.interface_method.param_cols = param_cols;
         m_node->as.interface_method.param_count = param_count;
@@ -2015,6 +2263,7 @@ static AstNode *parse_interface(Parser *p) {
         m_node->as.interface_method.return_is_map = ret_is_map;
         m_node->as.interface_method.return_key_type = ret_key_t;
         m_node->as.interface_method.return_class_name = ret_cls;
+        m_node->as.interface_method.return_type_desc = ret_td;
 
         if (method_count >= method_cap) {
             method_cap = method_cap == 0 ? 4 : method_cap * 2;
@@ -2152,6 +2401,7 @@ typedef struct InferVar {
     bool is_array;
     bool is_map;
     Type key_type;
+    TypeDesc *type_desc;
     int line;
     int col;
 } InferVar;
@@ -2183,9 +2433,10 @@ static InferVar *infer_scope_lookup(InferScope *s, const char *name) {
     return NULL;
 }
 
-static void infer_scope_add(AstArena *arena, InferScope *s, const char *name, Type type,
-                            const char *class_name, bool is_array, bool is_map, Type key_type,
-                            int line, int col) {
+static void infer_scope_add_td(AstArena *arena, InferScope *s, const char *name, Type type,
+                               const char *class_name, bool is_array, bool is_map, Type key_type,
+                               TypeDesc *type_desc,
+                               int line, int col) {
     if (s->count >= s->cap) {
         s->cap = s->cap == 0 ? 8 : s->cap * 2;
         InferVar *new_vars = (InferVar *)arena_alloc_array(arena, s->cap, sizeof(InferVar));
@@ -2200,9 +2451,16 @@ static void infer_scope_add(AstArena *arena, InferScope *s, const char *name, Ty
     s->vars[s->count].is_array = is_array;
     s->vars[s->count].is_map = is_map;
     s->vars[s->count].key_type = key_type;
+    s->vars[s->count].type_desc = type_desc;
     s->vars[s->count].line = line;
     s->vars[s->count].col = col;
     s->count++;
+}
+
+static void infer_scope_add(AstArena *arena, InferScope *s, const char *name, Type type,
+                            const char *class_name, bool is_array, bool is_map, Type key_type,
+                            int line, int col) {
+    infer_scope_add_td(arena, s, name, type, class_name, is_array, is_map, key_type, NULL, line, col);
 }
 
 static bool is_known_builtin_fn(const char *name) {
@@ -2216,6 +2474,8 @@ static bool is_known_builtin_fn(const char *name) {
            strcmp(name, "exit") == 0 ||
            strcmp(name, "file_exists") == 0 ||
            strcmp(name, "read_file") == 0 ||
+           strcmp(name, "read_file_checked") == 0 ||
+           strcmp(name, "io_last_error") == 0 ||
            strcmp(name, "read_line") == 0 ||
            strcmp(name, "input") == 0 ||
            strcmp(name, "write_file") == 0 ||
@@ -2258,9 +2518,18 @@ static bool is_known_builtin_fn(const char *name) {
            strcmp(name, "push") == 0 ||
            strcmp(name, "pop") == 0 ||
            strcmp(name, "net_listen") == 0 ||
+           strcmp(name, "net_listen_on") == 0 ||
+           strcmp(name, "net_connect") == 0 ||
+           strcmp(name, "net_last_error") == 0 ||
            strcmp(name, "net_accept") == 0 ||
            strcmp(name, "net_send") == 0 ||
+           strcmp(name, "net_send_bytes") == 0 ||
            strcmp(name, "net_recv") == 0 ||
+           strcmp(name, "net_recv_raw") == 0 ||
+           strcmp(name, "net_recv_http") == 0 ||
+           strcmp(name, "net_recv_bytes") == 0 ||
+           strcmp(name, "net_shutdown") == 0 ||
+           strcmp(name, "net_set_timeouts") == 0 ||
            strcmp(name, "net_close") == 0;
 }
 
@@ -2304,7 +2573,7 @@ static void check_expr_variables(AstArena *arena, AstNode *program, AstNode *fn,
                 snprintf(short_msg, sizeof(short_msg), "undefined variable '%s'", name);
                 const char *fn_path = expr->source_file ? expr->source_file : get_error_filename();
                 ErrorLocation primary = {fn_path, expr->line, expr->col};
-                print_formatted_error(short_msg, primary, "undefined variable", NULL, NULL, NULL, NULL);
+                print_formatted_error_code("E2001", short_msg, primary, "undefined variable", NULL, NULL, NULL, NULL);
                 exit(1);
             }
             break;
@@ -2316,11 +2585,42 @@ static void check_expr_variables(AstArena *arena, AstNode *program, AstNode *fn,
         case NODE_UNARY:
             check_expr_variables(arena, program, fn, scope, expr->as.unary.operand);
             break;
-        case NODE_CALL:
+        case NODE_CALL: {
+            const char *callee = expr->as.call.callee;
+            if (program && program->type == NODE_PROGRAM && program->as.program.import_count == 0) {
+                if (!is_defined_identifier(program, fn, scope, callee)) {
+                    char short_msg[256];
+                    snprintf(short_msg, sizeof(short_msg), "undefined function '%s'", callee);
+                    const char *fn_path = expr->source_file ? expr->source_file : get_error_filename();
+                    ErrorLocation primary = {fn_path, expr->line, expr->col};
+                    print_formatted_error_code("E2002", short_msg, primary, "undefined function", NULL, NULL, NULL, NULL);
+                    exit(1);
+                }
+            }
+            if (program && program->type == NODE_PROGRAM) {
+                for (int i = 0; i < program->as.program.count; i++) {
+                    AstNode *target_fn = program->as.program.functions[i];
+                    if (target_fn && target_fn->as.function.name && strcmp(target_fn->as.function.name, callee) == 0) {
+                        int expected = target_fn->as.function.param_count;
+                        int actual = expr->as.call.arg_count;
+                        if (expected != actual) {
+                            char short_msg[256];
+                            snprintf(short_msg, sizeof(short_msg), "function '%s' expects %d arguments, got %d", callee, expected, actual);
+                            const char *fn_path = expr->source_file ? expr->source_file : get_error_filename();
+                            ErrorLocation primary = {fn_path, expr->line, expr->col};
+                            ErrorLocation note_loc = {target_fn->source_file ? target_fn->source_file : get_error_filename(), target_fn->line, target_fn->col};
+                            print_formatted_error(short_msg, primary, "wrong argument count", "function defined here:", &note_loc, "declared with different parameter count", NULL);
+                            exit(1);
+                        }
+                        break;
+                    }
+                }
+            }
             for (int i = 0; i < expr->as.call.arg_count; i++) {
                 check_expr_variables(arena, program, fn, scope, expr->as.call.args[i]);
             }
             break;
+        }
         case NODE_METHOD_CALL:
             check_expr_variables(arena, program, fn, scope, expr->as.method_call.object);
             for (int i = 0; i < expr->as.method_call.arg_count; i++) {
@@ -2406,6 +2706,340 @@ static AstNode *find_let_in_node_rec(AstNode *node, const char *var_name) {
     return NULL;
 }
 
+static TypeDesc *infer_ast_expr_type_desc(AstArena *arena, AstNode *program, AstNode *fn, InferScope *scope, AstNode *expr) {
+    if (!expr) return NULL;
+
+    switch (expr->type) {
+        case NODE_LITERAL:
+            return type_desc_primitive(arena, expr->as.literal.lit_type);
+
+        case NODE_FSTRING:
+        case NODE_FSTRING_TEXT:
+            return type_desc_primitive(arena, TY_STRING);
+
+        case NODE_ALLOC:
+            if (expr->as.alloc.type_desc) {
+                return expr->as.alloc.type_desc;
+            }
+            if (expr->as.alloc.is_map) {
+                TypeDesc *k = type_desc_primitive(arena, expr->as.alloc.key_type);
+                TypeDesc *v = (expr->as.alloc.elem_type == TY_CLASS && expr->as.alloc.class_name)
+                    ? type_desc_named(arena, expr->as.alloc.class_name)
+                    : type_desc_primitive(arena, expr->as.alloc.elem_type);
+                return type_desc_map(arena, k, v);
+            } else {
+                TypeDesc *elem = (expr->as.alloc.elem_type == TY_CLASS && expr->as.alloc.class_name)
+                    ? type_desc_named(arena, expr->as.alloc.class_name)
+                    : type_desc_primitive(arena, expr->as.alloc.elem_type);
+                return type_desc_array(arena, elem);
+            }
+
+        case NODE_NEW:
+            return type_desc_named(arena, expr->as.new_expr.class_name);
+
+        case NODE_BINARY:
+            if (strcmp(expr->as.binary.op, "==") == 0 || strcmp(expr->as.binary.op, "!=") == 0 ||
+                strcmp(expr->as.binary.op, "<") == 0 || strcmp(expr->as.binary.op, ">") == 0 ||
+                strcmp(expr->as.binary.op, "<=") == 0 || strcmp(expr->as.binary.op, ">=") == 0 ||
+                strcmp(expr->as.binary.op, "&&") == 0 || strcmp(expr->as.binary.op, "||") == 0) {
+                return type_desc_primitive(arena, TY_BOOL);
+            }
+            {
+                TypeDesc *lt = infer_ast_expr_type_desc(arena, program, fn, scope, expr->as.binary.left);
+                TypeDesc *rt = infer_ast_expr_type_desc(arena, program, fn, scope, expr->as.binary.right);
+                if (lt && (lt->kind == TYPEDESC_CLASS || lt->kind == TYPEDESC_NAMED)) return lt;
+                if ((lt && lt->kind == TYPEDESC_PRIMITIVE && lt->as.primitive_desc.primitive_kind == TY_FLOAT) ||
+                    (rt && rt->kind == TYPEDESC_PRIMITIVE && rt->as.primitive_desc.primitive_kind == TY_FLOAT)) {
+                    return type_desc_primitive(arena, TY_FLOAT);
+                }
+                return type_desc_primitive(arena, TY_INT);
+            }
+
+        case NODE_UNARY:
+            if (strcmp(expr->as.unary.op, "!") == 0) {
+                return type_desc_primitive(arena, TY_BOOL);
+            }
+            return infer_ast_expr_type_desc(arena, program, fn, scope, expr->as.unary.operand);
+
+        case NODE_IDENT: {
+            const char *var_name = expr->as.ident.name;
+            if (scope) {
+                InferVar *v = infer_scope_lookup(scope, var_name);
+                if (v) {
+                    if (v->type_desc) return v->type_desc;
+                    if (v->is_map) {
+                        TypeDesc *k = type_desc_primitive(arena, v->key_type);
+                        TypeDesc *val = (v->type == TY_CLASS && v->class_name)
+                            ? type_desc_named(arena, v->class_name)
+                            : type_desc_primitive(arena, v->type);
+                        return type_desc_map(arena, k, val);
+                    }
+                    if (v->is_array) {
+                        TypeDesc *elem = (v->type == TY_CLASS && v->class_name)
+                            ? type_desc_named(arena, v->class_name)
+                            : type_desc_primitive(arena, v->type);
+                        return type_desc_array(arena, elem);
+                    }
+                    if (v->type == TY_CLASS && v->class_name) {
+                        return type_desc_named(arena, v->class_name);
+                    }
+                    return type_desc_primitive(arena, v->type);
+                }
+            }
+            if (fn && fn->type == NODE_FUNCTION) {
+                for (int p = 0; p < fn->as.function.param_count; p++) {
+                    if (strcmp(fn->as.function.param_names[p], var_name) == 0) {
+                        if (fn->as.function.param_type_descs && fn->as.function.param_type_descs[p]) {
+                            return fn->as.function.param_type_descs[p];
+                        }
+                        if (fn->as.function.param_is_array && fn->as.function.param_is_array[p]) {
+                            TypeDesc *elem = (fn->as.function.param_types[p] == TY_CLASS && fn->as.function.param_class_names && fn->as.function.param_class_names[p])
+                                ? type_desc_named(arena, fn->as.function.param_class_names[p])
+                                : type_desc_primitive(arena, fn->as.function.param_types[p]);
+                            return type_desc_array(arena, elem);
+                        }
+                        if (fn->as.function.param_types[p] == TY_CLASS && fn->as.function.param_class_names && fn->as.function.param_class_names[p]) {
+                            return type_desc_named(arena, fn->as.function.param_class_names[p]);
+                        }
+                        return type_desc_primitive(arena, fn->as.function.param_types[p]);
+                    }
+                }
+            } else if (fn && fn->type == NODE_METHOD) {
+                for (int p = 0; p < fn->as.method.param_count; p++) {
+                    if (strcmp(fn->as.method.param_names[p], var_name) == 0) {
+                        if (fn->as.method.param_type_descs && fn->as.method.param_type_descs[p]) {
+                            return fn->as.method.param_type_descs[p];
+                        }
+                        if (fn->as.method.param_is_array && fn->as.method.param_is_array[p]) {
+                            TypeDesc *elem = (fn->as.method.param_types[p] == TY_CLASS && fn->as.method.param_class_names && fn->as.method.param_class_names[p])
+                                ? type_desc_named(arena, fn->as.method.param_class_names[p])
+                                : type_desc_primitive(arena, fn->as.method.param_types[p]);
+                            return type_desc_array(arena, elem);
+                        }
+                        if (fn->as.method.param_types[p] == TY_CLASS && fn->as.method.param_class_names && fn->as.method.param_class_names[p]) {
+                            return type_desc_named(arena, fn->as.method.param_class_names[p]);
+                        }
+                        return type_desc_primitive(arena, fn->as.method.param_types[p]);
+                    }
+                }
+            }
+            AstNode *body = (fn && fn->type == NODE_FUNCTION) ? fn->as.function.body : (fn ? fn->as.method.body : NULL);
+            if (body) {
+                AstNode *st = find_let_in_node_rec(body, var_name);
+                if (st && st->type == NODE_LET) {
+                    if (st->as.let.type_desc) return st->as.let.type_desc;
+                    if (st->as.let.is_map) {
+                        TypeDesc *k = type_desc_primitive(arena, st->as.let.key_type);
+                        TypeDesc *val = (st->as.let.var_type == TY_CLASS && st->as.let.class_name)
+                            ? type_desc_named(arena, st->as.let.class_name)
+                            : type_desc_primitive(arena, st->as.let.var_type);
+                        return type_desc_map(arena, k, val);
+                    }
+                    if (st->as.let.is_array) {
+                        TypeDesc *elem = (st->as.let.var_type == TY_CLASS && st->as.let.class_name)
+                            ? type_desc_named(arena, st->as.let.class_name)
+                            : type_desc_primitive(arena, st->as.let.var_type);
+                        return type_desc_array(arena, elem);
+                    }
+                    if (st->as.let.var_type == TY_CLASS && st->as.let.class_name) {
+                        return type_desc_named(arena, st->as.let.class_name);
+                    }
+                    return type_desc_primitive(arena, st->as.let.var_type);
+                }
+            }
+            return NULL;
+        }
+
+        case NODE_CALL: {
+            const char *callee = expr->as.call.callee;
+            if (!callee) return NULL;
+            if (strcmp(callee, "get") == 0 && expr->as.call.arg_count == 2) {
+                TypeDesc *mtd = infer_ast_expr_type_desc(arena, program, fn, scope, expr->as.call.args[0]);
+                if (mtd && mtd->kind == TYPEDESC_MAP) {
+                    return mtd->as.map_desc.val_type;
+                }
+            }
+            if (strcmp(callee, "pop") == 0 && expr->as.call.arg_count == 1) {
+                TypeDesc *atd = infer_ast_expr_type_desc(arena, program, fn, scope, expr->as.call.args[0]);
+                if (atd && atd->kind == TYPEDESC_ARRAY) {
+                    return atd->as.array_desc.elem_type;
+                }
+            }
+            if (strcmp(callee, "push") == 0 && expr->as.call.arg_count >= 1) {
+                return infer_ast_expr_type_desc(arena, program, fn, scope, expr->as.call.args[0]);
+            }
+            if (strcmp(callee, "put") == 0 && expr->as.call.arg_count >= 1) {
+                return infer_ast_expr_type_desc(arena, program, fn, scope, expr->as.call.args[0]);
+            }
+            if (strcmp(callee, "remove") == 0 && expr->as.call.arg_count == 2) {
+                TypeDesc *mtd = infer_ast_expr_type_desc(arena, program, fn, scope, expr->as.call.args[0]);
+                if (mtd && mtd->kind == TYPEDESC_MAP) {
+                    return mtd->as.map_desc.val_type;
+                }
+            }
+            if (strcmp(callee, "concat") == 0 || strcmp(callee, "substring") == 0 || strcmp(callee, "char_to_string") == 0 ||
+                strcmp(callee, "to_string") == 0 || strcmp(callee, "read_file") == 0 || strcmp(callee, "read_file_checked") == 0 ||
+                strcmp(callee, "io_last_error") == 0 || strcmp(callee, "net_last_error") == 0 || strcmp(callee, "read_line") == 0 ||
+                strcmp(callee, "input") == 0 || strcmp(callee, "program_name") == 0 || strcmp(callee, "net_recv") == 0 ||
+                strcmp(callee, "net_recv_raw") == 0 || strcmp(callee, "net_recv_http") == 0) {
+                return type_desc_primitive(arena, TY_STRING);
+            }
+            if (strcmp(callee, "net_close") == 0 || strcmp(callee, "sleep_ms") == 0 || strcmp(callee, "random_seed") == 0 || strcmp(callee, "exit") == 0) {
+                return type_desc_primitive(arena, TY_VOID);
+            }
+            if (strcmp(callee, "args") == 0) {
+                return type_desc_array(arena, type_desc_primitive(arena, TY_STRING));
+            }
+            if (strcmp(callee, "sqrt") == 0 || strcmp(callee, "exp") == 0 || strcmp(callee, "log") == 0 || strcmp(callee, "sin") == 0 ||
+                strcmp(callee, "cos") == 0 || strcmp(callee, "tan") == 0 || strcmp(callee, "pow") == 0 || strcmp(callee, "abs_float") == 0 ||
+                strcmp(callee, "floor") == 0 || strcmp(callee, "ceil") == 0 || strcmp(callee, "min_float") == 0 || strcmp(callee, "max_float") == 0 ||
+                strcmp(callee, "to_float") == 0) {
+                return type_desc_primitive(arena, TY_FLOAT);
+            }
+            if (strcmp(callee, "equals") == 0 || strcmp(callee, "is_int") == 0 || strcmp(callee, "is_float") == 0 ||
+                strcmp(callee, "has") == 0 || strcmp(callee, "write_file") == 0 || strcmp(callee, "file_exists") == 0 || strcmp(callee, "write_bytes") == 0) {
+                return type_desc_primitive(arena, TY_BOOL);
+            }
+            if (strcmp(callee, "char_at") == 0) {
+                return type_desc_primitive(arena, TY_CHAR);
+            }
+            if (strcmp(callee, "to_int") == 0 || strcmp(callee, "len") == 0 || strcmp(callee, "abs_int") == 0 ||
+                strcmp(callee, "min_int") == 0 || strcmp(callee, "max_int") == 0 || strcmp(callee, "arg_count") == 0 ||
+                strcmp(callee, "random_int") == 0 || strcmp(callee, "net_listen") == 0 || strcmp(callee, "net_listen_on") == 0 ||
+                strcmp(callee, "net_connect") == 0 || strcmp(callee, "net_accept") == 0 || strcmp(callee, "net_send") == 0 ||
+                strcmp(callee, "net_send_bytes") == 0 || strcmp(callee, "net_recv_bytes") == 0 || strcmp(callee, "net_shutdown") == 0 ||
+                strcmp(callee, "net_set_timeouts") == 0 || strcmp(callee, "execute_cmd") == 0 || strcmp(callee, "system") == 0) {
+                return type_desc_primitive(arena, TY_INT);
+            }
+            if (program && program->type == NODE_PROGRAM) {
+                for (int f = 0; f < program->as.program.count; f++) {
+                    AstNode *target_fn = program->as.program.functions[f];
+                    if (target_fn && strcmp(target_fn->as.function.name, callee) == 0) {
+                        if (target_fn->as.function.return_type_desc) {
+                            return target_fn->as.function.return_type_desc;
+                        }
+                        if (target_fn->as.function.return_is_map) {
+                            TypeDesc *k = type_desc_primitive(arena, target_fn->as.function.return_key_type);
+                            TypeDesc *v = (target_fn->as.function.return_type == TY_CLASS && target_fn->as.function.return_class_name)
+                                ? type_desc_named(arena, target_fn->as.function.return_class_name)
+                                : type_desc_primitive(arena, target_fn->as.function.return_type);
+                            return type_desc_map(arena, k, v);
+                        }
+                        if (target_fn->as.function.return_is_array) {
+                            TypeDesc *elem = (target_fn->as.function.return_type == TY_CLASS && target_fn->as.function.return_class_name)
+                                ? type_desc_named(arena, target_fn->as.function.return_class_name)
+                                : type_desc_primitive(arena, target_fn->as.function.return_type);
+                            return type_desc_array(arena, elem);
+                        }
+                        if (target_fn->as.function.return_type == TY_CLASS && target_fn->as.function.return_class_name) {
+                            return type_desc_named(arena, target_fn->as.function.return_class_name);
+                        }
+                        return type_desc_primitive(arena, target_fn->as.function.return_type);
+                    }
+                }
+            }
+            return NULL;
+        }
+
+        case NODE_METHOD_CALL: {
+            TypeDesc *obj_td = infer_ast_expr_type_desc(arena, program, fn, scope, expr->as.method_call.object);
+            const char *cname = expr->as.method_call.target_class_name;
+            if (!cname && obj_td && (obj_td->kind == TYPEDESC_CLASS || obj_td->kind == TYPEDESC_NAMED)) {
+                cname = obj_td->as.named_desc.name;
+            }
+            const char *mname = expr->as.method_call.method_name;
+            if (cname && program && program->type == NODE_PROGRAM) {
+                for (int c = 0; c < program->as.program.class_count; c++) {
+                    AstNode *cls = program->as.program.classes[c];
+                    if (strcmp(cls->as.class_decl.name, cname) == 0) {
+                        for (int m = 0; m < cls->as.class_decl.method_count; m++) {
+                            AstNode *method = cls->as.class_decl.methods[m];
+                            if (strcmp(method->as.method.name, mname) == 0) {
+                                if (method->as.method.return_type_desc) {
+                                    return method->as.method.return_type_desc;
+                                }
+                                if (method->as.method.return_is_array) {
+                                    TypeDesc *elem = (method->as.method.return_type == TY_CLASS && method->as.method.return_class_name)
+                                        ? type_desc_named(arena, method->as.method.return_class_name)
+                                        : type_desc_primitive(arena, method->as.method.return_type);
+                                    return type_desc_array(arena, elem);
+                                }
+                                if (method->as.method.return_type == TY_CLASS && method->as.method.return_class_name) {
+                                    return type_desc_named(arena, method->as.method.return_class_name);
+                                }
+                                return type_desc_primitive(arena, method->as.method.return_type);
+                            }
+                        }
+                    }
+                }
+            }
+            return NULL;
+        }
+
+        case NODE_INDEX: {
+            TypeDesc *atd = infer_ast_expr_type_desc(arena, program, fn, scope, expr->as.index.array_expr ? expr->as.index.array_expr : expr);
+            if (atd && atd->kind == TYPEDESC_ARRAY) {
+                return atd->as.array_desc.elem_type;
+            }
+            return NULL;
+        }
+
+        case NODE_MEMBER: {
+            TypeDesc *obj_td = infer_ast_expr_type_desc(arena, program, fn, scope, expr->as.member.object);
+            const char *cname = expr->as.member.field_class_name;
+            if (!cname && obj_td && (obj_td->kind == TYPEDESC_CLASS || obj_td->kind == TYPEDESC_NAMED)) {
+                cname = obj_td->as.named_desc.name;
+            }
+            const char *mname = expr->as.member.member_name;
+            if (cname && program && program->type == NODE_PROGRAM) {
+                for (int s = 0; s < program->as.program.struct_count; s++) {
+                    AstNode *st = program->as.program.structs[s];
+                    if (strcmp(st->as.struct_decl.name, cname) == 0) {
+                        for (int f = 0; f < st->as.struct_decl.field_count; f++) {
+                            if (strcmp(st->as.struct_decl.fields[f]->as.struct_field_decl.name, mname) == 0) {
+                                return type_desc_primitive(arena, st->as.struct_decl.fields[f]->as.struct_field_decl.field_type);
+                            }
+                        }
+                    }
+                }
+                for (int c = 0; c < program->as.program.class_count; c++) {
+                    AstNode *cls = program->as.program.classes[c];
+                    if (strcmp(cls->as.class_decl.name, cname) == 0) {
+                        for (int f = 0; f < cls->as.class_decl.field_count; f++) {
+                            if (strcmp(cls->as.class_decl.fields[f]->as.field.name, mname) == 0) {
+                                if (cls->as.class_decl.fields[f]->as.field.type_desc) {
+                                    return cls->as.class_decl.fields[f]->as.field.type_desc;
+                                }
+                                if (cls->as.class_decl.fields[f]->as.field.is_map) {
+                                    TypeDesc *k = type_desc_primitive(arena, cls->as.class_decl.fields[f]->as.field.key_type);
+                                    TypeDesc *v = (cls->as.class_decl.fields[f]->as.field.type == TY_CLASS && cls->as.class_decl.fields[f]->as.field.class_name)
+                                        ? type_desc_named(arena, cls->as.class_decl.fields[f]->as.field.class_name)
+                                        : type_desc_primitive(arena, cls->as.class_decl.fields[f]->as.field.type);
+                                    return type_desc_map(arena, k, v);
+                                }
+                                if (cls->as.class_decl.fields[f]->as.field.is_array) {
+                                    TypeDesc *elem = (cls->as.class_decl.fields[f]->as.field.type == TY_CLASS && cls->as.class_decl.fields[f]->as.field.class_name)
+                                        ? type_desc_named(arena, cls->as.class_decl.fields[f]->as.field.class_name)
+                                        : type_desc_primitive(arena, cls->as.class_decl.fields[f]->as.field.type);
+                                    return type_desc_array(arena, elem);
+                                }
+                                if (cls->as.class_decl.fields[f]->as.field.type == TY_CLASS && cls->as.class_decl.fields[f]->as.field.class_name) {
+                                    return type_desc_named(arena, cls->as.class_decl.fields[f]->as.field.class_name);
+                                }
+                                return type_desc_primitive(arena, cls->as.class_decl.fields[f]->as.field.type);
+                            }
+                        }
+                    }
+                }
+            }
+            return NULL;
+        }
+
+        default:
+            return NULL;
+    }
+}
+
 static bool infer_ast_expr_type(AstArena *arena, AstNode *program, AstNode *fn, InferScope *scope, AstNode *expr, Type *out_type, char **out_class, bool *out_is_array, bool *out_is_map, Type *out_key_type) {
     *out_type = TY_INT;
     *out_class = NULL;
@@ -2414,6 +3048,12 @@ static bool infer_ast_expr_type(AstArena *arena, AstNode *program, AstNode *fn, 
     *out_key_type = TY_INT;
 
     if (!expr) return false;
+
+    TypeDesc *td = infer_ast_expr_type_desc(arena, program, fn, scope, expr);
+    if (td) {
+        *out_type = type_desc_to_flat(td, out_class, out_is_array, out_is_map, out_key_type, arena);
+        return true;
+    }
 
     if (expr->type == NODE_LITERAL) {
         *out_type = expr->as.literal.lit_type;
@@ -2515,7 +3155,7 @@ static bool infer_ast_expr_type(AstArena *arena, AstNode *program, AstNode *fn, 
     }
     if (expr->type == NODE_CALL) {
         const char *callee = expr->as.call.callee;
-        if (strcmp(callee, "concat") == 0 || strcmp(callee, "substring") == 0 || strcmp(callee, "char_to_string") == 0 || strcmp(callee, "to_string") == 0 || strcmp(callee, "read_file") == 0 || strcmp(callee, "read_line") == 0 || strcmp(callee, "input") == 0 || strcmp(callee, "program_name") == 0 || strcmp(callee, "net_recv") == 0) {
+        if (strcmp(callee, "concat") == 0 || strcmp(callee, "substring") == 0 || strcmp(callee, "char_to_string") == 0 || strcmp(callee, "to_string") == 0 || strcmp(callee, "read_file") == 0 || strcmp(callee, "read_file_checked") == 0 || strcmp(callee, "io_last_error") == 0 || strcmp(callee, "net_last_error") == 0 || strcmp(callee, "read_line") == 0 || strcmp(callee, "input") == 0 || strcmp(callee, "program_name") == 0 || strcmp(callee, "net_recv") == 0 || strcmp(callee, "net_recv_raw") == 0 || strcmp(callee, "net_recv_http") == 0) {
             *out_type = TY_STRING;
             return true;
         }
@@ -2540,7 +3180,7 @@ static bool infer_ast_expr_type(AstArena *arena, AstNode *program, AstNode *fn, 
             *out_type = TY_CHAR;
             return true;
         }
-        if (strcmp(callee, "to_int") == 0 || strcmp(callee, "len") == 0 || strcmp(callee, "abs_int") == 0 || strcmp(callee, "min_int") == 0 || strcmp(callee, "max_int") == 0 || strcmp(callee, "arg_count") == 0 || strcmp(callee, "random_int") == 0 || strcmp(callee, "net_listen") == 0 || strcmp(callee, "net_accept") == 0 || strcmp(callee, "net_send") == 0 || strcmp(callee, "execute_cmd") == 0 || strcmp(callee, "system") == 0) {
+        if (strcmp(callee, "to_int") == 0 || strcmp(callee, "len") == 0 || strcmp(callee, "abs_int") == 0 || strcmp(callee, "min_int") == 0 || strcmp(callee, "max_int") == 0 || strcmp(callee, "arg_count") == 0 || strcmp(callee, "random_int") == 0 || strcmp(callee, "net_listen") == 0 || strcmp(callee, "net_listen_on") == 0 || strcmp(callee, "net_connect") == 0 || strcmp(callee, "net_accept") == 0 || strcmp(callee, "net_send") == 0 || strcmp(callee, "net_send_bytes") == 0 || strcmp(callee, "net_recv_bytes") == 0 || strcmp(callee, "net_shutdown") == 0 || strcmp(callee, "net_set_timeouts") == 0 || strcmp(callee, "execute_cmd") == 0 || strcmp(callee, "system") == 0) {
             *out_type = TY_INT;
             return true;
         }
@@ -2660,6 +3300,8 @@ static AstNode *desugar_stmt_node(AstArena *arena, AstNode *program, AstNode *fn
             check_expr_variables(arena, program, fn, scope, stmt->as.let.value);
         }
         if (!stmt->as.let.has_explicit_type) {
+            TypeDesc *inferred_td = infer_ast_expr_type_desc(arena, program, fn, scope, stmt->as.let.value);
+            stmt->as.let.type_desc = inferred_td;
             Type vt = TY_INT; char *vc = NULL; bool va = false, vm = false; Type vk = TY_INT;
             infer_ast_expr_type(arena, program, fn, scope, stmt->as.let.value, &vt, &vc, &va, &vm, &vk);
             stmt->as.let.var_type = vt;
@@ -2669,49 +3311,86 @@ static AstNode *desugar_stmt_node(AstArena *arena, AstNode *program, AstNode *fn
             stmt->as.let.key_type = vk;
         } else {
             if (stmt->as.let.value) {
-                Type val_t = TY_INT; char *val_c = NULL; bool val_a = false, val_m = false; Type val_k = TY_INT;
-                bool val_known = infer_ast_expr_type(arena, program, fn, scope, stmt->as.let.value, &val_t, &val_c, &val_a, &val_m, &val_k);
-                if (val_known) {
-                    bool mismatch = false;
-                    bool is_alloc = (stmt->as.let.value->type == NODE_ALLOC);
-                    bool is_literal = (stmt->as.let.value->type == NODE_LITERAL);
-                    if (stmt->as.let.var_type != val_t) {
-                        if (stmt->as.let.var_type == TY_FLOAT && val_t == TY_INT) {
-                            // int -> float promotion ok
-                        } else if (stmt->as.let.var_type == TY_INT && val_t == TY_FLOAT && !is_literal) {
-                            // float -> int truncation ok for expressions/variables, rejected for literals
-                        } else {
-                            mismatch = true;
-                        }
-                    } else if (!is_alloc && (stmt->as.let.is_array != val_a || stmt->as.let.is_map != val_m)) {
-                        mismatch = true;
-                    } else if (stmt->as.let.var_type == TY_CLASS && val_t == TY_CLASS) {
-                        if (stmt->as.let.class_name && val_c && strcmp(stmt->as.let.class_name, val_c) != 0) {
-                            mismatch = true;
+                bool is_alloc = (stmt->as.let.value->type == NODE_ALLOC);
+                TypeDesc *val_td = infer_ast_expr_type_desc(arena, program, fn, scope, stmt->as.let.value);
+                if (is_alloc && stmt->as.let.type_desc && val_td) {
+                    if (stmt->as.let.type_desc->kind != TYPEDESC_ARRAY && stmt->as.let.type_desc->kind != TYPEDESC_MAP) {
+                        if (val_td->kind == TYPEDESC_ARRAY && type_desc_is_compatible(stmt->as.let.type_desc, val_td->as.array_desc.elem_type)) {
+                            stmt->as.let.type_desc = val_td;
+                            stmt->as.let.is_array = true;
+                        } else if (val_td->kind == TYPEDESC_MAP && type_desc_is_compatible(stmt->as.let.type_desc, val_td->as.map_desc.val_type)) {
+                            stmt->as.let.type_desc = val_td;
+                            stmt->as.let.is_map = true;
+                            stmt->as.let.key_type = stmt->as.let.value->as.alloc.key_type;
                         }
                     }
-                    if (mismatch) {
+                }
+                if (stmt->as.let.type_desc && val_td) {
+                    if (!type_desc_is_compatible(stmt->as.let.type_desc, val_td)) {
                         char short_msg[256];
                         snprintf(short_msg, sizeof(short_msg), "type mismatch in variable declaration — '%s' is declared with an incompatible type", stmt->as.let.name);
                         const char *fn_path = stmt->source_file ? stmt->source_file : get_error_filename();
                         ErrorLocation primary = {fn_path, stmt->line, stmt->col};
-                        print_formatted_error(short_msg, primary, "type mismatch", NULL, NULL, NULL, NULL);
+                        print_formatted_error_code("E3001", short_msg, primary, "type mismatch", NULL, NULL, NULL, NULL);
                         exit(1);
                     }
-                    if (is_alloc) {
-                        if (stmt->as.let.value->as.alloc.is_map) {
-                            stmt->as.let.is_map = true;
-                            stmt->as.let.key_type = stmt->as.let.value->as.alloc.key_type;
-                        } else {
-                            stmt->as.let.is_array = true;
+                } else {
+                    Type val_t = TY_INT; char *val_c = NULL; bool val_a = false, val_m = false; Type val_k = TY_INT;
+                    bool val_known = infer_ast_expr_type(arena, program, fn, scope, stmt->as.let.value, &val_t, &val_c, &val_a, &val_m, &val_k);
+                    if (val_known) {
+                        bool mismatch = false;
+                        bool is_alloc = (stmt->as.let.value->type == NODE_ALLOC);
+                        bool is_literal = (stmt->as.let.value->type == NODE_LITERAL);
+                        if (stmt->as.let.var_type != val_t) {
+                            if (stmt->as.let.var_type == TY_FLOAT && val_t == TY_INT) {
+                                // int -> float promotion ok
+                            } else if (stmt->as.let.var_type == TY_INT && val_t == TY_FLOAT && !is_literal) {
+                                // float -> int truncation ok for expressions/variables, rejected for literals
+                            } else {
+                                mismatch = true;
+                            }
+                        } else if (!is_alloc && (stmt->as.let.is_array != val_a || stmt->as.let.is_map != val_m)) {
+                            mismatch = true;
+                        } else if (stmt->as.let.var_type == TY_CLASS && val_t == TY_CLASS) {
+                            if (stmt->as.let.class_name && val_c && strcmp(stmt->as.let.class_name, val_c) != 0) {
+                                mismatch = true;
+                            }
+                        }
+                        if (mismatch) {
+                            char short_msg[256];
+                            snprintf(short_msg, sizeof(short_msg), "type mismatch in variable declaration — '%s' is declared with an incompatible type", stmt->as.let.name);
+                            const char *fn_path = stmt->source_file ? stmt->source_file : get_error_filename();
+                            ErrorLocation primary = {fn_path, stmt->line, stmt->col};
+                            print_formatted_error_code("E3001", short_msg, primary, "type mismatch", NULL, NULL, NULL, NULL);
+                            exit(1);
+                        }
+                        if (is_alloc) {
+                            if (stmt->as.let.value->as.alloc.is_map) {
+                                stmt->as.let.is_map = true;
+                                stmt->as.let.key_type = stmt->as.let.value->as.alloc.key_type;
+                            } else {
+                                stmt->as.let.is_array = true;
+                            }
                         }
                     }
                 }
             }
         }
-        infer_scope_add(arena, scope, stmt->as.let.name, stmt->as.let.var_type,
+        for (int i = 0; i < scope->count; i++) {
+            if (strcmp(scope->vars[i].name, stmt->as.let.name) == 0) {
+                char short_msg[256];
+                snprintf(short_msg, sizeof(short_msg), "duplicate variable declaration '%s'", stmt->as.let.name);
+                const char *fn_path = stmt->source_file ? stmt->source_file : get_error_filename();
+                ErrorLocation primary = {fn_path, stmt->line, stmt->col};
+                ErrorLocation note_loc = {fn_path, scope->vars[i].line, scope->vars[i].col};
+                print_formatted_error_code("E2003", short_msg, primary, "redeclared here",
+                                           "variable first declared here:", &note_loc, "first declared here", NULL);
+                exit(1);
+            }
+        }
+        infer_scope_add_td(arena, scope, stmt->as.let.name, stmt->as.let.var_type,
                         stmt->as.let.class_name, stmt->as.let.is_array, stmt->as.let.is_map,
-                        stmt->as.let.key_type, stmt->line, stmt->col);
+                        stmt->as.let.key_type, stmt->as.let.type_desc, stmt->line, stmt->col);
         return stmt;
     }
 
@@ -2726,11 +3405,13 @@ static AstNode *desugar_stmt_node(AstArena *arena, AstNode *program, AstNode *fn
         if (!existing) {
             // First assignment in this lexical scope chain: DECLARATION!
             char *decl_name = arena_strdup(arena, name);
+            TypeDesc *inferred_td = infer_ast_expr_type_desc(arena, program, fn, scope, assign_val);
             Type vt = TY_INT; char *vc = NULL; bool va = false, vm = false; Type vk = TY_INT;
             infer_ast_expr_type(arena, program, fn, scope, assign_val, &vt, &vc, &va, &vm, &vk);
 
             stmt->type = NODE_LET;
             stmt->as.let.name = decl_name;
+            stmt->as.let.type_desc = inferred_td;
             stmt->as.let.var_type = vt;
             stmt->as.let.class_name = vc;
             stmt->as.let.is_array = va;
@@ -2740,34 +3421,51 @@ static AstNode *desugar_stmt_node(AstArena *arena, AstNode *program, AstNode *fn
             stmt->as.let.retain_rhs = false;
             stmt->as.let.has_explicit_type = false;
 
-            infer_scope_add(arena, scope, decl_name, vt, vc, va, vm, vk, stmt->line, stmt->col);
+            infer_scope_add_td(arena, scope, decl_name, vt, vc, va, vm, vk, inferred_td, stmt->line, stmt->col);
             return stmt;
         } else {
             // Subsequent assignment: REASSIGNMENT!
-            Type val_t = TY_INT; char *val_c = NULL; bool val_a = false, val_m = false; Type val_k = TY_INT;
-            bool val_known = infer_ast_expr_type(arena, program, fn, scope, stmt->as.assign.value, &val_t, &val_c, &val_a, &val_m, &val_k);
-
-            if (val_known) {
-                bool mismatch = false;
-                if (existing->type != val_t && !(existing->type == TY_FLOAT && val_t == TY_INT)) {
-                    mismatch = true;
-                } else if (existing->is_array != val_a || existing->is_map != val_m) {
-                    mismatch = true;
-                } else if (existing->type == TY_CLASS && val_t == TY_CLASS) {
-                    if (existing->class_name && val_c && strcmp(existing->class_name, val_c) != 0) {
-                        mismatch = true;
-                    }
-                }
-                if (mismatch) {
+            TypeDesc *val_td = infer_ast_expr_type_desc(arena, program, fn, scope, stmt->as.assign.value);
+            if (existing->type_desc && val_td) {
+                if (!type_desc_is_compatible(existing->type_desc, val_td)) {
+                    char *exp_str = type_desc_to_string(arena, existing->type_desc);
+                    char *act_str = type_desc_to_string(arena, val_td);
                     char short_msg[256];
                     snprintf(short_msg, sizeof(short_msg), "type mismatch in assignment — cannot assign value of type '%s' to variable '%s' of type '%s'",
-                             type_to_string(val_t), name, type_to_string(existing->type));
+                             act_str, name, exp_str);
                     const char *fn_path = stmt->source_file ? stmt->source_file : get_error_filename();
                     ErrorLocation primary = {fn_path, stmt->line, stmt->col};
                     ErrorLocation note_loc = {fn_path, existing->line, existing->col};
-                    print_formatted_error(short_msg, primary, "type mismatch in assignment",
+                    print_formatted_error_code("E3002", short_msg, primary, "type mismatch in assignment",
                                           "variable first declared here:", &note_loc, "first declared here", NULL);
                     exit(1);
+                }
+            } else {
+                Type val_t = TY_INT; char *val_c = NULL; bool val_a = false, val_m = false; Type val_k = TY_INT;
+                bool val_known = infer_ast_expr_type(arena, program, fn, scope, stmt->as.assign.value, &val_t, &val_c, &val_a, &val_m, &val_k);
+
+                if (val_known) {
+                    bool mismatch = false;
+                    if (existing->type != val_t && !(existing->type == TY_FLOAT && val_t == TY_INT)) {
+                        mismatch = true;
+                    } else if (existing->is_array != val_a || existing->is_map != val_m) {
+                        mismatch = true;
+                    } else if (existing->type == TY_CLASS && val_t == TY_CLASS) {
+                        if (existing->class_name && val_c && strcmp(existing->class_name, val_c) != 0) {
+                            mismatch = true;
+                        }
+                    }
+                    if (mismatch) {
+                        char short_msg[256];
+                        snprintf(short_msg, sizeof(short_msg), "type mismatch in assignment — cannot assign value of type '%s' to variable '%s' of type '%s'",
+                                 type_to_string(val_t), name, type_to_string(existing->type));
+                        const char *fn_path = stmt->source_file ? stmt->source_file : get_error_filename();
+                        ErrorLocation primary = {fn_path, stmt->line, stmt->col};
+                        ErrorLocation note_loc = {fn_path, existing->line, existing->col};
+                        print_formatted_error_code("E3002", short_msg, primary, "type mismatch in assignment",
+                                              "variable first declared here:", &note_loc, "first declared here", NULL);
+                        exit(1);
+                    }
                 }
             }
             return stmt;
@@ -2785,7 +3483,7 @@ static AstNode *desugar_stmt_node(AstArena *arena, AstNode *program, AstNode *fn
                 snprintf(short_msg, sizeof(short_msg), "undefined variable '%s'", target->as.ident.name);
                 const char *fn_path = target->source_file ? target->source_file : get_error_filename();
                 ErrorLocation primary = {fn_path, target->line, target->col};
-                print_formatted_error(short_msg, primary, "undefined variable", NULL, NULL, NULL, NULL);
+                print_formatted_error_code("E2001", short_msg, primary, "undefined variable", NULL, NULL, NULL, NULL);
                 exit(1);
             }
         } else {
@@ -2934,6 +3632,47 @@ static AstNode *desugar_stmt_node(AstArena *arena, AstNode *program, AstNode *fn
     if (stmt->type == NODE_RETURN) {
         if (stmt->as.return_stmt.value) {
             check_expr_variables(arena, program, fn, scope, stmt->as.return_stmt.value);
+            TypeDesc *ret_val_td = infer_ast_expr_type_desc(arena, program, fn, scope, stmt->as.return_stmt.value);
+            TypeDesc *expected_ret_td = NULL;
+            if (fn && fn->type == NODE_FUNCTION) expected_ret_td = fn->as.function.return_type_desc;
+            else if (fn && fn->type == NODE_METHOD) expected_ret_td = fn->as.method.return_type_desc;
+
+            if (expected_ret_td && ret_val_td) {
+                bool is_legacy_arr = (expected_ret_td->kind != TYPEDESC_ARRAY && ret_val_td->kind == TYPEDESC_ARRAY && type_desc_is_compatible(expected_ret_td, ret_val_td->as.array_desc.elem_type));
+                bool is_legacy_map = (expected_ret_td->kind != TYPEDESC_MAP && ret_val_td->kind == TYPEDESC_MAP && type_desc_is_compatible(expected_ret_td, ret_val_td->as.map_desc.val_type));
+                if (is_legacy_arr || is_legacy_map) {
+                    if (fn && fn->type == NODE_FUNCTION) {
+                        fn->as.function.return_type_desc = ret_val_td;
+                        if (is_legacy_arr) fn->as.function.return_is_array = true;
+                        if (is_legacy_map) {
+                            fn->as.function.return_is_map = true;
+                            fn->as.function.return_key_type = ret_val_td->as.map_desc.key_type ? (Type)ret_val_td->as.map_desc.key_type->as.primitive_desc.primitive_kind : TY_INT;
+                        }
+                    }
+                } else if (!type_desc_is_compatible(expected_ret_td, ret_val_td)) {
+                    char short_msg[256];
+                    char *exp_str = type_desc_to_string(arena, expected_ret_td);
+                    char *act_str = type_desc_to_string(arena, ret_val_td);
+                    snprintf(short_msg, sizeof(short_msg), "return type mismatch — expected %s, but returning %s", exp_str, act_str);
+                    const char *fn_path = stmt->source_file ? stmt->source_file : get_error_filename();
+                    ErrorLocation primary = {fn_path, stmt->line, stmt->col};
+                    ErrorLocation note_loc = {fn->source_file ? fn->source_file : get_error_filename(), fn->line, fn->col};
+                    print_formatted_error(short_msg, primary, "invalid return type", "function declared here:", &note_loc, "declared return type", NULL);
+                    exit(1);
+                }
+            } else if (fn && fn->type == NODE_FUNCTION && stmt->as.return_stmt.value->type == NODE_LITERAL) {
+                Type expr_t = stmt->as.return_stmt.value->as.literal.lit_type;
+                Type ret_t = fn->as.function.return_type;
+                if (ret_t != TY_VOID && expr_t != TY_VOID && expr_t != ret_t) {
+                    char short_msg[256];
+                    snprintf(short_msg, sizeof(short_msg), "return type mismatch — expected %s, but returning %s", type_to_string(ret_t), type_to_string(expr_t));
+                    const char *fn_path = stmt->source_file ? stmt->source_file : get_error_filename();
+                    ErrorLocation primary = {fn_path, stmt->line, stmt->col};
+                    ErrorLocation note_loc = {fn->source_file ? fn->source_file : get_error_filename(), fn->line, fn->col};
+                    print_formatted_error(short_msg, primary, "invalid return type", "function declared here:", &note_loc, "declared return type", NULL);
+                    exit(1);
+                }
+            }
         }
         return stmt;
     }
@@ -2960,13 +3699,14 @@ static void desugar_and_infer_program(AstArena *arena, AstNode *program) {
         if (fn && fn->as.function.body) {
             InferScope *root_scope = create_infer_scope(arena, NULL);
             for (int p = 0; p < fn->as.function.param_count; p++) {
-                infer_scope_add(arena, root_scope,
+                infer_scope_add_td(arena, root_scope,
                                 fn->as.function.param_names[p],
                                 fn->as.function.param_types[p],
                                 fn->as.function.param_class_names ? fn->as.function.param_class_names[p] : NULL,
                                 fn->as.function.param_is_array ? fn->as.function.param_is_array[p] : false,
                                 fn->as.function.param_is_map ? fn->as.function.param_is_map[p] : false,
                                 fn->as.function.param_key_types ? fn->as.function.param_key_types[p] : TY_INT,
+                                fn->as.function.param_type_descs ? fn->as.function.param_type_descs[p] : NULL,
                                 fn->as.function.param_lines ? fn->as.function.param_lines[p] : fn->line,
                                 fn->as.function.param_cols ? fn->as.function.param_cols[p] : fn->col);
             }
@@ -2980,13 +3720,14 @@ static void desugar_and_infer_program(AstArena *arena, AstNode *program) {
             if (mn && mn->as.method.body) {
                 InferScope *root_scope = create_infer_scope(arena, NULL);
                 for (int p = 0; p < mn->as.method.param_count; p++) {
-                    infer_scope_add(arena, root_scope,
+                    infer_scope_add_td(arena, root_scope,
                                     mn->as.method.param_names[p],
                                     mn->as.method.param_types[p],
                                     mn->as.method.param_class_names ? mn->as.method.param_class_names[p] : NULL,
                                     mn->as.method.param_is_array ? mn->as.method.param_is_array[p] : false,
                                     mn->as.method.param_is_map ? mn->as.method.param_is_map[p] : false,
                                     mn->as.method.param_key_types ? mn->as.method.param_key_types[p] : TY_INT,
+                                    mn->as.method.param_type_descs ? mn->as.method.param_type_descs[p] : NULL,
                                     mn->as.method.param_lines ? mn->as.method.param_lines[p] : mn->line,
                                     mn->as.method.param_cols ? mn->as.method.param_cols[p] : mn->col);
                 }
@@ -3116,6 +3857,12 @@ AstNode *parse_program(Parser *p) {
             }
             top_level_stmts[top_level_count++] = stmt;
         }
+    }
+
+    if (import_count == 0 && fn_count == 0 && class_count == 0 &&
+        struct_count == 0 && enum_count == 0 && interface_count == 0 &&
+        top_level_count == 0) {
+        fatal_parser_error_code("E1005", 1, 1, NULL, "source file contains no declarations or statements");
     }
 
     AstNode *prog = arena_alloc_node(p->arena, NODE_PROGRAM, 1, 1);

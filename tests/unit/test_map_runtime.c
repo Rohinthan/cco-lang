@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-#include "../../src/map_runtime.h"
+#include "map_runtime.h"
 #include <assert.h>
 #include <stdio.h>
 

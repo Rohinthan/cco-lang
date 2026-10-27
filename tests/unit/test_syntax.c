@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #define _POSIX_C_SOURCE 200809L
-#include "../../src/lexer.h"
-#include "../../src/ast.h"
-#include "../../src/parser.h"
-#include "../../src/module_resolver.h"
+#include "lexer.h"
+#include "ast.h"
+#include "parser.h"
+#include "module_resolver.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <assert.h>

@@ -1,6 +1,6 @@
 CC = gcc
-CFLAGS = -Wall -Wextra -Werror -pedantic-errors -std=c11 -Isrc
-SRC = src/errors.c src/lexer.c src/ast.c src/class_decl.c src/parser.c src/module_resolver.c src/trait_resolver.c src/scope_analysis.c src/codegen.c src/ir.c src/ir_verify.c src/ir_print.c src/ir_lower.c src/ir_codegen_c.c src/x86_64_target.c src/x86_64_regalloc.c src/x86_64_instr.c src/x86_64_encode.c src/x86_64_elf.c src/x86_64_codegen.c src/x86_64_link.c src/ir_opt.c src/ir_dominance.c src/ir_ssa.c src/ir_loop.c src/ir_ssa_opt.c src/ir_ipa.c src/ir_profile.c
+CFLAGS = -Wall -Wextra -Werror -pedantic-errors -std=c11 -Isrc -Isrc/common -Isrc/frontend -Isrc/ir -Isrc/backend/c11 -Isrc/backend/x86_64 -Isrc/runtime
+SRC = src/common/errors.c src/frontend/lexer.c src/frontend/ast.c src/frontend/class_decl.c src/frontend/parser.c src/frontend/module_resolver.c src/frontend/trait_resolver.c src/frontend/scope_analysis.c src/backend/c11/codegen.c src/ir/ir.c src/ir/ir_verify.c src/ir/ir_print.c src/ir/ir_lower.c src/ir/ir_codegen_c.c src/backend/x86_64/x86_64_target.c src/backend/x86_64/x86_64_regalloc.c src/backend/x86_64/x86_64_instr.c src/backend/x86_64/x86_64_encode.c src/backend/x86_64/x86_64_elf.c src/backend/x86_64/x86_64_codegen.c src/backend/x86_64/x86_64_link.c src/ir/ir_opt.c src/ir/ir_dominance.c src/ir/ir_ssa.c src/ir/ir_loop.c src/ir/ir_ssa_opt.c src/ir/ir_ipa.c src/ir/ir_profile.c
 MAIN_SRC = src/main.c
 LDFLAGS = -lm
 

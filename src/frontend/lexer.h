@@ -99,6 +99,8 @@ typedef struct {
     char *lexeme;
     int line;
     int col;
+    int end_line;
+    int end_col;
 } Token;
 
 typedef struct {

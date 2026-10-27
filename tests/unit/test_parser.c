@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-#include "../../src/lexer.h"
-#include "../../src/ast.h"
-#include "../../src/parser.h"
+#include "lexer.h"
+#include "ast.h"
+#include "parser.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <assert.h>

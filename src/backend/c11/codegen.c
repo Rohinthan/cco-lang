@@ -40,6 +40,18 @@ static void sb_append(StringBuffer *sb, const char *str) {
     sb->buffer[sb->length] = '\0';
 }
 
+static void sb_append_len(StringBuffer *sb, const char *str, size_t len) {
+    if (sb->length + len + 1 > sb->capacity) {
+        while (sb->length + len + 1 > sb->capacity) {
+            sb->capacity *= 2;
+        }
+        sb->buffer = realloc(sb->buffer, sb->capacity);
+    }
+    memcpy(sb->buffer + sb->length, str, len);
+    sb->length += len;
+    sb->buffer[sb->length] = '\0';
+}
+
 static void sb_appendf(StringBuffer *sb, const char *fmt, ...) {
     va_list args, args_copy;
     va_start(args, fmt);
@@ -61,7 +73,29 @@ typedef struct {
     AstNode *program;
     AstNode *current_function;
     ClassTable *ct;
+    char emitted_helpers[256][64];
+    int emitted_helper_count;
 } CodegenCtx;
+
+static bool helper_already_emitted(CodegenCtx *ctx, const char *name) {
+    if (!ctx || !name) return false;
+    int count = ctx->emitted_helper_count;
+    if (count < 0) return false;
+    if (count > 256) count = 256;
+    for (int i = 0; i < count; i++) {
+        if (strcmp(ctx->emitted_helpers[i], name) == 0) return true;
+    }
+    return false;
+}
+
+static void mark_helper_emitted(CodegenCtx *ctx, const char *name) {
+    if (!ctx || !name) return;
+    if (ctx->emitted_helper_count < 256) {
+        strncpy(ctx->emitted_helpers[ctx->emitted_helper_count], name, 63);
+        ctx->emitted_helpers[ctx->emitted_helper_count][63] = '\0';
+        ctx->emitted_helper_count++;
+    }
+}
 
 static bool is_struct_name(CodegenCtx *ctx, const char *name) {
     if (!ctx || !ctx->ct || !name) return false;
@@ -147,8 +181,47 @@ static const char *c_type_str_decl(CodegenCtx *ctx, Type t, const char *class_na
     return c_type_str_decl_full(ctx, t, class_name, is_array, false, is_heap_owner);
 }
 
+static const char *c_type_str_desc(CodegenCtx *ctx, const TypeDesc *td) {
+    if (!td) return "void *";
+    static char ring_buf[8][256];
+    static int ring_idx = 0;
+    char *buf = ring_buf[ring_idx++ % 8];
+    switch (td->kind) {
+        case TYPEDESC_PRIMITIVE:
+            switch (td->as.primitive_desc.primitive_kind) {
+                case TY_INT: return "int";
+                case TY_FLOAT: return "double";
+                case TY_CHAR: return "char";
+                case TY_BOOL: return "bool";
+                case TY_STRING: return "char *";
+                case TY_VOID: return "void";
+                default: return "int";
+            }
+        case TYPEDESC_CLASS:
+        case TYPEDESC_ENUM:
+        case TYPEDESC_NAMED: {
+            const char *name = td->as.named_desc.name ? td->as.named_desc.name : "void";
+            if (is_struct_name(ctx, name)) {
+                return name;
+            }
+            snprintf(buf, 256, "%s *", name);
+            return buf;
+        }
+        case TYPEDESC_MAP:
+            return "__cco_map *";
+        case TYPEDESC_ARRAY: {
+            const char *elem_s = c_type_str_desc(ctx, td->as.array_desc.elem_type);
+            snprintf(buf, 256, "%s *", elem_s);
+            return buf;
+        }
+        default:
+            return "void *";
+    }
+}
+
 static const char *get_expr_class_name(AstNode *program, AstNode *fn, AstNode *expr);
 static const char *find_ident_class_in_node(AstNode *program, AstNode *node, const char *var_name);
+static TypeDesc *get_expr_type_desc(CodegenCtx *ctx, AstNode *expr);
 
 static bool is_expr_pointer(CodegenCtx *ctx, AstNode *expr) {
     if (!expr) return true;
@@ -726,6 +799,9 @@ static bool find_ident_is_array_in_node(AstNode *program, AstNode *node, const c
     }
     if (node->type == NODE_LET) {
         if (strcmp(node->as.let.name, var_name) == 0) {
+            if (node->as.let.type_desc) {
+                return node->as.let.type_desc->kind == TYPEDESC_ARRAY;
+            }
             return node->as.let.is_array;
         }
         return false;
@@ -760,19 +836,25 @@ static bool find_ident_is_array_in_node(AstNode *program, AstNode *node, const c
 
 static bool infer_expr_is_array(AstNode *program, AstNode *fn, AstNode *expr) {
     if (!expr) return false;
-    if (expr->type == NODE_ALLOC) return true;
+    if (expr->type == NODE_ALLOC) return !expr->as.alloc.is_map;
 
     if (expr->type == NODE_IDENT && fn) {
         const char *var_name = expr->as.ident.name;
         if (fn->type == NODE_FUNCTION) {
             for (int p = 0; p < fn->as.function.param_count; p++) {
                 if (strcmp(fn->as.function.param_names[p], var_name) == 0) {
+                    if (fn->as.function.param_type_descs && fn->as.function.param_type_descs[p]) {
+                        return fn->as.function.param_type_descs[p]->kind == TYPEDESC_ARRAY;
+                    }
                     return fn->as.function.param_is_array ? fn->as.function.param_is_array[p] : false;
                 }
             }
         } else if (fn->type == NODE_METHOD) {
             for (int p = 0; p < fn->as.method.param_count; p++) {
                 if (strcmp(fn->as.method.param_names[p], var_name) == 0) {
+                    if (fn->as.method.param_type_descs && fn->as.method.param_type_descs[p]) {
+                        return fn->as.method.param_type_descs[p]->kind == TYPEDESC_ARRAY;
+                    }
                     return fn->as.method.param_is_array ? fn->as.method.param_is_array[p] : false;
                 }
             }
@@ -847,12 +929,53 @@ static bool infer_expr_is_map(AstNode *program, AstNode *fn, AstNode *expr) {
 
     if (expr->type == NODE_IDENT && fn) {
         const char *var_name = expr->as.ident.name;
+        if (fn->type == NODE_FUNCTION) {
+            for (int p = 0; p < fn->as.function.param_count; p++) {
+                if (strcmp(fn->as.function.param_names[p], var_name) == 0) {
+                    if (fn->as.function.param_type_descs && fn->as.function.param_type_descs[p]) {
+                        return fn->as.function.param_type_descs[p]->kind == TYPEDESC_MAP;
+                    }
+                    return fn->as.function.param_is_map ? fn->as.function.param_is_map[p] : false;
+                }
+            }
+        } else if (fn->type == NODE_METHOD) {
+            for (int p = 0; p < fn->as.method.param_count; p++) {
+                if (strcmp(fn->as.method.param_names[p], var_name) == 0) {
+                    if (fn->as.method.param_type_descs && fn->as.method.param_type_descs[p]) {
+                        return fn->as.method.param_type_descs[p]->kind == TYPEDESC_MAP;
+                    }
+                    return fn->as.method.param_is_map ? fn->as.method.param_is_map[p] : false;
+                }
+            }
+        }
         AstNode *body = (fn->type == NODE_FUNCTION) ? fn->as.function.body : (fn->type == NODE_METHOD ? fn->as.method.body : NULL);
         if (body && body->type == NODE_BLOCK) {
             for (int i = 0; i < body->as.block.count; i++) {
                 AstNode *stmt = body->as.block.stmts[i];
                 if (stmt->type == NODE_LET && strcmp(stmt->as.let.name, var_name) == 0) {
+                    if (stmt->as.let.type_desc) {
+                        return stmt->as.let.type_desc->kind == TYPEDESC_MAP;
+                    }
                     return stmt->as.let.is_map;
+                }
+            }
+        }
+    }
+    if (expr->type == NODE_MEMBER && program && program->type == NODE_PROGRAM) {
+        const char *mname = expr->as.member.member_name;
+        const char *cname = expr->as.member.field_class_name;
+        if (!cname) {
+            cname = get_expr_class_name(program, fn, expr->as.member.object);
+        }
+        if (cname) {
+            for (int c = 0; c < program->as.program.class_count; c++) {
+                AstNode *cls = program->as.program.classes[c];
+                if (strcmp(cls->as.class_decl.name, cname) == 0) {
+                    for (int f = 0; f < cls->as.class_decl.field_count; f++) {
+                        if (strcmp(cls->as.class_decl.fields[f]->as.field.name, mname) == 0) {
+                            return cls->as.class_decl.fields[f]->as.field.is_map;
+                        }
+                    }
                 }
             }
         }
@@ -874,6 +997,13 @@ static bool infer_expr_is_map(AstNode *program, AstNode *fn, AstNode *expr) {
 
 static Type get_map_key_type(CodegenCtx *ctx, AstNode *expr) {
     if (!expr) return TY_INT;
+    TypeDesc *td = get_expr_type_desc(ctx, expr);
+    if (td && td->kind == TYPEDESC_MAP && td->as.map_desc.key_type) {
+        if (td->as.map_desc.key_type->kind == TYPEDESC_PRIMITIVE && td->as.map_desc.key_type->as.primitive_desc.primitive_kind == TY_STRING) {
+            return TY_STRING;
+        }
+        return TY_INT;
+    }
     if (expr->type == NODE_ALLOC && expr->as.alloc.is_map) {
         return expr->as.alloc.key_type;
     }
@@ -925,6 +1055,15 @@ static Type get_map_key_type(CodegenCtx *ctx, AstNode *expr) {
 
 static Type get_map_val_type(CodegenCtx *ctx, AstNode *expr) {
     if (!expr) return TY_INT;
+    TypeDesc *td = get_expr_type_desc(ctx, expr);
+    if (td && td->kind == TYPEDESC_MAP && td->as.map_desc.val_type) {
+        TypeDesc *v = td->as.map_desc.val_type;
+        if (v->kind == TYPEDESC_PRIMITIVE) return (Type)v->as.primitive_desc.primitive_kind;
+        if (v->kind == TYPEDESC_CLASS) return TY_CLASS;
+        if (v->kind == TYPEDESC_ENUM) return TY_ENUM;
+        if (v->kind == TYPEDESC_MAP) return TY_MAP;
+        if (v->kind == TYPEDESC_ARRAY) return TY_CLASS;
+    }
     if (expr->type == NODE_ALLOC && expr->as.alloc.is_map) {
         return expr->as.alloc.elem_type;
     }
@@ -965,6 +1104,10 @@ static Type get_map_val_type(CodegenCtx *ctx, AstNode *expr) {
 
 static bool get_map_val_is_array(CodegenCtx *ctx, AstNode *expr) {
     if (!expr) return false;
+    TypeDesc *td = get_expr_type_desc(ctx, expr);
+    if (td && td->kind == TYPEDESC_MAP && td->as.map_desc.val_type) {
+        return td->as.map_desc.val_type->kind == TYPEDESC_ARRAY;
+    }
     if (expr->type == NODE_ALLOC) {
         return false;
     }
@@ -1005,6 +1148,22 @@ static bool get_map_val_is_array(CodegenCtx *ctx, AstNode *expr) {
 
 static const char *get_map_val_class_name(CodegenCtx *ctx, AstNode *expr) {
     if (!expr) return NULL;
+    TypeDesc *td = get_expr_type_desc(ctx, expr);
+    if (td && td->kind == TYPEDESC_MAP && td->as.map_desc.val_type) {
+        TypeDesc *v = td->as.map_desc.val_type;
+        if (v->kind == TYPEDESC_CLASS || v->kind == TYPEDESC_ENUM || v->kind == TYPEDESC_NAMED) {
+            return v->as.named_desc.name;
+        }
+        if (v->kind == TYPEDESC_ARRAY) {
+            TypeDesc *elem = v->as.array_desc.elem_type;
+            if (elem && (elem->kind == TYPEDESC_CLASS || elem->kind == TYPEDESC_ENUM || elem->kind == TYPEDESC_NAMED)) {
+                return elem->as.named_desc.name;
+            }
+            if (elem && elem->kind == TYPEDESC_PRIMITIVE && elem->as.primitive_desc.primitive_kind == TY_STRING) {
+                return "string";
+            }
+        }
+    }
     if (expr->type == NODE_ALLOC && expr->as.alloc.is_map) {
         return expr->as.alloc.class_name;
     }
@@ -1058,14 +1217,268 @@ static void emit_frees(CodegenCtx *ctx, AstNode *node) {
     }
 }
 
+static TypeDesc *get_expr_type_desc(CodegenCtx *ctx, AstNode *expr) {
+    if (!expr) return NULL;
+    if (expr->type == NODE_ALLOC && expr->as.alloc.type_desc) {
+        return expr->as.alloc.type_desc;
+    }
+    if (expr->type == NODE_IDENT && ctx->current_function) {
+        const char *var_name = expr->as.ident.name;
+        AstNode *fn = ctx->current_function;
+        if (fn->type == NODE_FUNCTION) {
+            for (int p = 0; p < fn->as.function.param_count; p++) {
+                if (strcmp(fn->as.function.param_names[p], var_name) == 0) {
+                    if (fn->as.function.param_type_descs) return fn->as.function.param_type_descs[p];
+                    break;
+                }
+            }
+        } else if (fn->type == NODE_METHOD) {
+            for (int p = 0; p < fn->as.method.param_count; p++) {
+                if (strcmp(fn->as.method.param_names[p], var_name) == 0) {
+                    if (fn->as.method.param_type_descs) return fn->as.method.param_type_descs[p];
+                    break;
+                }
+            }
+        }
+        AstNode *body = (fn->type == NODE_FUNCTION) ? fn->as.function.body : (fn->type == NODE_METHOD ? fn->as.method.body : NULL);
+        if (body && body->type == NODE_BLOCK) {
+            for (int i = 0; i < body->as.block.count; i++) {
+                AstNode *stmt = body->as.block.stmts[i];
+                if (stmt->type == NODE_LET && strcmp(stmt->as.let.name, var_name) == 0) {
+                    return stmt->as.let.type_desc;
+                }
+            }
+        }
+    }
+    if (expr->type == NODE_MEMBER && ctx->program && ctx->program->type == NODE_PROGRAM) {
+        TypeDesc *obj_td = get_expr_type_desc(ctx, expr->as.member.object);
+        const char *obj_cls = expr->as.member.field_class_name;
+        if (!obj_cls && obj_td && (obj_td->kind == TYPEDESC_CLASS || obj_td->kind == TYPEDESC_NAMED || obj_td->kind == TYPEDESC_ENUM)) {
+            obj_cls = obj_td->as.named_desc.name;
+        }
+        if (!obj_cls) {
+            obj_cls = get_expr_elem_class_name(ctx, expr->as.member.object);
+        }
+        if (obj_cls) {
+            for (int c = 0; c < ctx->program->as.program.class_count; c++) {
+                AstNode *cls = ctx->program->as.program.classes[c];
+                if (strcmp(cls->as.class_decl.name, obj_cls) == 0) {
+                    for (int f = 0; f < cls->as.class_decl.field_count; f++) {
+                        AstNode *fld = cls->as.class_decl.fields[f];
+                        if (strcmp(fld->as.field.name, expr->as.member.member_name) == 0) {
+                            return fld->as.field.type_desc;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if (expr->type == NODE_CALL) {
+        const char *callee = expr->as.call.callee;
+        if (callee) {
+            if ((strcmp(callee, "put") == 0 || strcmp(callee, "push") == 0) && expr->as.call.arg_count > 0) {
+                return get_expr_type_desc(ctx, expr->as.call.args[0]);
+            }
+            if (strcmp(callee, "get") == 0 && expr->as.call.arg_count == 2) {
+                TypeDesc *mtd = get_expr_type_desc(ctx, expr->as.call.args[0]);
+                if (mtd && mtd->kind == TYPEDESC_MAP) {
+                    return mtd->as.map_desc.val_type;
+                }
+            }
+            if (strcmp(callee, "pop") == 0 && expr->as.call.arg_count == 1) {
+                TypeDesc *atd = get_expr_type_desc(ctx, expr->as.call.args[0]);
+                if (atd && atd->kind == TYPEDESC_ARRAY) {
+                    return atd->as.array_desc.elem_type;
+                }
+            }
+            if (strcmp(callee, "remove") == 0 && expr->as.call.arg_count == 2) {
+                TypeDesc *mtd = get_expr_type_desc(ctx, expr->as.call.args[0]);
+                if (mtd && mtd->kind == TYPEDESC_MAP) {
+                    return mtd->as.map_desc.val_type;
+                }
+            }
+            if (ctx->program && ctx->program->type == NODE_PROGRAM) {
+                for (int f = 0; f < ctx->program->as.program.count; f++) {
+                    AstNode *target_fn = ctx->program->as.program.functions[f];
+                    if (strcmp(target_fn->as.function.name, callee) == 0) {
+                        return target_fn->as.function.return_type_desc;
+                    }
+                }
+            }
+        }
+    }
+    if (expr->type == NODE_INDEX) {
+        TypeDesc *atd = get_expr_type_desc(ctx, expr->as.index.array_expr ? expr->as.index.array_expr : expr);
+        if (atd && atd->kind == TYPEDESC_ARRAY) {
+            return atd->as.array_desc.elem_type;
+        }
+    }
+    return NULL;
+}
+
+static void emit_typedesc_cleanup(CodegenCtx *ctx, const char *vname, const TypeDesc *td) {
+    if (!vname || !td) return;
+
+    if (td->kind == TYPEDESC_MAP) {
+        TypeDesc *v = td->as.map_desc.val_type;
+        if (!v) {
+            sb_appendf(&ctx->sb, "if (%s) __cco_map_free(%s, NULL);\n", vname, vname);
+            return;
+        }
+        if (v->kind == TYPEDESC_PRIMITIVE) {
+            if (v->as.primitive_desc.primitive_kind == TY_STRING) {
+                sb_appendf(&ctx->sb, "if (%s) __cco_map_free(%s, (__cco_val_free_fn)free);\n", vname, vname);
+            } else {
+                sb_appendf(&ctx->sb, "if (%s) __cco_map_free(%s, NULL);\n", vname, vname);
+            }
+        } else if (v->kind == TYPEDESC_CLASS || v->kind == TYPEDESC_ENUM || v->kind == TYPEDESC_NAMED) {
+            sb_appendf(&ctx->sb, "if (%s) __cco_map_free(%s, (__cco_val_free_fn)%s_free);\n", vname, vname, v->as.named_desc.name);
+        } else if (v->kind == TYPEDESC_ARRAY) {
+            TypeDesc *elem = v->as.array_desc.elem_type;
+            if (elem && (elem->kind == TYPEDESC_CLASS || elem->kind == TYPEDESC_ENUM || elem->kind == TYPEDESC_NAMED)) {
+                sb_appendf(&ctx->sb, "if (%s) __cco_map_free(%s, (__cco_val_free_fn)__cco_free_arr_of_%s);\n", vname, vname, elem->as.named_desc.name);
+            } else if (elem && elem->kind == TYPEDESC_PRIMITIVE && elem->as.primitive_desc.primitive_kind == TY_STRING) {
+                sb_appendf(&ctx->sb, "if (%s) __cco_map_free(%s, (__cco_val_free_fn)__cco_free_arr_of_string);\n", vname, vname);
+            } else if (elem && elem->kind == TYPEDESC_MAP) {
+                TypeDesc *ik = elem->as.map_desc.key_type;
+                TypeDesc *iv = elem->as.map_desc.val_type;
+                const char *ks = (ik && ik->as.primitive_desc.primitive_kind == TY_STRING) ? "string" : "int";
+                const char *vs = (iv && iv->kind != TYPEDESC_PRIMITIVE) ? iv->as.named_desc.name : "int";
+                sb_appendf(&ctx->sb, "if (%s) __cco_map_free(%s, (__cco_val_free_fn)__cco_free_arr_of_map_%s_%s);\n", vname, vname, ks, vs);
+            } else {
+                sb_appendf(&ctx->sb, "if (%s) __cco_map_free(%s, (__cco_val_free_fn)__cco_free_arr);\n", vname, vname);
+            }
+        } else if (v->kind == TYPEDESC_MAP) {
+            TypeDesc *ik = v->as.map_desc.key_type;
+            TypeDesc *iv = v->as.map_desc.val_type;
+            const char *ks = (ik && ik->as.primitive_desc.primitive_kind == TY_STRING) ? "string" : "int";
+            const char *vs = (iv && iv->kind != TYPEDESC_PRIMITIVE) ? iv->as.named_desc.name : "int";
+            sb_appendf(&ctx->sb, "if (%s) __cco_map_free(%s, (__cco_val_free_fn)__cco_free_map_%s_%s);\n", vname, vname, ks, vs);
+        } else {
+            sb_appendf(&ctx->sb, "if (%s) __cco_map_free(%s, NULL);\n", vname, vname);
+        }
+        return;
+    }
+
+    if (td->kind == TYPEDESC_ARRAY) {
+        TypeDesc *elem = td->as.array_desc.elem_type;
+        if (!elem) {
+            sb_appendf(&ctx->sb, "if (%s) __cco_free_arr(%s);\n", vname, vname);
+            return;
+        }
+        if (elem->kind == TYPEDESC_PRIMITIVE) {
+            if (elem->as.primitive_desc.primitive_kind == TY_STRING) {
+                sb_appendf(&ctx->sb, "if (%s != NULL) {\n", vname);
+                ctx->indent_level++;
+                emit_indent(ctx);
+                sb_appendf(&ctx->sb, "for (int __i = 0; __i < __cco_arr_len(%s); __i++) {\n", vname);
+                ctx->indent_level++;
+                emit_indent(ctx);
+                sb_appendf(&ctx->sb, "if (%s[__i] != NULL) free(%s[__i]);\n", vname, vname);
+                ctx->indent_level--;
+                emit_indent(ctx);
+                sb_append(&ctx->sb, "}\n");
+                emit_indent(ctx);
+                sb_appendf(&ctx->sb, "__cco_free_arr(%s);\n", vname);
+                ctx->indent_level--;
+                emit_indent(ctx);
+                sb_append(&ctx->sb, "}\n");
+            } else {
+                sb_appendf(&ctx->sb, "if (%s) __cco_free_arr(%s);\n", vname, vname);
+            }
+        } else if (elem->kind == TYPEDESC_CLASS || elem->kind == TYPEDESC_ENUM || elem->kind == TYPEDESC_NAMED) {
+            const char *cname = elem->as.named_desc.name;
+            sb_appendf(&ctx->sb, "if (%s != NULL) {\n", vname);
+            ctx->indent_level++;
+            emit_indent(ctx);
+            sb_appendf(&ctx->sb, "for (int __i = 0; __i < __cco_arr_len(%s); __i++) {\n", vname);
+            ctx->indent_level++;
+            emit_indent(ctx);
+            sb_appendf(&ctx->sb, "if (%s[__i] != NULL) %s_free(%s[__i]);\n", vname, cname, vname);
+            ctx->indent_level--;
+            emit_indent(ctx);
+            sb_append(&ctx->sb, "}\n");
+            emit_indent(ctx);
+            sb_appendf(&ctx->sb, "__cco_free_arr(%s);\n", vname);
+            ctx->indent_level--;
+            emit_indent(ctx);
+            sb_append(&ctx->sb, "}\n");
+        } else if (elem->kind == TYPEDESC_MAP) {
+            TypeDesc *iv = elem->as.map_desc.val_type;
+            const char *val_free = (iv && iv->kind != TYPEDESC_PRIMITIVE) ? iv->as.named_desc.name : NULL;
+            sb_appendf(&ctx->sb, "if (%s != NULL) {\n", vname);
+            ctx->indent_level++;
+            emit_indent(ctx);
+            sb_appendf(&ctx->sb, "for (int __i = 0; __i < __cco_arr_len(%s); __i++) {\n", vname);
+            ctx->indent_level++;
+            emit_indent(ctx);
+            if (val_free) {
+                sb_appendf(&ctx->sb, "if (%s[__i] != NULL) __cco_map_free(%s[__i], (__cco_val_free_fn)%s_free);\n", vname, vname, val_free);
+            } else if (iv && iv->kind == TYPEDESC_PRIMITIVE && iv->as.primitive_desc.primitive_kind == TY_STRING) {
+                sb_appendf(&ctx->sb, "if (%s[__i] != NULL) __cco_map_free(%s[__i], (__cco_val_free_fn)free);\n", vname, vname);
+            } else {
+                sb_appendf(&ctx->sb, "if (%s[__i] != NULL) __cco_map_free(%s[__i], NULL);\n", vname, vname);
+            }
+            ctx->indent_level--;
+            emit_indent(ctx);
+            sb_append(&ctx->sb, "}\n");
+            emit_indent(ctx);
+            sb_appendf(&ctx->sb, "__cco_free_arr(%s);\n", vname);
+            ctx->indent_level--;
+            emit_indent(ctx);
+            sb_append(&ctx->sb, "}\n");
+        } else if (elem->kind == TYPEDESC_ARRAY) {
+            TypeDesc *sub = elem->as.array_desc.elem_type;
+            sb_appendf(&ctx->sb, "if (%s != NULL) {\n", vname);
+            ctx->indent_level++;
+            emit_indent(ctx);
+            sb_appendf(&ctx->sb, "for (int __i = 0; __i < __cco_arr_len(%s); __i++) {\n", vname);
+            ctx->indent_level++;
+            emit_indent(ctx);
+            if (sub && (sub->kind == TYPEDESC_CLASS || sub->kind == TYPEDESC_ENUM || sub->kind == TYPEDESC_NAMED)) {
+                sb_appendf(&ctx->sb, "if (%s[__i] != NULL) __cco_free_arr_of_%s(%s[__i]);\n", vname, sub->as.named_desc.name, vname);
+            } else {
+                sb_appendf(&ctx->sb, "if (%s[__i] != NULL) __cco_free_arr(%s[__i]);\n", vname, vname);
+            }
+            ctx->indent_level--;
+            emit_indent(ctx);
+            sb_append(&ctx->sb, "}\n");
+            emit_indent(ctx);
+            sb_appendf(&ctx->sb, "__cco_free_arr(%s);\n", vname);
+            ctx->indent_level--;
+            emit_indent(ctx);
+            sb_append(&ctx->sb, "}\n");
+        } else {
+            sb_appendf(&ctx->sb, "if (%s) __cco_free_arr(%s);\n", vname, vname);
+        }
+        return;
+    }
+
+    if (td->kind == TYPEDESC_CLASS || td->kind == TYPEDESC_ENUM || td->kind == TYPEDESC_NAMED) {
+        if (!is_struct_name(ctx, td->as.named_desc.name)) {
+            sb_appendf(&ctx->sb, "%s_free(%s);\n", td->as.named_desc.name, vname);
+        }
+        return;
+    }
+
+    if (td->kind == TYPEDESC_PRIMITIVE && td->as.primitive_desc.primitive_kind == TY_STRING) {
+        sb_appendf(&ctx->sb, "free(%s);\n", vname);
+        return;
+    }
+}
+
 static void emit_releases(CodegenCtx *ctx, AstNode *node) {
     if (!node || node->releases_count == 0) return;
     for (int i = 0; i < node->releases_count; i++) {
         emit_indent(ctx);
+        if (node->releases_to_emit[i].type_desc) {
+            emit_typedesc_cleanup(ctx, node->releases_to_emit[i].var_name, node->releases_to_emit[i].type_desc);
+            continue;
+        }
         if (node->releases_to_emit[i].is_map) {
             const char *mname = node->releases_to_emit[i].var_name;
             const char *cls = node->releases_to_emit[i].class_name;
-            if (cls && find_class(ctx->ct, cls) != NULL) {
+            if (cls && (find_class(ctx->ct, cls) != NULL || find_enum(ctx->ct, cls) != NULL)) {
                 sb_appendf(&ctx->sb, "__cco_map_free(%s, (__cco_val_free_fn)%s_free);\n", mname, cls);
             } else {
                 sb_appendf(&ctx->sb, "__cco_map_free(%s, NULL);\n", mname);
@@ -1081,7 +1494,7 @@ static void emit_releases(CodegenCtx *ctx, AstNode *node) {
             emit_indent(ctx);
             if (cls && strcmp(cls, "string") == 0) {
                 sb_appendf(&ctx->sb, "if (%s[__i] != NULL) { free(%s[__i]); }\n", arr, arr);
-            } else if (cls && find_class(ctx->ct, cls) != NULL) {
+            } else if (cls && (find_class(ctx->ct, cls) != NULL || find_enum(ctx->ct, cls) != NULL)) {
                 sb_appendf(&ctx->sb, "if (%s[__i] != NULL) { %s_free(%s[__i]); }\n", arr, cls, arr);
             }
             ctx->indent_level--;
@@ -1095,6 +1508,14 @@ static void emit_releases(CodegenCtx *ctx, AstNode *node) {
         } else {
             sb_appendf(&ctx->sb, "%s_free(%s);\n", node->releases_to_emit[i].class_name, node->releases_to_emit[i].var_name);
         }
+    }
+}
+
+static void emit_nulls(CodegenCtx *ctx, AstNode *stmt) {
+    if (!stmt || stmt->nulls_count == 0) return;
+    for (int i = 0; i < stmt->nulls_count; i++) {
+        emit_indent(ctx);
+        sb_appendf(&ctx->sb, "%s = NULL;\n", stmt->nulls_to_emit[i]);
     }
 }
 
@@ -1116,6 +1537,43 @@ static void sb_append_escaped_string(StringBuffer *sb, const char *s) {
 }
 
 static void gen_fstring_part(CodegenCtx *ctx, AstNode *part, bool *out_needs_free);
+static void gen_expr(CodegenCtx *ctx, AstNode *expr);
+
+static bool is_pure_lvalue(const AstNode *node) {
+    if (!node) return false;
+    if (node->type == NODE_IDENT) {
+        return true;
+    }
+    if (node->type == NODE_MEMBER) {
+        return is_pure_lvalue(node->as.member.object);
+    }
+    if (node->type == NODE_INDEX) {
+        AstNode *arr = node->as.index.array_expr;
+        AstNode *idx = node->as.index.index;
+        if (!arr || !is_pure_lvalue(arr)) return false;
+        if (!idx) return true;
+        if (idx->type == NODE_IDENT || idx->type == NODE_LITERAL) return true;
+        return false;
+    }
+    return false;
+}
+
+static bool is_owned_temporary_string_expr(const AstNode *expr) {
+    if (!expr) return false;
+    if (expr->type == NODE_CALL) {
+        if (expr->as.call.callee && strcmp(expr->as.call.callee, "get") == 0) {
+            return false;
+        }
+        return true;
+    }
+    if (expr->type == NODE_METHOD_CALL) {
+        return true;
+    }
+    if (expr->type == NODE_FSTRING) {
+        return true;
+    }
+    return false;
+}
 
 static void gen_expr(CodegenCtx *ctx, AstNode *expr) {
     if (!expr) return;
@@ -1200,16 +1658,34 @@ static void gen_expr(CodegenCtx *ctx, AstNode *expr) {
         case NODE_ALLOC:
             if (expr->as.alloc.is_map) {
                 int kt = (expr->as.alloc.key_type == TY_STRING) ? 1 : 0;
+                if (expr->as.alloc.type_desc && expr->as.alloc.type_desc->kind == TYPEDESC_MAP) {
+                    TypeDesc *ktd = expr->as.alloc.type_desc->as.map_desc.key_type;
+                    if (ktd && ktd->kind == TYPEDESC_PRIMITIVE && ktd->as.primitive_desc.primitive_kind == TY_STRING) {
+                        kt = 1;
+                    } else {
+                        kt = 0;
+                    }
+                }
                 sb_appendf(&ctx->sb, "__cco_map_new(%d)", kt);
             } else if (expr->as.alloc.is_list) {
-                if (expr->as.alloc.elem_type == TY_CLASS && !is_struct_name(ctx, expr->as.alloc.class_name)) {
+                if (expr->as.alloc.type_desc && expr->as.alloc.type_desc->kind == TYPEDESC_ARRAY) {
+                    TypeDesc *elem_td = expr->as.alloc.type_desc->as.array_desc.elem_type;
+                    const char *elem_str = c_type_str_desc(ctx, elem_td);
+                    sb_appendf(&ctx->sb, "(%s *)__cco_list_new(sizeof(%s))", elem_str, elem_str);
+                } else if (expr->as.alloc.elem_type == TY_CLASS && !is_struct_name(ctx, expr->as.alloc.class_name)) {
                     sb_appendf(&ctx->sb, "(%s **)__cco_list_new(sizeof(%s *))", expr->as.alloc.class_name, expr->as.alloc.class_name);
                 } else {
                     const char *elem_str = c_type_str_full(ctx, expr->as.alloc.elem_type, expr->as.alloc.class_name, false, false);
                     sb_appendf(&ctx->sb, "(%s *)__cco_list_new(sizeof(%s))", elem_str, elem_str);
                 }
             } else {
-                if (expr->as.alloc.elem_type == TY_CLASS && !is_struct_name(ctx, expr->as.alloc.class_name)) {
+                if (expr->as.alloc.type_desc && expr->as.alloc.type_desc->kind == TYPEDESC_ARRAY) {
+                    TypeDesc *elem_td = expr->as.alloc.type_desc->as.array_desc.elem_type;
+                    const char *elem_str = c_type_str_desc(ctx, elem_td);
+                    sb_appendf(&ctx->sb, "(%s *)__cco_alloc_arr(sizeof(%s), ", elem_str, elem_str);
+                    gen_expr(ctx, expr->as.alloc.count_expr);
+                    sb_append(&ctx->sb, ")");
+                } else if (expr->as.alloc.elem_type == TY_CLASS && !is_struct_name(ctx, expr->as.alloc.class_name)) {
                     sb_appendf(&ctx->sb, "(%s **)__cco_alloc_arr(sizeof(%s *), ", expr->as.alloc.class_name, expr->as.alloc.class_name);
                     gen_expr(ctx, expr->as.alloc.count_expr);
                     sb_append(&ctx->sb, ")");
@@ -1240,14 +1716,17 @@ static void gen_expr(CodegenCtx *ctx, AstNode *expr) {
                                 break;
                             }
                         }
+                        bool is_str = (vdef && vdef->fields[f].type == TY_STRING && !vdef->fields[f].is_array && !vdef->fields[f].is_map);
                         if (fval) {
-                            if (vdef->fields[f].type == TY_STRING && fval->type == NODE_LITERAL) {
-                                sb_appendf(&ctx->sb, "strdup(\"%s\")", fval->as.literal.val.s);
-                            } else {
-                                gen_expr(ctx, fval);
+                            gen_expr(ctx, fval);
+                            if (is_str) {
+                                sb_appendf(&ctx->sb, ", %s", is_owned_temporary_string_expr(fval) ? "1" : "0");
                             }
                         } else {
                             sb_append(&ctx->sb, "0");
+                            if (is_str) {
+                                sb_append(&ctx->sb, ", 0");
+                            }
                         }
                     }
                 }
@@ -1274,13 +1753,20 @@ static void gen_expr(CodegenCtx *ctx, AstNode *expr) {
                                 break;
                             }
                         }
+                        bool is_str = (cls_node->as.class_decl.fields[f]->as.field.type == TY_STRING &&
+                                       !cls_node->as.class_decl.fields[f]->as.field.is_array &&
+                                       !cls_node->as.class_decl.fields[f]->as.field.is_map);
                         if (fval) {
-                            if (cls_node->as.class_decl.fields[f]->as.field.type == TY_STRING && fval->type == NODE_LITERAL) {
-                                sb_appendf(&ctx->sb, "strdup(\"%s\")", fval->as.literal.val.s);
-                            } else {
-                                gen_expr(ctx, fval);
+                            gen_expr(ctx, fval);
+                            if (is_str) {
+                                sb_appendf(&ctx->sb, ", %s", is_owned_temporary_string_expr(fval) ? "1" : "0");
                             }
-                        } else sb_append(&ctx->sb, "0");
+                        } else {
+                            sb_append(&ctx->sb, "0");
+                            if (is_str) {
+                                sb_append(&ctx->sb, ", 0");
+                            }
+                        }
                     }
                 }
                 sb_append(&ctx->sb, ")");
@@ -1376,8 +1862,14 @@ static void gen_expr(CodegenCtx *ctx, AstNode *expr) {
             if (strcmp(expr->as.unary.op, "&") == 0) {
                 Type ot = infer_expr_type(ctx->program, ctx->current_function, expr->as.unary.operand);
                 bool is_arr = infer_expr_is_array(ctx->program, ctx->current_function, expr->as.unary.operand);
+                bool is_map = infer_expr_is_map(ctx->program, ctx->current_function, expr->as.unary.operand);
+                TypeDesc *otd = get_expr_type_desc(ctx, expr->as.unary.operand);
+                if (otd && (otd->kind == TYPEDESC_MAP || otd->kind == TYPEDESC_ARRAY)) {
+                    is_map = (otd->kind == TYPEDESC_MAP);
+                    is_arr = (otd->kind == TYPEDESC_ARRAY);
+                }
                 const char *ocls = get_expr_elem_class_name(ctx, expr->as.unary.operand);
-                if (is_arr || (ot == TY_CLASS && ocls && !is_struct_name(ctx, ocls))) {
+                if (is_arr || is_map || (ot == TY_CLASS && ocls && !is_struct_name(ctx, ocls))) {
                     gen_expr(ctx, expr->as.unary.operand);
                     break;
                 }
@@ -1447,13 +1939,20 @@ static void gen_expr(CodegenCtx *ctx, AstNode *expr) {
                 AstNode *m_arg = expr->as.call.args[0];
                 AstNode *k_arg = expr->as.call.args[1];
                 AstNode *v_arg = expr->as.call.args[2];
-                Type kt = get_map_key_type(ctx, m_arg);
-                const char *v_cls = get_map_val_class_name(ctx, m_arg);
+                TypeDesc *m_td = get_expr_type_desc(ctx, m_arg);
 
                 sb_append(&ctx->sb, "__cco_map_put(");
                 gen_expr(ctx, m_arg);
                 sb_append(&ctx->sb, ", ");
-                if (kt == TY_STRING) {
+
+                bool k_is_str = false;
+                if (m_td && m_td->kind == TYPEDESC_MAP && m_td->as.map_desc.key_type) {
+                    k_is_str = (m_td->as.map_desc.key_type->kind == TYPEDESC_PRIMITIVE && m_td->as.map_desc.key_type->as.primitive_desc.primitive_kind == TY_STRING);
+                } else {
+                    k_is_str = (get_map_key_type(ctx, m_arg) == TY_STRING);
+                }
+
+                if (k_is_str) {
                     sb_append(&ctx->sb, "(void *)(");
                     gen_expr(ctx, k_arg);
                     sb_append(&ctx->sb, ")");
@@ -1463,14 +1962,11 @@ static void gen_expr(CodegenCtx *ctx, AstNode *expr) {
                     sb_append(&ctx->sb, ")");
                 }
                 sb_append(&ctx->sb, ", ");
-                bool val_is_arr = get_map_val_is_array(ctx, m_arg);
-                if (val_is_arr || (v_cls && find_class(ctx->ct, v_cls) != NULL)) {
-                    sb_append(&ctx->sb, "(void *)(");
-                    gen_expr(ctx, v_arg);
-                    sb_append(&ctx->sb, ")");
-                } else {
-                    Type vt = infer_expr_type(ctx->program, ctx->current_function, v_arg);
-                    if (vt == TY_STRING) {
+
+                if (m_td && m_td->kind == TYPEDESC_MAP && m_td->as.map_desc.val_type) {
+                    TypeDesc *v_td = m_td->as.map_desc.val_type;
+                    bool v_is_ptr = (v_td->kind == TYPEDESC_CLASS || v_td->kind == TYPEDESC_ENUM || v_td->kind == TYPEDESC_NAMED || v_td->kind == TYPEDESC_MAP || v_td->kind == TYPEDESC_ARRAY || (v_td->kind == TYPEDESC_PRIMITIVE && v_td->as.primitive_desc.primitive_kind == TY_STRING));
+                    if (v_is_ptr) {
                         sb_append(&ctx->sb, "(void *)(");
                         gen_expr(ctx, v_arg);
                         sb_append(&ctx->sb, ")");
@@ -1479,47 +1975,125 @@ static void gen_expr(CodegenCtx *ctx, AstNode *expr) {
                         gen_expr(ctx, v_arg);
                         sb_append(&ctx->sb, ")");
                     }
-                }
-                sb_append(&ctx->sb, ", ");
-                if (!val_is_arr && v_cls && find_class(ctx->ct, v_cls) != NULL) {
-                    sb_appendf(&ctx->sb, "(__cco_val_free_fn)%s_free)", v_cls);
+                    sb_append(&ctx->sb, ", ");
+                    if (v_td->kind == TYPEDESC_PRIMITIVE && v_td->as.primitive_desc.primitive_kind == TY_STRING) {
+                        sb_append(&ctx->sb, "(__cco_val_free_fn)free)");
+                    } else if (v_td->kind == TYPEDESC_CLASS || v_td->kind == TYPEDESC_ENUM || v_td->kind == TYPEDESC_NAMED) {
+                        sb_appendf(&ctx->sb, "(__cco_val_free_fn)%s_free)", v_td->as.named_desc.name);
+                    } else if (v_td->kind == TYPEDESC_ARRAY) {
+                        TypeDesc *elem = v_td->as.array_desc.elem_type;
+                        if (elem && (elem->kind == TYPEDESC_CLASS || elem->kind == TYPEDESC_ENUM || elem->kind == TYPEDESC_NAMED)) {
+                            sb_appendf(&ctx->sb, "(__cco_val_free_fn)__cco_free_arr_of_%s)", elem->as.named_desc.name);
+                        } else if (elem && elem->kind == TYPEDESC_PRIMITIVE && elem->as.primitive_desc.primitive_kind == TY_STRING) {
+                            sb_append(&ctx->sb, "(__cco_val_free_fn)__cco_free_arr_of_string)");
+                        } else if (elem && elem->kind == TYPEDESC_MAP) {
+                            TypeDesc *ik = elem->as.map_desc.key_type;
+                            TypeDesc *iv = elem->as.map_desc.val_type;
+                            const char *ks = (ik && ik->as.primitive_desc.primitive_kind == TY_STRING) ? "string" : "int";
+                            const char *vs = (iv && iv->kind != TYPEDESC_PRIMITIVE) ? iv->as.named_desc.name : ((iv && iv->as.primitive_desc.primitive_kind == TY_STRING) ? "string" : "int");
+                            sb_appendf(&ctx->sb, "(__cco_val_free_fn)__cco_free_arr_of_map_%s_%s)", ks, vs);
+                        } else {
+                            sb_append(&ctx->sb, "(__cco_val_free_fn)__cco_free_arr)");
+                        }
+                    } else if (v_td->kind == TYPEDESC_MAP) {
+                        TypeDesc *ik = v_td->as.map_desc.key_type;
+                        TypeDesc *iv = v_td->as.map_desc.val_type;
+                        const char *ks = (ik && ik->as.primitive_desc.primitive_kind == TY_STRING) ? "string" : "int";
+                        const char *vs = (iv && iv->kind != TYPEDESC_PRIMITIVE) ? iv->as.named_desc.name : ((iv && iv->as.primitive_desc.primitive_kind == TY_STRING) ? "string" : "int");
+                        sb_appendf(&ctx->sb, "(__cco_val_free_fn)__cco_free_map_%s_%s)", ks, vs);
+                    } else {
+                        sb_append(&ctx->sb, "NULL)");
+                    }
                 } else {
-                    sb_append(&ctx->sb, "NULL)");
+                    const char *v_cls = get_map_val_class_name(ctx, m_arg);
+                    bool val_is_arr = get_map_val_is_array(ctx, m_arg);
+                    if (val_is_arr || (v_cls && (find_class(ctx->ct, v_cls) != NULL || find_enum(ctx->ct, v_cls) != NULL))) {
+                        sb_append(&ctx->sb, "(void *)(");
+                        gen_expr(ctx, v_arg);
+                        sb_append(&ctx->sb, ")");
+                    } else {
+                        Type vt = infer_expr_type(ctx->program, ctx->current_function, v_arg);
+                        if (vt == TY_STRING) {
+                            sb_append(&ctx->sb, "(void *)(");
+                            gen_expr(ctx, v_arg);
+                            sb_append(&ctx->sb, ")");
+                        } else {
+                            sb_append(&ctx->sb, "(void *)(intptr_t)(");
+                            gen_expr(ctx, v_arg);
+                            sb_append(&ctx->sb, ")");
+                        }
+                    }
+                    sb_append(&ctx->sb, ", ");
+                    if (!val_is_arr && v_cls && (find_class(ctx->ct, v_cls) != NULL || find_enum(ctx->ct, v_cls) != NULL)) {
+                        sb_appendf(&ctx->sb, "(__cco_val_free_fn)%s_free)", v_cls);
+                    } else {
+                        sb_append(&ctx->sb, "NULL)");
+                    }
                 }
             } else if (strcmp(callee, "get") == 0) {
                 AstNode *m_arg = expr->as.call.args[0];
                 AstNode *k_arg = expr->as.call.args[1];
-                Type kt = get_map_key_type(ctx, m_arg);
-                Type vt = get_map_val_type(ctx, m_arg);
-                const char *v_cls = get_map_val_class_name(ctx, m_arg);
-                bool val_is_arr = get_map_val_is_array(ctx, m_arg);
-                const char *c_type = val_is_arr ? c_type_str_decl(ctx, vt, v_cls, true, false) : c_type_str_full(ctx, vt, v_cls, false, false);
+                TypeDesc *m_td = get_expr_type_desc(ctx, m_arg);
+                if (m_td && m_td->kind == TYPEDESC_MAP && m_td->as.map_desc.val_type) {
+                    TypeDesc *v_td = m_td->as.map_desc.val_type;
+                    const char *c_type = c_type_str_desc(ctx, v_td);
+                    bool v_is_ptr = (v_td->kind == TYPEDESC_CLASS || v_td->kind == TYPEDESC_ENUM || v_td->kind == TYPEDESC_NAMED || v_td->kind == TYPEDESC_MAP || v_td->kind == TYPEDESC_ARRAY || (v_td->kind == TYPEDESC_PRIMITIVE && v_td->as.primitive_desc.primitive_kind == TY_STRING));
+                    if (v_is_ptr) {
+                        sb_appendf(&ctx->sb, "(%s)__cco_map_get(", c_type);
+                    } else {
+                        sb_appendf(&ctx->sb, "(%s)(intptr_t)__cco_map_get(", c_type);
+                    }
+                    gen_expr(ctx, m_arg);
+                    sb_append(&ctx->sb, ", ");
+                    bool k_is_str = (m_td->as.map_desc.key_type && m_td->as.map_desc.key_type->kind == TYPEDESC_PRIMITIVE && m_td->as.map_desc.key_type->as.primitive_desc.primitive_kind == TY_STRING);
+                    if (k_is_str) {
+                        sb_append(&ctx->sb, "(void *)(");
+                        gen_expr(ctx, k_arg);
+                        sb_append(&ctx->sb, "))");
+                    } else {
+                        sb_append(&ctx->sb, "(void *)(intptr_t)(");
+                        gen_expr(ctx, k_arg);
+                        sb_append(&ctx->sb, "))");
+                    }
+                } else {
+                    Type kt = get_map_key_type(ctx, m_arg);
+                    Type vt = get_map_val_type(ctx, m_arg);
+                    const char *v_cls = get_map_val_class_name(ctx, m_arg);
+                    bool val_is_arr = get_map_val_is_array(ctx, m_arg);
+                    const char *c_type = val_is_arr ? c_type_str_decl(ctx, vt, v_cls, true, false) : c_type_str_full(ctx, vt, v_cls, false, false);
 
-                if (val_is_arr || vt == TY_CLASS || vt == TY_STRING) {
-                    sb_appendf(&ctx->sb, "(%s)__cco_map_get(", c_type);
-                } else {
-                    sb_appendf(&ctx->sb, "(%s)(intptr_t)__cco_map_get(", c_type);
-                }
-                gen_expr(ctx, m_arg);
-                sb_append(&ctx->sb, ", ");
-                if (kt == TY_STRING) {
-                    sb_append(&ctx->sb, "(void *)(");
-                    gen_expr(ctx, k_arg);
-                    sb_append(&ctx->sb, "))");
-                } else {
-                    sb_append(&ctx->sb, "(void *)(intptr_t)(");
-                    gen_expr(ctx, k_arg);
-                    sb_append(&ctx->sb, "))");
+                    if (val_is_arr || vt == TY_CLASS || vt == TY_STRING) {
+                        sb_appendf(&ctx->sb, "(%s)__cco_map_get(", c_type);
+                    } else {
+                        sb_appendf(&ctx->sb, "(%s)(intptr_t)__cco_map_get(", c_type);
+                    }
+                    gen_expr(ctx, m_arg);
+                    sb_append(&ctx->sb, ", ");
+                    if (kt == TY_STRING) {
+                        sb_append(&ctx->sb, "(void *)(");
+                        gen_expr(ctx, k_arg);
+                        sb_append(&ctx->sb, "))");
+                    } else {
+                        sb_append(&ctx->sb, "(void *)(intptr_t)(");
+                        gen_expr(ctx, k_arg);
+                        sb_append(&ctx->sb, "))");
+                    }
                 }
             } else if (strcmp(callee, "has") == 0) {
                 AstNode *m_arg = expr->as.call.args[0];
                 AstNode *k_arg = expr->as.call.args[1];
-                Type kt = get_map_key_type(ctx, m_arg);
+                TypeDesc *m_td = get_expr_type_desc(ctx, m_arg);
+                bool k_is_str = false;
+                if (m_td && m_td->kind == TYPEDESC_MAP && m_td->as.map_desc.key_type) {
+                    k_is_str = (m_td->as.map_desc.key_type->kind == TYPEDESC_PRIMITIVE && m_td->as.map_desc.key_type->as.primitive_desc.primitive_kind == TY_STRING);
+                } else {
+                    k_is_str = (get_map_key_type(ctx, m_arg) == TY_STRING);
+                }
 
                 sb_append(&ctx->sb, "__cco_map_has(");
                 gen_expr(ctx, m_arg);
                 sb_append(&ctx->sb, ", ");
-                if (kt == TY_STRING) {
+                if (k_is_str) {
                     sb_append(&ctx->sb, "(void *)(");
                     gen_expr(ctx, k_arg);
                     sb_append(&ctx->sb, "))");
@@ -1531,26 +2105,50 @@ static void gen_expr(CodegenCtx *ctx, AstNode *expr) {
             } else if (strcmp(callee, "remove") == 0) {
                 AstNode *m_arg = expr->as.call.args[0];
                 AstNode *k_arg = expr->as.call.args[1];
-                Type kt = get_map_key_type(ctx, m_arg);
-                Type vt = get_map_val_type(ctx, m_arg);
-                const char *v_cls = get_map_val_class_name(ctx, m_arg);
-                const char *c_type = c_type_str_full(ctx, vt, v_cls, false, false);
+                TypeDesc *m_td = get_expr_type_desc(ctx, m_arg);
+                if (m_td && m_td->kind == TYPEDESC_MAP && m_td->as.map_desc.val_type) {
+                    TypeDesc *v_td = m_td->as.map_desc.val_type;
+                    const char *c_type = c_type_str_desc(ctx, v_td);
+                    bool v_is_ptr = (v_td->kind == TYPEDESC_CLASS || v_td->kind == TYPEDESC_ENUM || v_td->kind == TYPEDESC_NAMED || v_td->kind == TYPEDESC_MAP || v_td->kind == TYPEDESC_ARRAY || (v_td->kind == TYPEDESC_PRIMITIVE && v_td->as.primitive_desc.primitive_kind == TY_STRING));
+                    if (v_is_ptr) {
+                        sb_appendf(&ctx->sb, "(%s)__cco_map_remove(", c_type);
+                    } else {
+                        sb_appendf(&ctx->sb, "(%s)(intptr_t)__cco_map_remove(", c_type);
+                    }
+                    gen_expr(ctx, m_arg);
+                    sb_append(&ctx->sb, ", ");
+                    bool k_is_str = (m_td->as.map_desc.key_type && m_td->as.map_desc.key_type->kind == TYPEDESC_PRIMITIVE && m_td->as.map_desc.key_type->as.primitive_desc.primitive_kind == TY_STRING);
+                    if (k_is_str) {
+                        sb_append(&ctx->sb, "(void *)(");
+                        gen_expr(ctx, k_arg);
+                        sb_append(&ctx->sb, "))");
+                    } else {
+                        sb_append(&ctx->sb, "(void *)(intptr_t)(");
+                        gen_expr(ctx, k_arg);
+                        sb_append(&ctx->sb, "))");
+                    }
+                } else {
+                    Type kt = get_map_key_type(ctx, m_arg);
+                    Type vt = get_map_val_type(ctx, m_arg);
+                    const char *v_cls = get_map_val_class_name(ctx, m_arg);
+                    const char *c_type = c_type_str_full(ctx, vt, v_cls, false, false);
 
-                if (vt == TY_CLASS || vt == TY_STRING) {
-                    sb_appendf(&ctx->sb, "(%s)__cco_map_remove(", c_type);
-                } else {
-                    sb_appendf(&ctx->sb, "(%s)(intptr_t)__cco_map_remove(", c_type);
-                }
-                gen_expr(ctx, m_arg);
-                sb_append(&ctx->sb, ", ");
-                if (kt == TY_STRING) {
-                    sb_append(&ctx->sb, "(void *)(");
-                    gen_expr(ctx, k_arg);
-                    sb_append(&ctx->sb, "))");
-                } else {
-                    sb_append(&ctx->sb, "(void *)(intptr_t)(");
-                    gen_expr(ctx, k_arg);
-                    sb_append(&ctx->sb, "))");
+                    if (vt == TY_CLASS || vt == TY_STRING) {
+                        sb_appendf(&ctx->sb, "(%s)__cco_map_remove(", c_type);
+                    } else {
+                        sb_appendf(&ctx->sb, "(%s)(intptr_t)__cco_map_remove(", c_type);
+                    }
+                    gen_expr(ctx, m_arg);
+                    sb_append(&ctx->sb, ", ");
+                    if (kt == TY_STRING) {
+                        sb_append(&ctx->sb, "(void *)(");
+                        gen_expr(ctx, k_arg);
+                        sb_append(&ctx->sb, "))");
+                    } else {
+                        sb_append(&ctx->sb, "(void *)(intptr_t)(");
+                        gen_expr(ctx, k_arg);
+                        sb_append(&ctx->sb, "))");
+                    }
                 }
             } else if (strcmp(callee, "keys") == 0) {
                 AstNode *m_arg = expr->as.call.args[0];
@@ -1562,10 +2160,22 @@ static void gen_expr(CodegenCtx *ctx, AstNode *expr) {
             } else if (strcmp(callee, "push") == 0) {
                 AstNode *arr_arg = expr->as.call.args[0];
                 AstNode *val_arg = expr->as.call.args[1];
-                Type elem_type = infer_expr_type(ctx->program, ctx->current_function, arr_arg);
-                const char *elem_cls = get_expr_elem_class_name(ctx, arr_arg);
-                const char *elem_c_type = c_type_str_full(ctx, elem_type, elem_cls, false, false);
-                const char *arr_ptr_type = c_type_str_decl(ctx, elem_type, elem_cls, true, false);
+                TypeDesc *arr_td = get_expr_type_desc(ctx, arr_arg);
+                const char *elem_c_type = NULL;
+                const char *arr_ptr_type = NULL;
+                Type elem_type = TY_INT;
+                if (arr_td && arr_td->kind == TYPEDESC_ARRAY) {
+                    elem_c_type = c_type_str_desc(ctx, arr_td->as.array_desc.elem_type);
+                    arr_ptr_type = c_type_str_desc(ctx, arr_td);
+                    if (arr_td->as.array_desc.elem_type && arr_td->as.array_desc.elem_type->kind == TYPEDESC_PRIMITIVE && arr_td->as.array_desc.elem_type->as.primitive_desc.primitive_kind == TY_STRING) {
+                        elem_type = TY_STRING;
+                    }
+                } else {
+                    elem_type = infer_expr_type(ctx->program, ctx->current_function, arr_arg);
+                    const char *elem_cls = get_expr_elem_class_name(ctx, arr_arg);
+                    elem_c_type = c_type_str_full(ctx, elem_type, elem_cls, false, false);
+                    arr_ptr_type = c_type_str_decl(ctx, elem_type, elem_cls, true, false);
+                }
 
                 sb_append(&ctx->sb, "(");
                 gen_expr(ctx, arr_arg);
@@ -1590,9 +2200,15 @@ static void gen_expr(CodegenCtx *ctx, AstNode *expr) {
                 sb_append(&ctx->sb, ")");
             } else if (strcmp(callee, "pop") == 0) {
                 AstNode *arr_arg = expr->as.call.args[0];
-                Type elem_type = infer_expr_type(ctx->program, ctx->current_function, arr_arg);
-                const char *elem_cls = get_expr_elem_class_name(ctx, arr_arg);
-                const char *arr_ptr_type = c_type_str_decl(ctx, elem_type, elem_cls, true, false);
+                TypeDesc *arr_td = get_expr_type_desc(ctx, arr_arg);
+                const char *arr_ptr_type = NULL;
+                if (arr_td && arr_td->kind == TYPEDESC_ARRAY) {
+                    arr_ptr_type = c_type_str_desc(ctx, arr_td);
+                } else {
+                    Type elem_type = infer_expr_type(ctx->program, ctx->current_function, arr_arg);
+                    const char *elem_cls = get_expr_elem_class_name(ctx, arr_arg);
+                    arr_ptr_type = c_type_str_decl(ctx, elem_type, elem_cls, true, false);
+                }
 
                 sb_append(&ctx->sb, "(__cco_arr_decr_len(");
                 gen_expr(ctx, arr_arg);
@@ -1865,6 +2481,19 @@ static void gen_expr(CodegenCtx *ctx, AstNode *expr) {
                 sb_append(&ctx->sb, "__cco_sleep_ms(");
                 gen_expr(ctx, expr->as.call.args[0]);
                 sb_append(&ctx->sb, ")");
+            } else if (strcmp(callee, "free") == 0 && expr->as.call.arg_count == 1) {
+                AstNode *arg = expr->as.call.args[0];
+                if (is_pure_lvalue(arg)) {
+                    sb_append(&ctx->sb, "(free(");
+                    gen_expr(ctx, arg);
+                    sb_append(&ctx->sb, "), ");
+                    gen_expr(ctx, arg);
+                    sb_append(&ctx->sb, " = NULL)");
+                } else {
+                    sb_append(&ctx->sb, "free(");
+                    gen_expr(ctx, arg);
+                    sb_append(&ctx->sb, ")");
+                }
             } else {
                 sb_appendf(&ctx->sb, "%s(", callee);
                 for (int i = 0; i < expr->as.call.arg_count; i++) {
@@ -1946,19 +2575,24 @@ static void gen_stmt(CodegenCtx *ctx, AstNode *stmt) {
     if (!stmt) return;
 
     switch (stmt->type) {
-        case NODE_LET:
+        case NODE_LET: {
             emit_indent(ctx);
-            sb_appendf(&ctx->sb, "%s %s = ", c_type_str_decl_full(ctx, stmt->as.let.var_type, stmt->as.let.class_name, stmt->as.let.is_array, stmt->as.let.is_map, stmt->is_heap_owner), stmt->as.let.name);
+            const char *let_type_str = stmt->as.let.type_desc ?
+                c_type_str_desc(ctx, stmt->as.let.type_desc) :
+                c_type_str_decl_full(ctx, stmt->as.let.var_type, stmt->as.let.class_name, stmt->as.let.is_array, stmt->as.let.is_map, stmt->is_heap_owner);
+            sb_appendf(&ctx->sb, "%s %s = ", let_type_str, stmt->as.let.name);
             if (stmt->as.let.var_type == TY_STRING && stmt->as.let.value->type == NODE_LITERAL) {
                 sb_appendf(&ctx->sb, "strdup(\"%s\")", stmt->as.let.value->as.literal.val.s);
             } else {
                 gen_expr(ctx, stmt->as.let.value);
             }
             sb_append(&ctx->sb, ";\n");
+            emit_nulls(ctx, stmt);
             break;
+        }
 
         case NODE_ASSIGN: {
-            bool has_cleanup = (stmt->frees_count > 0) || (stmt->as.assign.release_old && stmt->as.assign.class_name);
+            bool has_cleanup = (stmt->frees_count > 0) || (stmt->as.assign.release_old && (stmt->as.assign.class_name || stmt->as.assign.type_desc));
             if (has_cleanup) {
                 static int assign_tmp_counter = 0;
                 int cur_assign_tmp = ++assign_tmp_counter;
@@ -1970,10 +2604,31 @@ static void gen_stmt(CodegenCtx *ctx, AstNode *stmt) {
                     gen_expr(ctx, stmt->as.assign.value);
                 }
                 sb_append(&ctx->sb, ");\n");
-                emit_frees(ctx, stmt);
-                if (stmt->as.assign.release_old && stmt->as.assign.class_name) {
+                for (int i = 0; i < stmt->frees_count; i++) {
+                    if (stmt->as.assign.release_old && (stmt->as.assign.class_name || stmt->as.assign.type_desc) &&
+                        strcmp(stmt->frees_to_emit[i].var_name, stmt->as.assign.name) == 0) {
+                        continue;
+                    }
                     emit_indent(ctx);
-                    sb_appendf(&ctx->sb, "%s_free(%s);\n", stmt->as.assign.class_name, stmt->as.assign.name);
+                    if (stmt->frees_to_emit[i].is_array) {
+                        sb_appendf(&ctx->sb, "if (%s != NULL && (void *)%s != __assign_tmp_%d) __cco_free_arr(%s);\n", stmt->frees_to_emit[i].var_name, stmt->frees_to_emit[i].var_name, cur_assign_tmp, stmt->frees_to_emit[i].var_name);
+                    } else {
+                        sb_appendf(&ctx->sb, "if (%s != NULL && (void *)%s != __assign_tmp_%d) free(%s);\n", stmt->frees_to_emit[i].var_name, stmt->frees_to_emit[i].var_name, cur_assign_tmp, stmt->frees_to_emit[i].var_name);
+                    }
+                }
+                if (stmt->as.assign.release_old) {
+                    if (stmt->as.assign.type_desc) {
+                        emit_indent(ctx);
+                        sb_appendf(&ctx->sb, "if (%s != NULL && (void *)%s != __assign_tmp_%d) {\n", stmt->as.assign.name, stmt->as.assign.name, cur_assign_tmp);
+                        ctx->indent_level++;
+                        emit_typedesc_cleanup(ctx, stmt->as.assign.name, stmt->as.assign.type_desc);
+                        ctx->indent_level--;
+                        emit_indent(ctx);
+                        sb_append(&ctx->sb, "}\n");
+                    } else if (stmt->as.assign.class_name) {
+                        emit_indent(ctx);
+                        sb_appendf(&ctx->sb, "if (%s != NULL && (void *)%s != __assign_tmp_%d) %s_free(%s);\n", stmt->as.assign.name, stmt->as.assign.name, cur_assign_tmp, stmt->as.assign.class_name, stmt->as.assign.name);
+                    }
                 }
                 emit_indent(ctx);
                 sb_appendf(&ctx->sb, "%s = __assign_tmp_%d;\n", stmt->as.assign.name, cur_assign_tmp);
@@ -1987,31 +2642,128 @@ static void gen_stmt(CodegenCtx *ctx, AstNode *stmt) {
                 }
                 sb_append(&ctx->sb, ";\n");
             }
+            emit_nulls(ctx, stmt);
             break;
         }
 
-        case NODE_MEMBER_ASSIGN:
-            if (stmt->as.member_assign.release_old && stmt->as.member_assign.field_class_name) {
-                const char *fcls = stmt->as.member_assign.field_class_name;
+        case NODE_MEMBER_ASSIGN: {
+            if (stmt->as.member_assign.release_old) {
+                static int member_assign_tmp_counter = 0;
+                int cur_tmp = ++member_assign_tmp_counter;
                 emit_indent(ctx);
-                sb_appendf(&ctx->sb, "%s_free(", fcls);
+                sb_appendf(&ctx->sb, "void *__m_tmp_%d = (void *)(", cur_tmp);
+                gen_expr(ctx, stmt->as.member_assign.value);
+                sb_append(&ctx->sb, ");\n");
+
+                const char *arrow = is_expr_pointer(ctx, stmt->as.member_assign.object) ? "->" : ".";
+                if (stmt->as.member_assign.field_is_map) {
+                    emit_indent(ctx);
+                    if (stmt->as.member_assign.field_class_name && (find_class(ctx->ct, stmt->as.member_assign.field_class_name) != NULL || find_enum(ctx->ct, stmt->as.member_assign.field_class_name) != NULL)) {
+                        sb_appendf(&ctx->sb, "if (");
+                        gen_expr(ctx, stmt->as.member_assign.object);
+                        sb_appendf(&ctx->sb, "%s%s != NULL && ", arrow, stmt->as.member_assign.member_name);
+                        gen_expr(ctx, stmt->as.member_assign.object);
+                        sb_appendf(&ctx->sb, "%s%s != __m_tmp_%d) __cco_map_free(", arrow, stmt->as.member_assign.member_name, cur_tmp);
+                        gen_expr(ctx, stmt->as.member_assign.object);
+                        sb_appendf(&ctx->sb, "%s%s, (__cco_val_free_fn)%s_free);\n", arrow, stmt->as.member_assign.member_name, stmt->as.member_assign.field_class_name);
+                    } else {
+                        sb_appendf(&ctx->sb, "if (");
+                        gen_expr(ctx, stmt->as.member_assign.object);
+                        sb_appendf(&ctx->sb, "%s%s != NULL && ", arrow, stmt->as.member_assign.member_name);
+                        gen_expr(ctx, stmt->as.member_assign.object);
+                        sb_appendf(&ctx->sb, "%s%s != __m_tmp_%d) __cco_map_free(", arrow, stmt->as.member_assign.member_name, cur_tmp);
+                        gen_expr(ctx, stmt->as.member_assign.object);
+                        sb_appendf(&ctx->sb, "%s%s, NULL);\n", arrow, stmt->as.member_assign.member_name);
+                    }
+                } else if (stmt->as.member_assign.field_is_array) {
+                    emit_indent(ctx);
+                    const char *fcls = stmt->as.member_assign.field_class_name;
+                    if (fcls && (find_class(ctx->ct, fcls) != NULL || find_enum(ctx->ct, fcls) != NULL)) {
+                        sb_appendf(&ctx->sb, "if (");
+                        gen_expr(ctx, stmt->as.member_assign.object);
+                        sb_appendf(&ctx->sb, "%s%s != NULL && ", arrow, stmt->as.member_assign.member_name);
+                        gen_expr(ctx, stmt->as.member_assign.object);
+                        sb_appendf(&ctx->sb, "%s%s != __m_tmp_%d) {\n", arrow, stmt->as.member_assign.member_name, cur_tmp);
+                        ctx->indent_level++;
+                        emit_indent(ctx);
+                        sb_appendf(&ctx->sb, "for (int __i = 0; __i < __cco_arr_len(");
+                        gen_expr(ctx, stmt->as.member_assign.object);
+                        sb_appendf(&ctx->sb, "%s%s); __i++) {\n", arrow, stmt->as.member_assign.member_name);
+                        ctx->indent_level++;
+                        emit_indent(ctx);
+                        sb_appendf(&ctx->sb, "if (");
+                        gen_expr(ctx, stmt->as.member_assign.object);
+                        sb_appendf(&ctx->sb, "%s%s[__i] != NULL) { %s_free(", arrow, stmt->as.member_assign.member_name, fcls);
+                        gen_expr(ctx, stmt->as.member_assign.object);
+                        sb_appendf(&ctx->sb, "%s%s[__i]); }\n", arrow, stmt->as.member_assign.member_name);
+                        ctx->indent_level--;
+                        emit_indent(ctx);
+                        sb_appendf(&ctx->sb, "}\n");
+                        emit_indent(ctx);
+                        sb_appendf(&ctx->sb, "__cco_free_arr(");
+                        gen_expr(ctx, stmt->as.member_assign.object);
+                        sb_appendf(&ctx->sb, "%s%s);\n", arrow, stmt->as.member_assign.member_name);
+                        ctx->indent_level--;
+                        emit_indent(ctx);
+                        sb_appendf(&ctx->sb, "}\n");
+                    } else {
+                        sb_appendf(&ctx->sb, "if (");
+                        gen_expr(ctx, stmt->as.member_assign.object);
+                        sb_appendf(&ctx->sb, "%s%s != NULL && ", arrow, stmt->as.member_assign.member_name);
+                        gen_expr(ctx, stmt->as.member_assign.object);
+                        sb_appendf(&ctx->sb, "%s%s != __m_tmp_%d) { __cco_free_arr(", arrow, stmt->as.member_assign.member_name, cur_tmp);
+                        gen_expr(ctx, stmt->as.member_assign.object);
+                        sb_appendf(&ctx->sb, "%s%s); }\n", arrow, stmt->as.member_assign.member_name);
+                    }
+                } else if (stmt->as.member_assign.field_class_name) {
+                    const char *fcls = stmt->as.member_assign.field_class_name;
+                    emit_indent(ctx);
+                    if (strcmp(fcls, "string") == 0) {
+                        sb_appendf(&ctx->sb, "if (");
+                        gen_expr(ctx, stmt->as.member_assign.object);
+                        sb_appendf(&ctx->sb, "%s%s != NULL && ", arrow, stmt->as.member_assign.member_name);
+                        gen_expr(ctx, stmt->as.member_assign.object);
+                        sb_appendf(&ctx->sb, "%s%s != __m_tmp_%d) free(", arrow, stmt->as.member_assign.member_name, cur_tmp);
+                        gen_expr(ctx, stmt->as.member_assign.object);
+                        sb_appendf(&ctx->sb, "%s%s);\n", arrow, stmt->as.member_assign.member_name);
+                    } else {
+                        sb_appendf(&ctx->sb, "if (");
+                        gen_expr(ctx, stmt->as.member_assign.object);
+                        sb_appendf(&ctx->sb, "%s%s != NULL && ", arrow, stmt->as.member_assign.member_name);
+                        gen_expr(ctx, stmt->as.member_assign.object);
+                        sb_appendf(&ctx->sb, "%s%s != __m_tmp_%d) %s_free(", arrow, stmt->as.member_assign.member_name, cur_tmp, fcls);
+                        gen_expr(ctx, stmt->as.member_assign.object);
+                        sb_appendf(&ctx->sb, "%s%s);\n", arrow, stmt->as.member_assign.member_name);
+                    }
+                }
+                emit_indent(ctx);
+                gen_expr(ctx, stmt->as.member_assign.object);
+                const char *arrow_assign = is_expr_pointer(ctx, stmt->as.member_assign.object) ? "->" : ".";
+                if (stmt->as.member_assign.field_class_name && strcmp(stmt->as.member_assign.field_class_name, "string") == 0) {
+                    if (is_owned_temporary_string_expr(stmt->as.member_assign.value)) {
+                        sb_appendf(&ctx->sb, "%s%s = (char *)__m_tmp_%d;\n", arrow_assign, stmt->as.member_assign.member_name, cur_tmp);
+                    } else {
+                        sb_appendf(&ctx->sb, "%s%s = (", arrow_assign, stmt->as.member_assign.member_name);
+                        gen_expr(ctx, stmt->as.member_assign.object);
+                        sb_appendf(&ctx->sb, "%s%s == __m_tmp_%d) ? (char *)__m_tmp_%d : (__m_tmp_%d ? strdup((char *)__m_tmp_%d) : NULL);\n", arrow_assign, stmt->as.member_assign.member_name, cur_tmp, cur_tmp, cur_tmp, cur_tmp);
+                    }
+                } else {
+                    sb_appendf(&ctx->sb, "%s%s = __m_tmp_%d;\n", arrow_assign, stmt->as.member_assign.member_name, cur_tmp);
+                }
+            } else {
+                emit_indent(ctx);
                 gen_expr(ctx, stmt->as.member_assign.object);
                 if (is_expr_pointer(ctx, stmt->as.member_assign.object)) {
-                    sb_appendf(&ctx->sb, "->%s);\n", stmt->as.member_assign.member_name);
+                    sb_appendf(&ctx->sb, "->%s = ", stmt->as.member_assign.member_name);
                 } else {
-                    sb_appendf(&ctx->sb, ".%s);\n", stmt->as.member_assign.member_name);
+                    sb_appendf(&ctx->sb, ".%s = ", stmt->as.member_assign.member_name);
                 }
+                gen_expr(ctx, stmt->as.member_assign.value);
+                sb_append(&ctx->sb, ";\n");
             }
-            emit_indent(ctx);
-            gen_expr(ctx, stmt->as.member_assign.object);
-            if (is_expr_pointer(ctx, stmt->as.member_assign.object)) {
-                sb_appendf(&ctx->sb, "->%s = ", stmt->as.member_assign.member_name);
-            } else {
-                sb_appendf(&ctx->sb, ".%s = ", stmt->as.member_assign.member_name);
-            }
-            gen_expr(ctx, stmt->as.member_assign.value);
-            sb_append(&ctx->sb, ";\n");
+            emit_nulls(ctx, stmt);
             break;
+        }
 
         case NODE_INDEX_ASSIGN:
             emit_indent(ctx);
@@ -2025,6 +2777,7 @@ static void gen_stmt(CodegenCtx *ctx, AstNode *stmt) {
             sb_append(&ctx->sb, "] = ");
             gen_expr(ctx, stmt->as.index_assign.value);
             sb_append(&ctx->sb, ";\n");
+            emit_nulls(ctx, stmt);
             break;
 
         case NODE_FOR_EACH: {
@@ -2116,32 +2869,70 @@ static void gen_stmt(CodegenCtx *ctx, AstNode *stmt) {
             gen_block(ctx, stmt->as.while_stmt.body);
             break;
 
-        case NODE_FOR:
-            emit_indent(ctx);
-            sb_append(&ctx->sb, "for (");
-            if (stmt->as.for_stmt.init) {
-                if (stmt->as.for_stmt.init->type == NODE_LET) {
-                    sb_appendf(&ctx->sb, "%s %s = ", c_type_str_full(ctx, stmt->as.for_stmt.init->as.let.var_type, stmt->as.for_stmt.init->as.let.class_name, false, stmt->as.for_stmt.init->is_heap_owner), stmt->as.for_stmt.init->as.let.name);
-                    gen_expr(ctx, stmt->as.for_stmt.init->as.let.value);
-                } else if (stmt->as.for_stmt.init->type == NODE_ASSIGN) {
-                    sb_appendf(&ctx->sb, "%s = ", stmt->as.for_stmt.init->as.assign.name);
-                    gen_expr(ctx, stmt->as.for_stmt.init->as.assign.value);
+        case NODE_FOR: {
+            bool has_owned_init = (stmt->releases_count > 0 || stmt->frees_count > 0);
+            if (has_owned_init) {
+                emit_indent(ctx);
+                sb_append(&ctx->sb, "{\n");
+                ctx->indent_level++;
+                emit_indent(ctx);
+                if (stmt->as.for_stmt.init) {
+                    if (stmt->as.for_stmt.init->type == NODE_LET) {
+                        sb_appendf(&ctx->sb, "%s %s = ", c_type_str_full(ctx, stmt->as.for_stmt.init->as.let.var_type, stmt->as.for_stmt.init->as.let.class_name, false, stmt->as.for_stmt.init->is_heap_owner), stmt->as.for_stmt.init->as.let.name);
+                        gen_expr(ctx, stmt->as.for_stmt.init->as.let.value);
+                    } else if (stmt->as.for_stmt.init->type == NODE_ASSIGN) {
+                        sb_appendf(&ctx->sb, "%s = ", stmt->as.for_stmt.init->as.assign.name);
+                        gen_expr(ctx, stmt->as.for_stmt.init->as.assign.value);
+                    }
                 }
-            }
-            sb_append(&ctx->sb, "; ");
-            if (stmt->as.for_stmt.cond) gen_expr(ctx, stmt->as.for_stmt.cond);
-            sb_append(&ctx->sb, "; ");
-            if (stmt->as.for_stmt.step) {
-                if (stmt->as.for_stmt.step->type == NODE_ASSIGN) {
-                    sb_appendf(&ctx->sb, "%s = ", stmt->as.for_stmt.step->as.assign.name);
-                    gen_expr(ctx, stmt->as.for_stmt.step->as.assign.value);
-                } else {
-                    gen_expr(ctx, stmt->as.for_stmt.step);
+                sb_append(&ctx->sb, ";\n");
+                emit_indent(ctx);
+                sb_append(&ctx->sb, "for (; ");
+                if (stmt->as.for_stmt.cond) gen_expr(ctx, stmt->as.for_stmt.cond);
+                sb_append(&ctx->sb, "; ");
+                if (stmt->as.for_stmt.step) {
+                    if (stmt->as.for_stmt.step->type == NODE_ASSIGN) {
+                        sb_appendf(&ctx->sb, "%s = ", stmt->as.for_stmt.step->as.assign.name);
+                        gen_expr(ctx, stmt->as.for_stmt.step->as.assign.value);
+                    } else {
+                        gen_expr(ctx, stmt->as.for_stmt.step);
+                    }
                 }
+                sb_append(&ctx->sb, ") ");
+                gen_block(ctx, stmt->as.for_stmt.body);
+                emit_frees(ctx, stmt);
+                emit_releases(ctx, stmt);
+                ctx->indent_level--;
+                emit_indent(ctx);
+                sb_append(&ctx->sb, "}\n");
+            } else {
+                emit_indent(ctx);
+                sb_append(&ctx->sb, "for (");
+                if (stmt->as.for_stmt.init) {
+                    if (stmt->as.for_stmt.init->type == NODE_LET) {
+                        sb_appendf(&ctx->sb, "%s %s = ", c_type_str_full(ctx, stmt->as.for_stmt.init->as.let.var_type, stmt->as.for_stmt.init->as.let.class_name, false, stmt->as.for_stmt.init->is_heap_owner), stmt->as.for_stmt.init->as.let.name);
+                        gen_expr(ctx, stmt->as.for_stmt.init->as.let.value);
+                    } else if (stmt->as.for_stmt.init->type == NODE_ASSIGN) {
+                        sb_appendf(&ctx->sb, "%s = ", stmt->as.for_stmt.init->as.assign.name);
+                        gen_expr(ctx, stmt->as.for_stmt.init->as.assign.value);
+                    }
+                }
+                sb_append(&ctx->sb, "; ");
+                if (stmt->as.for_stmt.cond) gen_expr(ctx, stmt->as.for_stmt.cond);
+                sb_append(&ctx->sb, "; ");
+                if (stmt->as.for_stmt.step) {
+                    if (stmt->as.for_stmt.step->type == NODE_ASSIGN) {
+                        sb_appendf(&ctx->sb, "%s = ", stmt->as.for_stmt.step->as.assign.name);
+                        gen_expr(ctx, stmt->as.for_stmt.step->as.assign.value);
+                    } else {
+                        gen_expr(ctx, stmt->as.for_stmt.step);
+                    }
+                }
+                sb_append(&ctx->sb, ") ");
+                gen_block(ctx, stmt->as.for_stmt.body);
             }
-            sb_append(&ctx->sb, ") ");
-            gen_block(ctx, stmt->as.for_stmt.body);
             break;
+        }
 
         case NODE_RETURN:
             if (stmt->as.return_stmt.value) {
@@ -2261,6 +3052,7 @@ static void gen_stmt(CodegenCtx *ctx, AstNode *stmt) {
                     gen_expr(ctx, val);
                     sb_append(&ctx->sb, "));\n");
                 }
+                emit_nulls(ctx, stmt);
                 break;
             }
 
@@ -2314,6 +3106,7 @@ static void gen_stmt(CodegenCtx *ctx, AstNode *stmt) {
             }
             emit_indent(ctx);
             sb_append(&ctx->sb, "printf(\"\\n\");\n");
+            emit_nulls(ctx, stmt);
             break;
         }
 
@@ -2410,6 +3203,7 @@ static void gen_stmt(CodegenCtx *ctx, AstNode *stmt) {
             emit_indent(ctx);
             gen_expr(ctx, stmt->as.expr_stmt.expr);
             sb_append(&ctx->sb, ";\n");
+            emit_nulls(ctx, stmt);
             break;
 
         case NODE_BLOCK:
@@ -2621,15 +3415,38 @@ static void gen_enum_helpers(CodegenCtx *ctx, AstNode *program) {
                     sb_appendf(&ctx->sb, "%s %s",
                                c_type_str_full(ctx, fn->as.field.type, fn->as.field.class_name, false, false),
                                fn->as.field.name);
+                    if (fn->as.field.type == TY_STRING && !fn->as.field.is_array && !fn->as.field.is_map) {
+                        sb_appendf(&ctx->sb, ", int %s_is_owned", fn->as.field.name);
+                    }
                 }
             }
             sb_append(&ctx->sb, ") {\n");
-            sb_appendf(&ctx->sb, "    %s *p = (%s *)malloc(sizeof(%s));\n", ename, ename, ename);
+            sb_appendf(&ctx->sb, "    %s *p = (%s *)calloc(1, sizeof(%s));\n", ename, ename, ename);
+            sb_appendf(&ctx->sb, "    if (!p) {\n");
+            sb_appendf(&ctx->sb, "        fprintf(stderr, \"Memory allocation failed in %s_new_%s()\\n\");\n", ename, vname);
+            sb_append(&ctx->sb, "        exit(1);\n");
+            sb_append(&ctx->sb, "    }\n");
             sb_appendf(&ctx->sb, "    p->tag = %s_TAG_%s;\n", upper_ename, vname);
             if (!vn->as.variant_decl.is_unit && vn->as.variant_decl.field_count > 0) {
                 for (int f = 0; f < vn->as.variant_decl.field_count; f++) {
                     AstNode *fn = vn->as.variant_decl.fields[f];
-                    sb_appendf(&ctx->sb, "    p->as.%s.%s = %s;\n", vname, fn->as.field.name, fn->as.field.name);
+                    const char *fname = fn->as.field.name;
+                    if (fn->as.field.type == TY_STRING && !fn->as.field.is_array && !fn->as.field.is_map) {
+                        sb_appendf(&ctx->sb, "    if (%s) {\n", fname);
+                        sb_appendf(&ctx->sb, "        if (%s_is_owned) {\n", fname);
+                        sb_appendf(&ctx->sb, "            p->as.%s.%s = %s;\n", vname, fname, fname);
+                        sb_appendf(&ctx->sb, "        } else {\n");
+                        sb_appendf(&ctx->sb, "            p->as.%s.%s = strdup(%s);\n", vname, fname, fname);
+                        sb_appendf(&ctx->sb, "            if (!p->as.%s.%s) {\n", vname, fname);
+                        sb_appendf(&ctx->sb, "                %s_free(p);\n", ename);
+                        sb_appendf(&ctx->sb, "                fprintf(stderr, \"Memory allocation failed in strdup() for %s.%s.%s\\n\");\n", ename, vname, fname);
+                        sb_append(&ctx->sb, "                exit(1);\n");
+                        sb_append(&ctx->sb, "            }\n");
+                        sb_append(&ctx->sb, "        }\n");
+                        sb_append(&ctx->sb, "    }\n");
+                    } else {
+                        sb_appendf(&ctx->sb, "    p->as.%s.%s = %s;\n", vname, fname, fname);
+                    }
                 }
             }
             sb_append(&ctx->sb, "    return p;\n");
@@ -2667,9 +3484,10 @@ static void gen_class_helpers(CodegenCtx *ctx, AstNode *program) {
         sb_appendf(&ctx->sb, "struct %s {\n", cls->as.class_decl.name);
         for (int f = 0; f < cls->as.class_decl.field_count; f++) {
             AstNode *f_node = cls->as.class_decl.fields[f];
-            sb_appendf(&ctx->sb, "    %s %s;\n",
-                       c_type_str_decl_full(ctx, f_node->as.field.type, f_node->as.field.class_name, f_node->as.field.is_array, f_node->as.field.is_map, f_node->is_heap_owner),
-                       f_node->as.field.name);
+            const char *fld_type = f_node->as.field.type_desc ?
+                c_type_str_desc(ctx, f_node->as.field.type_desc) :
+                c_type_str_decl_full(ctx, f_node->as.field.type, f_node->as.field.class_name, f_node->as.field.is_array, f_node->as.field.is_map, f_node->is_heap_owner);
+            sb_appendf(&ctx->sb, "    %s %s;\n", fld_type, f_node->as.field.name);
         }
         sb_append(&ctx->sb, "};\n\n");
     }
@@ -2682,10 +3500,17 @@ static void gen_class_helpers(CodegenCtx *ctx, AstNode *program) {
         sb_append(&ctx->sb, "    if (p) {\n");
         for (int f = 0; f < cls->as.class_decl.field_count; f++) {
             AstNode *f_node = cls->as.class_decl.fields[f];
+            if (f_node->as.field.type_desc) {
+                char fld_name[256];
+                snprintf(fld_name, sizeof(fld_name), "p->%s", f_node->as.field.name);
+                sb_append(&ctx->sb, "        ");
+                emit_typedesc_cleanup(ctx, fld_name, f_node->as.field.type_desc);
+                continue;
+            }
             if (f_node->as.field.is_map) {
                 if (f_node->as.field.is_array && f_node->as.field.type == TY_CLASS && f_node->as.field.class_name) {
                     sb_appendf(&ctx->sb, "        if (p->%s) __cco_map_free(p->%s, (__cco_val_free_fn)__cco_free_arr_of_%s);\n", f_node->as.field.name, f_node->as.field.name, f_node->as.field.class_name);
-                } else if (f_node->as.field.type == TY_CLASS && f_node->as.field.class_name && !f_node->as.field.is_array) {
+                } else if ((f_node->as.field.type == TY_CLASS || f_node->as.field.type == TY_ENUM) && f_node->as.field.class_name && !f_node->as.field.is_array) {
                     sb_appendf(&ctx->sb, "        if (p->%s) __cco_map_free(p->%s, (__cco_val_free_fn)%s_free);\n", f_node->as.field.name, f_node->as.field.name, f_node->as.field.class_name);
                 } else if (f_node->as.field.is_array) {
                     sb_appendf(&ctx->sb, "        if (p->%s) __cco_map_free(p->%s, (__cco_val_free_fn)__cco_free_arr);\n", f_node->as.field.name, f_node->as.field.name);
@@ -2695,7 +3520,7 @@ static void gen_class_helpers(CodegenCtx *ctx, AstNode *program) {
             } else if (f_node->as.field.type == TY_CLASS && f_node->as.field.class_name && !f_node->as.field.is_array) {
                 sb_appendf(&ctx->sb, "        %s_free(p->%s);\n", f_node->as.field.class_name, f_node->as.field.name);
             } else if (f_node->as.field.is_array) {
-                if (f_node->as.field.type == TY_CLASS && f_node->as.field.class_name) {
+                if ((f_node->as.field.type == TY_CLASS || f_node->as.field.type == TY_ENUM) && f_node->as.field.class_name) {
                     sb_appendf(&ctx->sb, "        if (p->%s != NULL) {\n", f_node->as.field.name);
                     sb_appendf(&ctx->sb, "            for (int __i = 0; __i < __cco_arr_len(p->%s); __i++) {\n", f_node->as.field.name);
                     sb_appendf(&ctx->sb, "                if (p->%s[__i] != NULL) { %s_free(p->%s[__i]); }\n", f_node->as.field.name, f_node->as.field.class_name, f_node->as.field.name);
@@ -2739,26 +3564,225 @@ static void gen_class_helpers(CodegenCtx *ctx, AstNode *program) {
             for (int f = 0; f < cls->as.class_decl.field_count; f++) {
                 if (f > 0) sb_append(&ctx->sb, ", ");
                 AstNode *f_node = cls->as.class_decl.fields[f];
-                sb_appendf(&ctx->sb, "%s %s",
-                           c_type_str_decl_full(ctx, f_node->as.field.type, f_node->as.field.class_name, f_node->as.field.is_array, f_node->as.field.is_map, f_node->is_heap_owner),
-                           f_node->as.field.name);
+                const char *fld_type = f_node->as.field.type_desc ?
+                    c_type_str_desc(ctx, f_node->as.field.type_desc) :
+                    c_type_str_decl_full(ctx, f_node->as.field.type, f_node->as.field.class_name, f_node->as.field.is_array, f_node->as.field.is_map, f_node->is_heap_owner);
+                sb_appendf(&ctx->sb, "%s %s", fld_type, f_node->as.field.name);
+                if (f_node->as.field.type == TY_STRING && !f_node->as.field.is_array && !f_node->as.field.is_map) {
+                    sb_appendf(&ctx->sb, ", int %s_is_owned", f_node->as.field.name);
+                }
             }
         }
         sb_append(&ctx->sb, ") {\n");
-        sb_appendf(&ctx->sb, "    %s *__obj = (%s *)malloc(sizeof(%s));\n", cname, cname, cname);
+        sb_appendf(&ctx->sb, "    %s *__obj = (%s *)calloc(1, sizeof(%s));\n", cname, cname, cname);
+        sb_appendf(&ctx->sb, "    if (!__obj) {\n");
+        sb_appendf(&ctx->sb, "        fprintf(stderr, \"Memory allocation failed in %s_new()\\n\");\n", cname);
+        sb_append(&ctx->sb, "        exit(1);\n");
+        sb_append(&ctx->sb, "    }\n");
         for (int f = 0; f < cls->as.class_decl.field_count; f++) {
             AstNode *f_node = cls->as.class_decl.fields[f];
             const char *fname = f_node->as.field.name;
-            sb_appendf(&ctx->sb, "    __obj->%s = %s;\n", fname, fname);
+            if (f_node->as.field.type == TY_STRING && !f_node->as.field.is_array && !f_node->as.field.is_map) {
+                sb_appendf(&ctx->sb, "    if (%s) {\n", fname);
+                sb_appendf(&ctx->sb, "        if (%s_is_owned) {\n", fname);
+                sb_appendf(&ctx->sb, "            __obj->%s = %s;\n", fname, fname);
+                sb_appendf(&ctx->sb, "        } else {\n");
+                sb_appendf(&ctx->sb, "            __obj->%s = strdup(%s);\n", fname, fname);
+                sb_appendf(&ctx->sb, "            if (!__obj->%s) {\n", fname);
+                sb_appendf(&ctx->sb, "                %s_free(__obj);\n", cname);
+                sb_appendf(&ctx->sb, "                fprintf(stderr, \"Memory allocation failed in strdup() for %s.%s\\n\");\n", cname, fname);
+                sb_append(&ctx->sb, "                exit(1);\n");
+                sb_append(&ctx->sb, "            }\n");
+                sb_append(&ctx->sb, "        }\n");
+                sb_append(&ctx->sb, "    }\n");
+            } else {
+                sb_appendf(&ctx->sb, "    __obj->%s = %s;\n", fname, fname);
+            }
         }
         sb_append(&ctx->sb, "    return __obj;\n");
         sb_append(&ctx->sb, "}\n\n");
     }
 }
 
+static void collect_and_emit_helpers_for_typedesc(CodegenCtx *ctx, const TypeDesc *td) {
+    if (!td) return;
+    if (td->kind == TYPEDESC_MAP) {
+        TypeDesc *v = td->as.map_desc.val_type;
+        if (v && v->kind == TYPEDESC_MAP) {
+            collect_and_emit_helpers_for_typedesc(ctx, v);
+            TypeDesc *ik = v->as.map_desc.key_type;
+            TypeDesc *iv = v->as.map_desc.val_type;
+            const char *iks = (ik && ik->as.primitive_desc.primitive_kind == TY_STRING) ? "string" : "int";
+            const char *ivs = (iv && iv->kind != TYPEDESC_PRIMITIVE) ? iv->as.named_desc.name : ((iv && iv->as.primitive_desc.primitive_kind == TY_STRING) ? "string" : "int");
+            char helper_name[128];
+            snprintf(helper_name, sizeof(helper_name), "__cco_free_map_%s_%s", iks, ivs);
+            if (!helper_already_emitted(ctx, helper_name)) {
+                mark_helper_emitted(ctx, helper_name);
+                sb_appendf(&ctx->sb, "static inline void %s(void *m) {\n", helper_name);
+                if (iv && iv->kind != TYPEDESC_PRIMITIVE) {
+                    sb_appendf(&ctx->sb, "    if (m) __cco_map_free((__cco_map *)m, (__cco_val_free_fn)%s_free);\n", iv->as.named_desc.name);
+                } else if (iv && iv->as.primitive_desc.primitive_kind == TY_STRING) {
+                    sb_appendf(&ctx->sb, "    if (m) __cco_map_free((__cco_map *)m, (__cco_val_free_fn)free);\n");
+                } else {
+                    sb_appendf(&ctx->sb, "    if (m) __cco_map_free((__cco_map *)m, NULL);\n");
+                }
+                sb_append(&ctx->sb, "}\n\n");
+            }
+        } else if (v && v->kind == TYPEDESC_ARRAY) {
+            collect_and_emit_helpers_for_typedesc(ctx, v);
+            TypeDesc *elem = v->as.array_desc.elem_type;
+            if (elem && elem->kind == TYPEDESC_MAP) {
+                TypeDesc *ik = elem->as.map_desc.key_type;
+                TypeDesc *iv = elem->as.map_desc.val_type;
+                const char *iks = (ik && ik->as.primitive_desc.primitive_kind == TY_STRING) ? "string" : "int";
+                const char *ivs = (iv && iv->kind != TYPEDESC_PRIMITIVE) ? iv->as.named_desc.name : ((iv && iv->as.primitive_desc.primitive_kind == TY_STRING) ? "string" : "int");
+                char helper_name[128];
+                snprintf(helper_name, sizeof(helper_name), "__cco_free_arr_of_map_%s_%s", iks, ivs);
+                if (!helper_already_emitted(ctx, helper_name)) {
+                    mark_helper_emitted(ctx, helper_name);
+                    sb_appendf(&ctx->sb, "static inline void %s(void *arr) {\n", helper_name);
+                    sb_append(&ctx->sb, "    if (arr) {\n");
+                    sb_append(&ctx->sb, "        __cco_map **__marr = (__cco_map **)arr;\n");
+                    sb_append(&ctx->sb, "        for (int __i = 0; __i < __cco_arr_len(__marr); __i++) {\n");
+                    if (iv && iv->kind != TYPEDESC_PRIMITIVE) {
+                        sb_appendf(&ctx->sb, "            if (__marr[__i]) __cco_map_free(__marr[__i], (__cco_val_free_fn)%s_free);\n", iv->as.named_desc.name);
+                    } else if (iv && iv->as.primitive_desc.primitive_kind == TY_STRING) {
+                        sb_appendf(&ctx->sb, "            if (__marr[__i]) __cco_map_free(__marr[__i], (__cco_val_free_fn)free);\n");
+                    } else {
+                        sb_appendf(&ctx->sb, "            if (__marr[__i]) __cco_map_free(__marr[__i], NULL);\n");
+                    }
+                    sb_append(&ctx->sb, "        }\n");
+                    sb_append(&ctx->sb, "        __cco_free_arr(arr);\n");
+                    sb_append(&ctx->sb, "    }\n");
+                    sb_append(&ctx->sb, "}\n\n");
+                }
+            } else if (elem && (elem->kind == TYPEDESC_CLASS || elem->kind == TYPEDESC_ENUM || elem->kind == TYPEDESC_NAMED)) {
+                const char *cname = elem->as.named_desc.name;
+                char helper_name[128];
+                snprintf(helper_name, sizeof(helper_name), "__cco_free_arr_of_%s", cname);
+                if (!helper_already_emitted(ctx, helper_name)) {
+                    mark_helper_emitted(ctx, helper_name);
+                    sb_appendf(&ctx->sb, "static inline void %s(void *arr) {\n", helper_name);
+                    sb_append(&ctx->sb, "    if (arr) {\n");
+                    sb_appendf(&ctx->sb, "        %s **__items = (%s **)arr;\n", cname, cname);
+                    sb_append(&ctx->sb, "        for (int __i = 0; __i < __cco_arr_len(__items); __i++) {\n");
+                    sb_appendf(&ctx->sb, "            if (__items[__i]) %s_free(__items[__i]);\n", cname);
+                    sb_append(&ctx->sb, "        }\n");
+                    sb_append(&ctx->sb, "        __cco_free_arr(arr);\n");
+                    sb_append(&ctx->sb, "    }\n");
+                    sb_append(&ctx->sb, "}\n\n");
+                }
+            } else if (elem && elem->kind == TYPEDESC_PRIMITIVE && elem->as.primitive_desc.primitive_kind == TY_STRING) {
+                char helper_name[128];
+                snprintf(helper_name, sizeof(helper_name), "__cco_free_arr_of_string");
+                if (!helper_already_emitted(ctx, helper_name)) {
+                    mark_helper_emitted(ctx, helper_name);
+                    sb_append(&ctx->sb, "static inline void __cco_free_arr_of_string(void *arr) {\n");
+                    sb_append(&ctx->sb, "    if (arr) {\n");
+                    sb_append(&ctx->sb, "        char **__sarr = (char **)arr;\n");
+                    sb_append(&ctx->sb, "        for (int __i = 0; __i < __cco_arr_len(__sarr); __i++) {\n");
+                    sb_append(&ctx->sb, "            if (__sarr[__i]) free(__sarr[__i]);\n");
+                    sb_append(&ctx->sb, "        }\n");
+                    sb_append(&ctx->sb, "        __cco_free_arr(arr);\n");
+                    sb_append(&ctx->sb, "    }\n");
+                    sb_append(&ctx->sb, "}\n\n");
+                }
+            }
+        }
+    } else if (td->kind == TYPEDESC_ARRAY) {
+        collect_and_emit_helpers_for_typedesc(ctx, td->as.array_desc.elem_type);
+    }
+}
+
+static void scan_all_typedescs(CodegenCtx *ctx, AstNode *node) {
+    if (!node) return;
+    switch (node->type) {
+        case NODE_PROGRAM:
+            for (int i = 0; i < node->as.program.class_count; i++) scan_all_typedescs(ctx, node->as.program.classes[i]);
+            for (int i = 0; i < node->as.program.enum_count; i++) scan_all_typedescs(ctx, node->as.program.enums[i]);
+            for (int i = 0; i < node->as.program.count; i++) scan_all_typedescs(ctx, node->as.program.functions[i]);
+            break;
+        case NODE_CLASS:
+            for (int i = 0; i < node->as.class_decl.field_count; i++) {
+                if (node->as.class_decl.fields[i]->as.field.type_desc) {
+                    collect_and_emit_helpers_for_typedesc(ctx, node->as.class_decl.fields[i]->as.field.type_desc);
+                }
+            }
+            for (int i = 0; i < node->as.class_decl.method_count; i++) scan_all_typedescs(ctx, node->as.class_decl.methods[i]);
+            break;
+        case NODE_ENUM:
+            break;
+        case NODE_FUNCTION:
+            if (node->as.function.return_type_desc) collect_and_emit_helpers_for_typedesc(ctx, node->as.function.return_type_desc);
+            if (node->as.function.param_type_descs) {
+                for (int i = 0; i < node->as.function.param_count; i++) {
+                    if (node->as.function.param_type_descs[i]) collect_and_emit_helpers_for_typedesc(ctx, node->as.function.param_type_descs[i]);
+                }
+            }
+            scan_all_typedescs(ctx, node->as.function.body);
+            break;
+        case NODE_METHOD:
+            if (node->as.method.return_type_desc) collect_and_emit_helpers_for_typedesc(ctx, node->as.method.return_type_desc);
+            if (node->as.method.param_type_descs) {
+                for (int i = 0; i < node->as.method.param_count; i++) {
+                    if (node->as.method.param_type_descs[i]) collect_and_emit_helpers_for_typedesc(ctx, node->as.method.param_type_descs[i]);
+                }
+            }
+            scan_all_typedescs(ctx, node->as.method.body);
+            break;
+        case NODE_BLOCK:
+            for (int i = 0; i < node->as.block.count; i++) scan_all_typedescs(ctx, node->as.block.stmts[i]);
+            break;
+        case NODE_LET:
+            if (node->as.let.type_desc) collect_and_emit_helpers_for_typedesc(ctx, node->as.let.type_desc);
+            scan_all_typedescs(ctx, node->as.let.value);
+            break;
+        case NODE_ASSIGN:
+            if (node->as.assign.type_desc) collect_and_emit_helpers_for_typedesc(ctx, node->as.assign.type_desc);
+            scan_all_typedescs(ctx, node->as.assign.value);
+            break;
+        case NODE_ALLOC:
+            if (node->as.alloc.type_desc) collect_and_emit_helpers_for_typedesc(ctx, node->as.alloc.type_desc);
+            break;
+        case NODE_IF:
+            scan_all_typedescs(ctx, node->as.if_stmt.cond);
+            scan_all_typedescs(ctx, node->as.if_stmt.then_b);
+            scan_all_typedescs(ctx, node->as.if_stmt.else_b);
+            break;
+        case NODE_WHILE:
+            scan_all_typedescs(ctx, node->as.while_stmt.cond);
+            scan_all_typedescs(ctx, node->as.while_stmt.body);
+            break;
+        case NODE_FOR:
+            scan_all_typedescs(ctx, node->as.for_stmt.init);
+            scan_all_typedescs(ctx, node->as.for_stmt.cond);
+            scan_all_typedescs(ctx, node->as.for_stmt.step);
+            scan_all_typedescs(ctx, node->as.for_stmt.body);
+            break;
+        case NODE_MATCH:
+            scan_all_typedescs(ctx, node->as.match_stmt.expr);
+            for (int i = 0; i < node->as.match_stmt.arm_count; i++) {
+                scan_all_typedescs(ctx, node->as.match_stmt.arms[i]->as.match_arm.body);
+            }
+            break;
+        case NODE_CALL:
+            for (int i = 0; i < node->as.call.arg_count; i++) scan_all_typedescs(ctx, node->as.call.args[i]);
+            break;
+        default:
+            break;
+    }
+}
+
+static void gen_recursive_cleanup_helpers(CodegenCtx *ctx, AstNode *program) {
+    if (!program || program->type != NODE_PROGRAM) return;
+    scan_all_typedescs(ctx, program);
+}
+
 static void gen_method(CodegenCtx *ctx, const char *class_name, AstNode *m_node) {
     ctx->current_function = m_node;
-    const char *ret_type_str = c_type_str_decl_full(ctx, m_node->as.method.return_type, m_node->as.method.return_class_name, m_node->as.method.return_is_array, m_node->as.method.return_is_map, m_node->as.method.returns_heap_pointer);
+    const char *ret_type_str = m_node->as.method.return_type_desc ?
+        c_type_str_desc(ctx, m_node->as.method.return_type_desc) :
+        c_type_str_decl_full(ctx, m_node->as.method.return_type, m_node->as.method.return_class_name, m_node->as.method.return_is_array, m_node->as.method.return_is_map, m_node->as.method.returns_heap_pointer);
     sb_appendf(&ctx->sb, "%s %s_%s(",
                ret_type_str,
                class_name, m_node->as.method.name);
@@ -2771,9 +3795,17 @@ static void gen_method(CodegenCtx *ctx, const char *class_name, AstNode *m_node)
             bool is_bor = m_node->as.method.param_is_borrowed ? m_node->as.method.param_is_borrowed[i] : false;
             bool is_arr = m_node->as.method.param_is_array ? m_node->as.method.param_is_array[i] : false;
             bool is_map = m_node->as.method.param_is_map ? m_node->as.method.param_is_map[i] : false;
-            sb_appendf(&ctx->sb, "%s %s",
-                       (is_arr || is_map) ? c_type_str_decl_full(ctx, m_node->as.method.param_types[i], m_node->as.method.param_class_names[i], is_arr, is_map, false) : c_type_str_full(ctx, m_node->as.method.param_types[i], m_node->as.method.param_class_names[i], is_bor, false),
-                       m_node->as.method.param_names[i]);
+            const char *p_type_str;
+            if (is_bor && m_node->as.method.param_class_names && m_node->as.method.param_class_names[i] && is_struct_name(ctx, m_node->as.method.param_class_names[i])) {
+                p_type_str = c_type_str_full(ctx, m_node->as.method.param_types[i], m_node->as.method.param_class_names[i], true, false);
+            } else if (m_node->as.method.param_type_descs && m_node->as.method.param_type_descs[i]) {
+                p_type_str = c_type_str_desc(ctx, m_node->as.method.param_type_descs[i]);
+            } else if (is_arr || is_map) {
+                p_type_str = c_type_str_decl_full(ctx, m_node->as.method.param_types[i], m_node->as.method.param_class_names[i], is_arr, is_map, false);
+            } else {
+                p_type_str = c_type_str_full(ctx, m_node->as.method.param_types[i], m_node->as.method.param_class_names[i], is_bor, false);
+            }
+            sb_appendf(&ctx->sb, "%s %s", p_type_str, m_node->as.method.param_names[i]);
         }
     }
     sb_append(&ctx->sb, ") ");
@@ -2788,7 +3820,9 @@ static void gen_function(CodegenCtx *ctx, AstNode *fn) {
     if (is_main) {
         sb_append(&ctx->sb, "int main(int __cco_main_argc, char **__cco_main_argv) ");
     } else {
-        const char *ret_type_str = c_type_str_decl_full(ctx, fn->as.function.return_type, fn->as.function.return_class_name, fn->as.function.return_is_array, fn->as.function.return_is_map, fn->as.function.returns_heap_pointer);
+        const char *ret_type_str = fn->as.function.return_type_desc ?
+            c_type_str_desc(ctx, fn->as.function.return_type_desc) :
+            c_type_str_decl_full(ctx, fn->as.function.return_type, fn->as.function.return_class_name, fn->as.function.return_is_array, fn->as.function.return_is_map, fn->as.function.returns_heap_pointer);
         const char *c_fn_name = fn->as.function.name;
         if (fn->as.function.is_operator) {
             c_fn_name = get_operator_fn_c_name(fn->as.function.param_class_names[0], fn->as.function.operator_symbol, fn->as.function.param_count);
@@ -2803,9 +3837,17 @@ static void gen_function(CodegenCtx *ctx, AstNode *fn) {
                 bool is_bor = fn->as.function.param_is_borrowed ? fn->as.function.param_is_borrowed[i] : false;
                 bool is_arr = fn->as.function.param_is_array ? fn->as.function.param_is_array[i] : false;
                 bool is_map = fn->as.function.param_is_map ? fn->as.function.param_is_map[i] : false;
-                sb_appendf(&ctx->sb, "%s %s",
-                           (is_arr || is_map) ? c_type_str_decl_full(ctx, fn->as.function.param_types[i], fn->as.function.param_class_names[i], is_arr, is_map, false) : c_type_str_full(ctx, fn->as.function.param_types[i], fn->as.function.param_class_names[i], is_bor, false),
-                           fn->as.function.param_names[i]);
+                const char *p_type_str;
+                if (is_bor && fn->as.function.param_class_names && fn->as.function.param_class_names[i] && is_struct_name(ctx, fn->as.function.param_class_names[i])) {
+                    p_type_str = c_type_str_full(ctx, fn->as.function.param_types[i], fn->as.function.param_class_names[i], true, false);
+                } else if (fn->as.function.param_type_descs && fn->as.function.param_type_descs[i]) {
+                    p_type_str = c_type_str_desc(ctx, fn->as.function.param_type_descs[i]);
+                } else if (is_arr || is_map) {
+                    p_type_str = c_type_str_decl_full(ctx, fn->as.function.param_types[i], fn->as.function.param_class_names[i], is_arr, is_map, false);
+                } else {
+                    p_type_str = c_type_str_full(ctx, fn->as.function.param_types[i], fn->as.function.param_class_names[i], is_bor, false);
+                }
+                sb_appendf(&ctx->sb, "%s %s", p_type_str, fn->as.function.param_names[i]);
             }
         }
         sb_append(&ctx->sb, ") ");
@@ -3004,15 +4046,37 @@ static void mark_chunk_used(bool *used_chunks, const char *name) {
     }
 }
 
+static void scan_typedesc_usage(const TypeDesc *td, bool *used_chunks, uint32_t *header_flags) {
+    if (!td) return;
+    if (td->kind == TYPEDESC_PRIMITIVE && td->as.primitive_desc.primitive_kind == TY_STRING) {
+        *header_flags |= HEADER_STRING | HEADER_POSIX | HEADER_STDLIB;
+    } else if (td->kind == TYPEDESC_ARRAY) {
+        mark_chunk_used(used_chunks, "free_arr");
+        mark_chunk_used(used_chunks, "arr_len");
+        *header_flags |= HEADER_STDLIB;
+        scan_typedesc_usage(td->as.array_desc.elem_type, used_chunks, header_flags);
+    } else if (td->kind == TYPEDESC_MAP) {
+        mark_chunk_used(used_chunks, "map_free");
+        *header_flags |= HEADER_STDINT | HEADER_STDLIB;
+        scan_typedesc_usage(td->as.map_desc.key_type, used_chunks, header_flags);
+        scan_typedesc_usage(td->as.map_desc.val_type, used_chunks, header_flags);
+    } else if (td->kind == TYPEDESC_CLASS || td->kind == TYPEDESC_ENUM) {
+        *header_flags |= HEADER_STDLIB;
+    }
+}
+
 static void check_releases_usage(AstNode *node, bool *used_chunks, uint32_t *header_flags) {
     if (!node) return;
     for (int i = 0; i < node->releases_count; i++) {
         *header_flags |= HEADER_STDLIB;
-        if (node->releases_to_emit && node->releases_to_emit[i].is_map) {
+        if (node->releases_to_emit && node->releases_to_emit[i].type_desc) {
+            scan_typedesc_usage(node->releases_to_emit[i].type_desc, used_chunks, header_flags);
+        } else if (node->releases_to_emit && node->releases_to_emit[i].is_map) {
             mark_chunk_used(used_chunks, "map_free");
             *header_flags |= HEADER_STDINT;
         } else if (node->releases_to_emit && node->releases_to_emit[i].is_array) {
             mark_chunk_used(used_chunks, "free_arr");
+            mark_chunk_used(used_chunks, "arr_len");
         }
     }
     if (node->frees_count > 0) {
@@ -3060,6 +4124,7 @@ static void scan_node_usage(AstNode *node, bool *used_chunks, uint32_t *header_f
                 }
                 if (fld->as.field.is_array) {
                     mark_chunk_used(used_chunks, "free_arr");
+                    mark_chunk_used(used_chunks, "arr_len");
                     *header_flags |= HEADER_STDLIB;
                 }
             }
@@ -3265,6 +4330,7 @@ static void scan_node_usage(AstNode *node, bool *used_chunks, uint32_t *header_f
             }
             if (node->as.alloc.elem_type == TY_CLASS) {
                 mark_chunk_used(used_chunks, "free_arr");
+                mark_chunk_used(used_chunks, "arr_len");
             }
             scan_node_usage(node->as.alloc.count_expr, used_chunks, header_flags, needs_libm);
             break;
@@ -3485,8 +4551,10 @@ static void resolve_transitive_dependencies(bool *used_chunks) {
     }
 }
 
+
 char *generate_c_code(AstNode *program, AstArena *arena) {
     CodegenCtx ctx;
+    memset(&ctx, 0, sizeof(CodegenCtx));
     ctx.sb = create_buffer();
     ctx.indent_level = 0;
     ctx.program = program;
@@ -3511,7 +4579,28 @@ char *generate_c_code(AstNode *program, AstArena *arena) {
 
     if (program && program->type == NODE_PROGRAM) {
         if (program->as.program.class_count > 0 || program->as.program.enum_count > 0) {
-            header_flags |= HEADER_STDLIB;
+            header_flags |= HEADER_STDLIB | HEADER_STDIO;
+            for (int i = 0; i < program->as.program.class_count; i++) {
+                AstNode *cls = program->as.program.classes[i];
+                for (int f = 0; f < cls->as.class_decl.field_count; f++) {
+                    if (cls->as.class_decl.fields[f]->as.field.type == TY_STRING) {
+                        header_flags |= HEADER_STRING | HEADER_POSIX;
+                        break;
+                    }
+                }
+            }
+            for (int i = 0; i < program->as.program.enum_count; i++) {
+                AstNode *en = program->as.program.enums[i];
+                for (int v = 0; v < en->as.enum_decl.variant_count; v++) {
+                    AstNode *vn = en->as.enum_decl.variants[v];
+                    for (int f = 0; f < vn->as.variant_decl.field_count; f++) {
+                        if (vn->as.variant_decl.fields[f]->as.field.type == TY_STRING) {
+                            header_flags |= HEADER_STRING | HEADER_POSIX;
+                            break;
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -3575,9 +4664,23 @@ char *generate_c_code(AstNode *program, AstArena *arena) {
 
     for (size_t i = 0; i < PRELUDE_CHUNK_COUNT; i++) {
         if (used_chunks[i]) {
-            sb_append(&ctx.sb, PRELUDE_CHUNKS[i].c_source);
+            if (strcmp(PRELUDE_CHUNKS[i].name, "map_put") == 0) {
+                const char *orig = PRELUDE_CHUNKS[i].c_source;
+                const char *target = "if (free_fn && m->buckets[idx].value) {";
+                const char *pos = strstr(orig, target);
+                if (pos) {
+                    sb_append_len(&ctx.sb, orig, (size_t)(pos - orig));
+                    sb_append(&ctx.sb, "if (free_fn && m->buckets[idx].value && m->buckets[idx].value != val) {");
+                    sb_append(&ctx.sb, pos + strlen(target));
+                } else {
+                    sb_append(&ctx.sb, orig);
+                }
+            } else {
+                sb_append(&ctx.sb, PRELUDE_CHUNKS[i].c_source);
+            }
         }
     }
+
 
     // Struct definitions
     gen_struct_typedefs(&ctx, program);
@@ -3588,11 +4691,16 @@ char *generate_c_code(AstNode *program, AstArena *arena) {
     // Class struct definitions, retain/release/new helpers
     gen_class_helpers(&ctx, program);
 
+    // Recursive container cleanup helpers
+    gen_recursive_cleanup_helpers(&ctx, program);
+
     // Function prototypes
     for (int i = 0; i < program->as.program.count; i++) {
         AstNode *fn = program->as.program.functions[i];
         if (strcmp(fn->as.function.name, "main") == 0) continue;
-        const char *ret_type_str = c_type_str_decl_full(&ctx, fn->as.function.return_type, fn->as.function.return_class_name, fn->as.function.return_is_array, fn->as.function.return_is_map, fn->as.function.returns_heap_pointer);
+        const char *ret_type_str = fn->as.function.return_type_desc ?
+            c_type_str_desc(&ctx, fn->as.function.return_type_desc) :
+            c_type_str_decl_full(&ctx, fn->as.function.return_type, fn->as.function.return_class_name, fn->as.function.return_is_array, fn->as.function.return_is_map, fn->as.function.returns_heap_pointer);
         const char *c_fn_name = fn->as.function.name;
         if (fn->as.function.is_operator) {
             c_fn_name = get_operator_fn_c_name(fn->as.function.param_class_names[0], fn->as.function.operator_symbol, fn->as.function.param_count);
@@ -3606,9 +4714,17 @@ char *generate_c_code(AstNode *program, AstArena *arena) {
                 bool is_bor = fn->as.function.param_is_borrowed ? fn->as.function.param_is_borrowed[p] : false;
                 bool is_arr = fn->as.function.param_is_array ? fn->as.function.param_is_array[p] : false;
                 bool is_map = fn->as.function.param_is_map ? fn->as.function.param_is_map[p] : false;
-                sb_appendf(&ctx.sb, "%s %s",
-                           (is_arr || is_map) ? c_type_str_decl_full(&ctx, fn->as.function.param_types[p], fn->as.function.param_class_names[p], is_arr, is_map, false) : c_type_str_full(&ctx, fn->as.function.param_types[p], fn->as.function.param_class_names[p], is_bor, false),
-                           fn->as.function.param_names[p]);
+                const char *p_type_str;
+                if (is_bor && fn->as.function.param_class_names && fn->as.function.param_class_names[p] && is_struct_name(&ctx, fn->as.function.param_class_names[p])) {
+                    p_type_str = c_type_str_full(&ctx, fn->as.function.param_types[p], fn->as.function.param_class_names[p], true, false);
+                } else if (fn->as.function.param_type_descs && fn->as.function.param_type_descs[p]) {
+                    p_type_str = c_type_str_desc(&ctx, fn->as.function.param_type_descs[p]);
+                } else if (is_arr || is_map) {
+                    p_type_str = c_type_str_decl_full(&ctx, fn->as.function.param_types[p], fn->as.function.param_class_names[p], is_arr, is_map, false);
+                } else {
+                    p_type_str = c_type_str_full(&ctx, fn->as.function.param_types[p], fn->as.function.param_class_names[p], is_bor, false);
+                }
+                sb_appendf(&ctx.sb, "%s %s", p_type_str, fn->as.function.param_names[p]);
             }
         }
         sb_append(&ctx.sb, ");\n");

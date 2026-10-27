@@ -225,6 +225,7 @@ static AstNode *clone_node(AstNode *node, AstArena *arena) {
             c->as.assign.class_name = node->as.assign.class_name ? arena_strdup(arena, node->as.assign.class_name) : NULL;
             c->as.assign.retain_rhs = node->as.assign.retain_rhs;
             c->as.assign.release_old = node->as.assign.release_old;
+            c->as.assign.type_desc = node->as.assign.type_desc;
             break;
         case NODE_MEMBER_ASSIGN:
             c->as.member_assign.object = clone_node(node->as.member_assign.object, arena);
@@ -233,6 +234,8 @@ static AstNode *clone_node(AstNode *node, AstArena *arena) {
             c->as.member_assign.field_class_name = node->as.member_assign.field_class_name ? arena_strdup(arena, node->as.member_assign.field_class_name) : NULL;
             c->as.member_assign.retain_rhs = node->as.member_assign.retain_rhs;
             c->as.member_assign.release_old = node->as.member_assign.release_old;
+            c->as.member_assign.field_is_array = node->as.member_assign.field_is_array;
+            c->as.member_assign.field_is_map = node->as.member_assign.field_is_map;
             break;
         case NODE_INDEX_ASSIGN:
             c->as.index_assign.array_expr = clone_node(node->as.index_assign.array_expr, arena);
