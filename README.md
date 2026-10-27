@@ -192,6 +192,7 @@ The objective is not to replace established languages, but to provide a practica
 | **Static Typing** | Implemented | Strongly typed at compile time; primitive scalar types (`int`, `float`, `bool`, `char`, `string`, `void`). |
 | **Type Inference** | Implemented | Local types inferred from initializers; validated against explicit annotations when provided. |
 | **Declaration by Assignment** | Implemented | Assignment to an unresolved identifier creates a scoped binding (`x = 10;`); reassignment preserves type invariance. |
+| **Optional Semicolons** | Implemented | Statements may be terminated by newlines or semicolons; multiline expressions continue across lines cleanly. |
 | **Range Loops** | Implemented | Half-open interval iteration syntax (`for i in 0..10 { ... }`) desugared into deterministic counting loops. |
 | **Boolean Keywords** | Implemented | Readable logical keywords (`and`, `or`, `not`) supported alongside traditional C operators (`&&`, `\|\|`, `!`). |
 | **Expression-Bodied Functions** | Implemented | Concise single-expression function definitions (`fn f(x: int) -> int = expr;`). |
@@ -203,6 +204,7 @@ The objective is not to replace established languages, but to provide a practica
 | **Classes (Reference Types)** | Implemented | Heap-allocated objects with single ownership, encapsulated methods, and automatic scope-exit deallocation cascades. |
 | **Tagged Unions (Enums)** | Implemented | Sum types with unit and payload variants; evaluated via compile-time exhaustiveness-checked `match` statements. |
 | **Dynamic Collections** | Implemented | Typed arrays (`T[]` via `alloc`), growable lists (`list_new`, `push`, `pop`), and open-addressing hash maps (`map[K]V`). |
+| **Recursive Type Descriptors** | Implemented | Arbitrary nested container descriptors (`int[][]`, `map[string]int[]`, `(map[string]int)[]`) with synthesized recursive cleanups. |
 | **Interfaces (Traits)** | Implemented | Monomorphized at compile time; generic calls generate specialized functions with zero vtable dispatch overhead. |
 | **F-String Interpolation** | Implemented | String interpolation with expression evaluation, automatic type conversion, and brace escaping (`{{`, `}}`). |
 | **POSIX Networking** | Implemented | Core socket primitives (`net_listen`, `net_accept`, `net_recv`, `net_send`, `net_close`, `sleep_ms`) for TCP services. |
@@ -497,7 +499,7 @@ Cco includes a fully self-contained native code generation backend:
 - **Register Allocation**: Linear scan register allocator with automatic stack frame spill-slot assignment.
 - **Machine Code Encoder**: Direct binary instruction encoding (REX prefixes, ModR/M, SIB) without invoking an external assembler.
 - **ELF64 Object Writer**: Generates valid relocatable ELF64 object files (`.o`) containing `.text`, `.rodata`, `.symtab`, `.strtab`, and `.rela.text` sections.
-- **Internal Static Linker (`--use-internal-linker`)**: Directly resolves relocations (`R_X86_64_64`, `R_X86_64_32S`, `R_X86_64_PC32`) and synthesizes an executable ELF header and `PT_LOAD` program headers. It embeds a minimal assembly runtime (`src/runtime_start.s`) utilizing direct Linux kernel syscalls (`sys_write`, `sys_mmap`, `sys_munmap`, `sys_exit`), generating standalone binaries without glibc or GNU `ld`.
+- **Internal Static Linker (`--use-internal-linker`)**: Directly resolves relocations (`R_X86_64_64`, `R_X86_64_32S`, `R_X86_64_PC32`) and synthesizes an executable ELF header and `PT_LOAD` program headers. It embeds a minimal assembly runtime (`src/runtime/runtime_start.s`) utilizing direct Linux kernel syscalls (`sys_write`, `sys_mmap`, `sys_munmap`, `sys_exit`), generating standalone binaries without glibc or GNU `ld`.
 
 ---
 
@@ -717,11 +719,22 @@ Standalone tests, practical application examples, algorithm implementations, and
 Contributions to the Cco compiler are welcome.
 
 ### Repository Organization:
-- `src/`: Core compiler implementation (lexer, parser, AST, semantic analyzer, IR, SSA optimizer, x86-64 backend, ELF generator, internal linker).
-- `selfhost/`: Self-hosted compiler sources written in Cco (`lexer.cco`, `parser.cco`, `typechecker.cco`, `codegen.cco`).
-- `std/`: Cco standard library modules (`net.cco`, `math.cco`, `io.cco`, `string.cco`).
-- `tests/`: Official unit test suites (`tests/unit/`) and integration test programs (`tests/programs/`).
-- `docs/`: Technical specifications and design documentation.
+- `src/`: Modular C11 reference compiler implementation organized into clean subsystems:
+  - `src/common/`: Shared diagnostics, source error formatting, and timing instrumentation.
+  - `src/frontend/`: Lexer, recursive-descent parser, AST definitions, module resolver, trait resolver, and ownership scope analysis.
+  - `src/ir/`: Quadruples IR, SSA dominance frontiers, optimization passes (SCCP, GVN/CSE, LICM, inlining, PGO), and IR verifier.
+  - `src/backend/c11/`: ISO C11 code generator, hash map runtime, and standard library preludes.
+  - `src/backend/x86_64/`: Native machine code generator, linear scan register allocator, instruction encoder, and ELF64 object emitter.
+  - `src/runtime/`: Freestanding assembly runtime (`runtime_start.s`) for standalone Linux executables.
+  - `src/main.c`: Top-level CLI driver and compiler entry point.
+- `selfhost/`: Self-hosted compiler sources written in Cco (`lexer.cco`, `parser.cco`, `typechecker.cco`, `codegen.cco`, `elf_core.cco`, `x86_64_core.cco`).
+- `std/`: Cco standard library modules (`net.cco`, `math.cco`, `io.cco`, `string.cco`, `buffer.cco`, `deque.cco`, `result.cco`, `option.cco`).
+- `tests/`: Extensive regression, unit, and adversarial test suites:
+  - `tests/programs/`: Core integration test programs executed under Valgrind Memcheck.
+  - `tests/unit/`: Unit tests for compiler subsystems (lexer, parser, scope analysis, map runtime).
+  - `tests/diagnostics/`: Phase 17 compiler error diagnostic fixtures and runner.
+  - `tests/phase15/`, `tests/phase16/`, `tests/phase17/`: Native backend differential verification suites.
+- `docs/`: Technical specifications and architectural design documents.
 
 ### Development Workflow:
 1. Ensure all code compiles cleanly under `-Wall -Wextra -Werror -pedantic-errors -std=c11`:
