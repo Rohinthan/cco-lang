@@ -295,6 +295,56 @@ void test_parse_top_level_script() {
     printf("[PASS] test_parse_top_level_script\n");
 }
 
+void test_parse_extern() {
+    const char *src = "extern \"C\" {\n"
+                      "    fn puts(message: string) -> int\n"
+                      "    fn abs(value: int) -> int\n"
+                      "}\n"
+                      "extern \"C\" fn putchar(ch: int) -> int\n"
+                      "fn main() -> int { return 0; }";
+    TokenArray tokens = lex_source(src);
+    AstArena *arena = create_ast_arena();
+    Parser parser = create_parser(tokens, arena);
+
+    AstNode *prog = parse_program(&parser);
+    assert(prog != NULL);
+    assert(prog->type == NODE_PROGRAM);
+    assert(prog->as.program.count == 4);
+
+    AstNode *fn0 = prog->as.program.functions[0];
+    assert(fn0->as.function.is_extern == true);
+    assert(strcmp(fn0->as.function.extern_abi, "C") == 0);
+    assert(strcmp(fn0->as.function.name, "puts") == 0);
+    assert(fn0->as.function.param_count == 1);
+    assert(fn0->as.function.param_is_borrowed[0] == true);
+    assert(fn0->as.function.return_type == TY_INT);
+    assert(fn0->as.function.body == NULL);
+
+    AstNode *fn1 = prog->as.program.functions[1];
+    assert(fn1->as.function.is_extern == true);
+    assert(strcmp(fn1->as.function.extern_abi, "C") == 0);
+    assert(strcmp(fn1->as.function.name, "abs") == 0);
+    assert(fn1->as.function.param_count == 1);
+    assert(fn1->as.function.return_type == TY_INT);
+    assert(fn1->as.function.body == NULL);
+
+    AstNode *fn2 = prog->as.program.functions[2];
+    assert(fn2->as.function.is_extern == true);
+    assert(strcmp(fn2->as.function.extern_abi, "C") == 0);
+    assert(strcmp(fn2->as.function.name, "putchar") == 0);
+    assert(fn2->as.function.param_count == 1);
+    assert(fn2->as.function.return_type == TY_INT);
+    assert(fn2->as.function.body == NULL);
+
+    AstNode *fn3 = prog->as.program.functions[3];
+    assert(fn3->as.function.is_extern == false);
+    assert(fn3->as.function.body != NULL);
+
+    free_ast_arena(arena);
+    free_tokens(&tokens);
+    printf("[PASS] test_parse_extern\n");
+}
+
 int main() {
     printf("Running Parser Unit Tests...\n");
     test_parse_simple_func();
@@ -305,6 +355,7 @@ int main() {
     test_parse_enum();
     test_parse_interface();
     test_parse_top_level_script();
+    test_parse_extern();
     printf("All Parser tests passed!\n");
     return 0;
 }

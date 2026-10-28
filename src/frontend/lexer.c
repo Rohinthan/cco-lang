@@ -37,6 +37,7 @@ void free_tokens(TokenArray *array) {
 
 static TokenType check_keyword(const char *str) {
     if (strcmp(str, "import") == 0) return TOKEN_IMPORT;
+    if (strcmp(str, "extern") == 0) return TOKEN_EXTERN;
     if (strcmp(str, "class") == 0) return TOKEN_CLASS;
     if (strcmp(str, "struct") == 0) return TOKEN_STRUCT;
     if (strcmp(str, "self") == 0) return TOKEN_SELF;
@@ -462,6 +463,7 @@ TokenArray lex_source(const char *source) {
 const char *token_type_to_string(TokenType type) {
     switch (type) {
         case TOKEN_IMPORT: return "import";
+        case TOKEN_EXTERN: return "extern";
         case TOKEN_CLASS: return "class";
         case TOKEN_STRUCT: return "struct";
         case TOKEN_SELF: return "self";
@@ -550,6 +552,7 @@ void dump_tokens(const TokenArray *array) {
         Token tok = array->tokens[i];
         switch (tok.type) {
             case TOKEN_IMPORT:
+            case TOKEN_EXTERN:
             case TOKEN_CLASS:
             case TOKEN_STRUCT:
             case TOKEN_SELF:

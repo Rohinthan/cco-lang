@@ -24,6 +24,7 @@ typedef struct LoopScope {
 typedef struct {
     IrModule *module;
     IrBuilder builder;
+    AstNode *program;
     AstNode *current_fn_ast;
     IrFunction *current_fn;
     VarBinding *sym_table;
@@ -204,6 +205,16 @@ static IrValue *lower_expr(LowerCtx *ctx, AstNode *expr) {
             IrFunction *callee_fn = ir_module_find_function(ctx->module, expr->as.call.callee);
             if (callee_fn) {
                 ret_type = callee_fn->return_type;
+            } else if (ctx->program && ctx->program->type == NODE_PROGRAM) {
+                for (int i = 0; i < ctx->program->as.program.count; i++) {
+                    AstNode *fn_node = ctx->program->as.program.functions[i];
+                    if (fn_node && strcmp(fn_node->as.function.name, expr->as.call.callee) == 0) {
+                        ret_type = map_ast_type(arena, fn_node->as.function.return_type,
+                                                fn_node->as.function.return_is_array,
+                                                fn_node->as.function.return_class_name);
+                        break;
+                    }
+                }
             } else {
                 /* Infer default i32 for non-void C functions, or void */
                 ret_type = ir_type_i32(arena);
@@ -249,6 +260,11 @@ static void lower_stmt(LowerCtx *ctx, AstNode *stmt) {
             if (stmt->as.let.value) {
                 IrValue *val = lower_expr(ctx, stmt->as.let.value);
                 if (val) {
+                    if (stmt->is_heap_owner && stmt->as.let.var_type == TY_STRING && !stmt->as.let.is_array && stmt->as.let.value->type == NODE_LITERAL) {
+                        IrValue *arg_val = val;
+                        IrInstruction *dup = ir_emit_call(&ctx->builder, "strdup", ir_type_ptr(arena, ir_type_char(arena)), &arg_val, 1);
+                        val = dup->result;
+                    }
                     ir_emit_store(&ctx->builder, val, alloca_inst->result);
                 }
             }
@@ -260,6 +276,11 @@ static void lower_stmt(LowerCtx *ctx, AstNode *stmt) {
             if (!b) break;
             IrValue *val = lower_expr(ctx, stmt->as.assign.value);
             if (val && b->slot) {
+                if (stmt->free_old_on_reassign && stmt->as.assign.value->type == NODE_LITERAL && stmt->as.assign.value->as.literal.lit_type == TY_STRING) {
+                    IrValue *arg_val = val;
+                    IrInstruction *dup = ir_emit_call(&ctx->builder, "strdup", ir_type_ptr(arena, ir_type_char(arena)), &arg_val, 1);
+                    val = dup->result;
+                }
                 ir_emit_store(&ctx->builder, val, b->slot);
             }
             break;
@@ -492,6 +513,7 @@ IrModule *ir_lower_ast(AstNode *program, const char *module_name) {
     LowerCtx ctx;
     memset(&ctx, 0, sizeof(ctx));
     ctx.module = mod;
+    ctx.program = program;
     ir_builder_init(&ctx.builder, mod);
 
     /* Lower structs and classes */
@@ -518,6 +540,7 @@ IrModule *ir_lower_ast(AstNode *program, const char *module_name) {
     /* Pre-register all function signatures */
     for (int i = 0; i < program->as.program.count; i++) {
         AstNode *fn_node = program->as.program.functions[i];
+        if (fn_node->as.function.is_extern) continue;
         const char *fn_name = fn_node->as.function.name;
         IrType *ret_type = map_ast_type(mod->arena, fn_node->as.function.return_type,
                                         fn_node->as.function.return_is_array,
@@ -537,6 +560,7 @@ IrModule *ir_lower_ast(AstNode *program, const char *module_name) {
 
     /* Lower functions */
     for (int i = 0; i < program->as.program.count; i++) {
+        if (program->as.program.functions[i]->as.function.is_extern) continue;
         lower_function(&ctx, program->as.program.functions[i]);
     }
 

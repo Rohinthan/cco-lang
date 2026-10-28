@@ -301,6 +301,8 @@ struct AstNode {
             bool returns_heap_pointer;
             bool is_operator;
             char *operator_symbol;
+            bool is_extern;
+            char *extern_abi;
             AstNode *body;
         } function;
 

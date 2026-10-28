@@ -290,6 +290,7 @@ static void analyze_node(ScopeStack *stack, AstNode *node) {
             break;
 
         case NODE_FUNCTION: {
+            if (node->as.function.is_extern) break;
             AstNode *prev_fn = stack->current_function;
             stack->current_function = node;
             analyze_block(stack, node->as.function.body, false);
@@ -1646,6 +1647,7 @@ static void analyze_own_node(OwnScopeStack *stack, AstNode *node) {
 
             for (int f = 0; f < node->as.program.count; f++) {
                 AstNode *fn = node->as.program.functions[f];
+                if (fn->as.function.is_extern) continue;
                 stack->current_function = fn;
                 stack->moved_count = 0;
                 stack->loop_depth = 0;

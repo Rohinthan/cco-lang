@@ -1501,16 +1501,20 @@ static AstNode *parse_match_stmt(Parser *p) {
 }
 
 static AstNode *parse_statement(Parser *p) {
-    if (check(p, TOKEN_FN) || check(p, TOKEN_CLASS) || check(p, TOKEN_STRUCT) || check(p, TOKEN_ENUM) || check(p, TOKEN_INTERFACE) || check(p, TOKEN_IMPL) || check(p, TOKEN_IMPORT)) {
+    if (check(p, TOKEN_FN) || check(p, TOKEN_CLASS) || check(p, TOKEN_STRUCT) || check(p, TOKEN_ENUM) || check(p, TOKEN_INTERFACE) || check(p, TOKEN_IMPL) || check(p, TOKEN_IMPORT) || check(p, TOKEN_EXTERN)) {
         Token tok = peek(p);
         char short_msg[256];
-        snprintf(short_msg, sizeof(short_msg), "unexpected top-level declaration '%s' inside a block — missing '}' on the preceding block/function?", tok.lexeme);
+        if (tok.type == TOKEN_EXTERN) {
+            snprintf(short_msg, sizeof(short_msg), "unexpected 'extern' declaration inside a block — external declarations are only allowed at module scope");
+        } else {
+            snprintf(short_msg, sizeof(short_msg), "unexpected top-level declaration '%s' inside a block — missing '}' on the preceding block/function?", tok.lexeme);
+        }
         ErrorLocation primary = {get_error_filename(), tok.line, tok.col};
         print_formatted_error(
             short_msg,
             primary,
             "unexpected declaration inside block",
-            "top-level declarations ('fn', 'class', 'struct', 'enum', 'interface', 'impl', 'import') cannot be nested inside function or loop blocks — check if a closing brace '}' is missing above",
+            tok.type == TOKEN_EXTERN ? "external declarations cannot be nested inside function or loop blocks" : "top-level declarations ('fn', 'class', 'struct', 'enum', 'interface', 'impl', 'import') cannot be nested inside function or loop blocks — check if a closing brace '}' is missing above",
             NULL,
             NULL,
             NULL
@@ -2146,6 +2150,158 @@ static AstNode *parse_function(Parser *p) {
     return node;
 }
 
+static AstNode *parse_extern_function(Parser *p, const char *abi) {
+    Token tok = consume(p, TOKEN_FN, "Expected 'fn'");
+    Token name_tok = consume(p, TOKEN_IDENT, "Expected function name in extern declaration");
+    char *fn_name = arena_strdup(p->arena, name_tok.lexeme);
+    consume(p, TOKEN_LPAREN, "Expected '(' after function name");
+
+    char **param_names = NULL;
+    Type *param_types = NULL;
+    bool *param_is_array = NULL;
+    bool *param_is_map = NULL;
+    Type *param_key_types = NULL;
+    char **param_class_names = NULL;
+    bool *param_is_borrowed = NULL;
+    TypeDesc **param_type_descs = NULL;
+    int *param_lines = NULL;
+    int *param_cols = NULL;
+    int param_count = 0;
+    int param_cap = 0;
+
+    if (!check(p, TOKEN_RPAREN)) {
+        do {
+            Token p_name = consume(p, TOKEN_IDENT, "Expected parameter name");
+            consume(p, TOKEN_COLON, "Expected ':' after parameter name");
+            char *p_cls = NULL;
+            bool p_borrowed = false;
+            bool p_is_arr = false;
+            bool p_is_map = false;
+            Type p_key_t = TY_INT;
+            bool p_is_impl = false;
+            TypeDesc *p_td = parse_type_desc(p, &p_borrowed, &p_is_impl, false, false);
+            Type p_type = type_desc_to_flat(p_td, &p_cls, &p_is_arr, &p_is_map, &p_key_t, p->arena);
+
+            // Validate supported FFI-1 parameter types
+            if (p_is_impl) {
+                fatal_parser_error(p_name.line, p_name.col, p_name.lexeme, "impl Trait is not supported in extern declarations");
+            }
+            if (p_is_arr || (p_td && p_td->kind == TYPEDESC_ARRAY)) {
+                fatal_parser_error(p_name.line, p_name.col, p_name.lexeme, "array types are not supported in extern \"C\" declarations in FFI-1");
+            }
+            if (p_is_map || (p_td && p_td->kind == TYPEDESC_MAP)) {
+                fatal_parser_error(p_name.line, p_name.col, p_name.lexeme, "map types are not supported in extern \"C\" declarations in FFI-1");
+            }
+            if (p_type == TY_CLASS || (p_td && (p_td->kind == TYPEDESC_CLASS || p_td->kind == TYPEDESC_NAMED))) {
+                fatal_parser_error(p_name.line, p_name.col, p_name.lexeme, "class/struct types are not supported in extern \"C\" declarations in FFI-1");
+            }
+            if (p_type == TY_VOID) {
+                fatal_parser_error(p_name.line, p_name.col, p_name.lexeme, "void is not a valid parameter type in extern \"C\" declarations");
+            }
+
+            if (param_count >= param_cap) {
+                param_cap = param_cap == 0 ? 4 : param_cap * 2;
+                char **new_names = (char **)arena_alloc_array(p->arena, param_cap, sizeof(char *));
+                Type *new_types = (Type *)arena_alloc_array(p->arena, param_cap, sizeof(Type));
+                bool *new_arr = (bool *)arena_alloc_array(p->arena, param_cap, sizeof(bool));
+                bool *new_map = (bool *)arena_alloc_array(p->arena, param_cap, sizeof(bool));
+                Type *new_ktypes = (Type *)arena_alloc_array(p->arena, param_cap, sizeof(Type));
+                char **new_cls = (char **)arena_alloc_array(p->arena, param_cap, sizeof(char *));
+                bool *new_bor = (bool *)arena_alloc_array(p->arena, param_cap, sizeof(bool));
+                TypeDesc **new_tds = (TypeDesc **)arena_alloc_array(p->arena, param_cap, sizeof(TypeDesc *));
+                int *new_lines = (int *)arena_alloc_array(p->arena, param_cap, sizeof(int));
+                int *new_cols = (int *)arena_alloc_array(p->arena, param_cap, sizeof(int));
+                if (param_names) {
+                    memcpy(new_names, param_names, param_count * sizeof(char *));
+                    memcpy(new_types, param_types, param_count * sizeof(Type));
+                    if (param_is_array) memcpy(new_arr, param_is_array, param_count * sizeof(bool));
+                    if (param_is_map) memcpy(new_map, param_is_map, param_count * sizeof(bool));
+                    if (param_key_types) memcpy(new_ktypes, param_key_types, param_count * sizeof(Type));
+                    memcpy(new_cls, param_class_names, param_count * sizeof(char *));
+                    memcpy(new_bor, param_is_borrowed, param_count * sizeof(bool));
+                    if (param_type_descs) memcpy(new_tds, param_type_descs, param_count * sizeof(TypeDesc *));
+                    memcpy(new_lines, param_lines, param_count * sizeof(int));
+                    memcpy(new_cols, param_cols, param_count * sizeof(int));
+                }
+                param_names = new_names;
+                param_types = new_types;
+                param_is_array = new_arr;
+                param_is_map = new_map;
+                param_key_types = new_ktypes;
+                param_class_names = new_cls;
+                param_is_borrowed = new_bor;
+                param_type_descs = new_tds;
+                param_lines = new_lines;
+                param_cols = new_cols;
+            }
+            param_names[param_count] = arena_strdup(p->arena, p_name.lexeme);
+            param_types[param_count] = p_type;
+            param_is_array[param_count] = false;
+            param_is_map[param_count] = false;
+            param_key_types[param_count] = TY_INT;
+            param_class_names[param_count] = NULL;
+            // In FFI-1, all parameters to extern "C" functions are treated as borrowed
+            param_is_borrowed[param_count] = true;
+            param_type_descs[param_count] = p_td;
+            param_lines[param_count] = p_name.line;
+            param_cols[param_count] = p_name.col;
+            param_count++;
+        } while (match(p, TOKEN_COMMA));
+    }
+
+    consume(p, TOKEN_RPAREN, "Expected ')' after parameters");
+    consume(p, TOKEN_ARROW, "Expected '->' after function signature");
+
+    char *ret_cls = NULL;
+    bool ret_is_arr = false;
+    bool ret_is_map = false;
+    Type ret_key_t = TY_INT;
+    TypeDesc *ret_td = parse_type_desc(p, NULL, NULL, false, false);
+    Type return_type = type_desc_to_flat(ret_td, &ret_cls, &ret_is_arr, &ret_is_map, &ret_key_t, p->arena);
+
+    // Validate supported FFI-1 return types
+    if (ret_is_arr || (ret_td && ret_td->kind == TYPEDESC_ARRAY)) {
+        fatal_parser_error(tok.line, tok.col, fn_name, "array types are not supported as extern \"C\" return type in FFI-1");
+    }
+    if (ret_is_map || (ret_td && ret_td->kind == TYPEDESC_MAP)) {
+        fatal_parser_error(tok.line, tok.col, fn_name, "map types are not supported as extern \"C\" return type in FFI-1");
+    }
+    if (return_type == TY_CLASS || (ret_td && (ret_td->kind == TYPEDESC_CLASS || ret_td->kind == TYPEDESC_NAMED))) {
+        fatal_parser_error(tok.line, tok.col, fn_name, "class/struct types are not supported as extern \"C\" return type in FFI-1");
+    }
+
+    // Ensure external functions do NOT have a body
+    if (check(p, TOKEN_LBRACE) || check(p, TOKEN_ASSIGN)) {
+        fatal_parser_error(peek(p).line, peek(p).col, peek(p).lexeme, "external function declarations cannot have a body");
+    }
+
+    AstNode *node = arena_alloc_node(p->arena, NODE_FUNCTION, tok.line, tok.col);
+    node->as.function.name = fn_name;
+    node->as.function.is_extern = true;
+    node->as.function.extern_abi = arena_strdup(p->arena, abi);
+    node->as.function.param_names = param_names;
+    node->as.function.param_types = param_types;
+    node->as.function.param_is_array = param_is_array;
+    node->as.function.param_is_map = param_is_map;
+    node->as.function.param_key_types = param_key_types;
+    node->as.function.param_class_names = param_class_names;
+    node->as.function.param_is_borrowed = param_is_borrowed;
+    node->as.function.param_is_impl_trait = NULL;
+    node->as.function.param_impl_trait_names = NULL;
+    node->as.function.param_type_descs = param_type_descs;
+    node->as.function.param_lines = param_lines;
+    node->as.function.param_cols = param_cols;
+    node->as.function.param_count = param_count;
+    node->as.function.return_type = return_type;
+    node->as.function.return_is_array = false;
+    node->as.function.return_is_map = false;
+    node->as.function.return_key_type = TY_INT;
+    node->as.function.return_class_name = NULL;
+    node->as.function.return_type_desc = ret_td;
+    node->as.function.body = NULL;
+    return node;
+}
+
 static AstNode *parse_interface(Parser *p) {
     Token tok = consume(p, TOKEN_INTERFACE, "Expected 'interface'");
     Token name_tok = consume(p, TOKEN_IDENT, "Expected interface name");
@@ -2413,6 +2569,8 @@ typedef struct InferScope {
     int cap;
 } InferScope;
 
+static TypeDesc *infer_ast_expr_type_desc(AstArena *arena, AstNode *program, AstNode *fn, InferScope *scope, AstNode *expr);
+
 static InferScope *create_infer_scope(AstArena *arena, InferScope *parent) {
     InferScope *s = (InferScope *)arena_alloc_array(arena, 1, sizeof(InferScope));
     s->parent = parent;
@@ -2611,6 +2769,28 @@ static void check_expr_variables(AstArena *arena, AstNode *program, AstNode *fn,
                             ErrorLocation note_loc = {target_fn->source_file ? target_fn->source_file : get_error_filename(), target_fn->line, target_fn->col};
                             print_formatted_error(short_msg, primary, "wrong argument count", "function defined here:", &note_loc, "declared with different parameter count", NULL);
                             exit(1);
+                        }
+                        for (int a = 0; a < actual && a < expected; a++) {
+                            if (target_fn->as.function.param_is_impl_trait && target_fn->as.function.param_is_impl_trait[a]) {
+                                continue;
+                            }
+                            TypeDesc *arg_td = infer_ast_expr_type_desc(arena, program, fn, scope, expr->as.call.args[a]);
+                            TypeDesc *param_td = target_fn->as.function.param_type_descs ? target_fn->as.function.param_type_descs[a] : NULL;
+                            if (!param_td && target_fn->as.function.param_types) {
+                                param_td = type_desc_primitive(arena, target_fn->as.function.param_types[a]);
+                            }
+                            if (param_td && arg_td && !type_desc_is_compatible(param_td, arg_td)) {
+                                char *param_str = type_desc_to_string(arena, param_td);
+                                char *arg_str = type_desc_to_string(arena, arg_td);
+                                char short_msg[256];
+                                snprintf(short_msg, sizeof(short_msg), "type mismatch in call to '%s' — argument %d expected %s, got %s",
+                                         callee, a + 1, param_str, arg_str);
+                                const char *fn_path = expr->source_file ? expr->source_file : get_error_filename();
+                                ErrorLocation primary = {fn_path, expr->as.call.args[a]->line, expr->as.call.args[a]->col};
+                                ErrorLocation note_loc = {target_fn->source_file ? target_fn->source_file : get_error_filename(), target_fn->line, target_fn->col};
+                                print_formatted_error(short_msg, primary, "type mismatch", "function declared here:", &note_loc, "parameter declared here", NULL);
+                                exit(1);
+                            }
                         }
                         break;
                     }
@@ -3737,6 +3917,22 @@ static void desugar_and_infer_program(AstArena *arena, AstNode *program) {
     }
 }
 
+static void check_duplicate_fn(AstNode **functions, int count, AstNode *new_fn) {
+    if (!new_fn || !new_fn->as.function.name) return;
+    for (int j = 0; j < count; j++) {
+        if (!functions[j] || !functions[j]->as.function.name) continue;
+        if (new_fn->as.function.is_operator || functions[j]->as.function.is_operator) continue;
+        if (strcmp(functions[j]->as.function.name, new_fn->as.function.name) == 0) {
+            char short_msg[256];
+            snprintf(short_msg, sizeof(short_msg), "duplicate definition of '%s'", new_fn->as.function.name);
+            ErrorLocation primary = {get_error_filename(), new_fn->line, new_fn->col};
+            ErrorLocation note_loc = {functions[j]->source_file ? functions[j]->source_file : get_error_filename(), functions[j]->line, functions[j]->col};
+            print_formatted_error(short_msg, primary, "duplicate definition", "first defined here:", &note_loc, "first defined here", NULL);
+            exit(1);
+        }
+    }
+}
+
 AstNode *parse_program(Parser *p) {
     AstNode **imports = NULL;
     int import_count = 0;
@@ -3835,9 +4031,57 @@ AstNode *parse_program(Parser *p) {
                 enums = new_en;
             }
             enums[enum_count++] = en;
+        } else if (check(p, TOKEN_EXTERN)) {
+            seen_decl = true;
+            advance(p); // consume TOKEN_EXTERN
+            if (!check(p, TOKEN_STRING_LIT)) {
+                fatal_parser_error(peek(p).line, peek(p).col, peek(p).lexeme, "Expected ABI string literal after 'extern' (e.g. extern \"C\")");
+            }
+            Token abi_tok = advance(p);
+            if (strcmp(abi_tok.lexeme, "C") != 0) {
+                char err_buf[256];
+                snprintf(err_buf, sizeof(err_buf), "Unsupported ABI '%s' (only \"C\" is supported in FFI-1)", abi_tok.lexeme);
+                fatal_parser_error(abi_tok.line, abi_tok.col, abi_tok.lexeme, err_buf);
+            }
+
+            if (check(p, TOKEN_LBRACE)) {
+                advance(p); // consume '{'
+                while (!check(p, TOKEN_RBRACE) && !is_at_end(p)) {
+                    if (!check(p, TOKEN_FN)) {
+                        fatal_parser_error(peek(p).line, peek(p).col, peek(p).lexeme, "Expected 'fn' in extern block");
+                    }
+                    AstNode *fn = parse_extern_function(p, abi_tok.lexeme);
+                    match(p, TOKEN_SEMICOLON);
+                    check_duplicate_fn(functions, fn_count, fn);
+
+                    if (fn_count >= fn_cap) {
+                        fn_cap = fn_cap == 0 ? 4 : fn_cap * 2;
+                        AstNode **new_fns = (AstNode **)arena_alloc_array(p->arena, fn_cap, sizeof(AstNode *));
+                        if (functions) memcpy(new_fns, functions, fn_count * sizeof(AstNode *));
+                        functions = new_fns;
+                    }
+                    functions[fn_count++] = fn;
+                }
+                consume(p, TOKEN_RBRACE, "Expected '}' closing extern block");
+            } else if (check(p, TOKEN_FN)) {
+                AstNode *fn = parse_extern_function(p, abi_tok.lexeme);
+                match(p, TOKEN_SEMICOLON);
+                check_duplicate_fn(functions, fn_count, fn);
+
+                if (fn_count >= fn_cap) {
+                    fn_cap = fn_cap == 0 ? 4 : fn_cap * 2;
+                    AstNode **new_fns = (AstNode **)arena_alloc_array(p->arena, fn_cap, sizeof(AstNode *));
+                    if (functions) memcpy(new_fns, functions, fn_count * sizeof(AstNode *));
+                    functions = new_fns;
+                }
+                functions[fn_count++] = fn;
+            } else {
+                fatal_parser_error(peek(p).line, peek(p).col, peek(p).lexeme, "Expected '{' or 'fn' after extern ABI");
+            }
         } else if (check(p, TOKEN_FN)) {
             seen_decl = true;
             AstNode *fn = parse_function(p);
+            check_duplicate_fn(functions, fn_count, fn);
             if (fn_count >= fn_cap) {
                 fn_cap = fn_cap == 0 ? 4 : fn_cap * 2;
                 AstNode **new_fns = (AstNode **)arena_alloc_array(p->arena, fn_cap, sizeof(AstNode *));

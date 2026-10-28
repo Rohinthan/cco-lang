@@ -112,6 +112,20 @@ void test_interface_tokens() {
     printf("[PASS] test_interface_tokens\n");
 }
 
+void test_extern_tokens() {
+    const char *src = "extern \"C\" fn puts(message: string) -> int";
+    TokenArray arr = lex_source(src);
+    assert(arr.count >= 9);
+    assert(arr.tokens[0].type == TOKEN_EXTERN);
+    assert(arr.tokens[1].type == TOKEN_STRING_LIT);
+    assert(strcmp(arr.tokens[1].lexeme, "C") == 0);
+    assert(arr.tokens[2].type == TOKEN_FN);
+    assert(arr.tokens[3].type == TOKEN_IDENT);
+    assert(strcmp(arr.tokens[3].lexeme, "puts") == 0);
+    free_tokens(&arr);
+    printf("[PASS] test_extern_tokens\n");
+}
+
 int main() {
     printf("Running Lexer Unit Tests...\n");
     test_basic_tokens();
@@ -119,6 +133,7 @@ int main() {
     test_class_tokens();
     test_dump_tokens_format();
     test_interface_tokens();
+    test_extern_tokens();
     printf("All Lexer tests passed!\n");
     return 0;
 }

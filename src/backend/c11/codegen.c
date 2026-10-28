@@ -3815,6 +3815,7 @@ static void gen_method(CodegenCtx *ctx, const char *class_name, AstNode *m_node)
 }
 
 static void gen_function(CodegenCtx *ctx, AstNode *fn) {
+    if (fn->as.function.is_extern) return;
     ctx->current_function = fn;
     bool is_main = (strcmp(fn->as.function.name, "main") == 0);
     if (is_main) {
@@ -4167,7 +4168,9 @@ static void scan_node_usage(AstNode *node, bool *used_chunks, uint32_t *header_f
                     *header_flags |= HEADER_STDINT;
                 }
             }
-            scan_node_usage(node->as.function.body, used_chunks, header_flags, needs_libm);
+            if (node->as.function.body) {
+                scan_node_usage(node->as.function.body, used_chunks, header_flags, needs_libm);
+            }
             break;
 
         case NODE_METHOD:
@@ -4705,12 +4708,19 @@ char *generate_c_code(AstNode *program, AstArena *arena) {
         if (fn->as.function.is_operator) {
             c_fn_name = get_operator_fn_c_name(fn->as.function.param_class_names[0], fn->as.function.operator_symbol, fn->as.function.param_count);
         }
+        if (fn->as.function.is_extern) {
+            sb_append(&ctx.sb, "extern ");
+        }
         sb_appendf(&ctx.sb, "%s %s(", ret_type_str, c_fn_name);
         if (fn->as.function.param_count == 0) {
             sb_append(&ctx.sb, "void");
         } else {
             for (int p = 0; p < fn->as.function.param_count; p++) {
                 if (p > 0) sb_append(&ctx.sb, ", ");
+                if (fn->as.function.is_extern && fn->as.function.param_types[p] == TY_STRING) {
+                    sb_appendf(&ctx.sb, "const char *%s", fn->as.function.param_names[p]);
+                    continue;
+                }
                 bool is_bor = fn->as.function.param_is_borrowed ? fn->as.function.param_is_borrowed[p] : false;
                 bool is_arr = fn->as.function.param_is_array ? fn->as.function.param_is_array[p] : false;
                 bool is_map = fn->as.function.param_is_map ? fn->as.function.param_is_map[p] : false;

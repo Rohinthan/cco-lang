@@ -6,6 +6,7 @@
 typedef enum {
     // Keywords
     TOKEN_IMPORT,
+    TOKEN_EXTERN,
     TOKEN_CLASS,
     TOKEN_STRUCT,
     TOKEN_SELF,
