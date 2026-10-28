@@ -32,6 +32,64 @@
 #include <limits.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
+#include <unistd.h>
+#include <errno.h>
+
+typedef struct {
+    char **items;
+    int count;
+    int capacity;
+} LinkerArgs;
+
+static LinkerArgs g_linker_args;
+
+static void linker_args_free(LinkerArgs *la) {
+    if (!la || !la->items) return;
+    for (int i = 0; i < la->count; i++) {
+        if (la->items[i]) free(la->items[i]);
+    }
+    free(la->items);
+    la->items = NULL;
+    la->count = 0;
+    la->capacity = 0;
+}
+
+static void cleanup_linker_args(void) {
+    linker_args_free(&g_linker_args);
+}
+
+static void linker_args_push(LinkerArgs *la, const char *arg) {
+    if (la->count >= la->capacity) {
+        la->capacity = la->capacity == 0 ? 8 : la->capacity * 2;
+        la->items = (char **)realloc(la->items, la->capacity * sizeof(char *));
+    }
+    la->items[la->count++] = strdup(arg);
+}
+
+static int run_process_vector(char *const argv[]) {
+    pid_t pid = fork();
+    if (pid < 0) {
+        perror("fork");
+        return 1;
+    }
+    if (pid == 0) {
+        execvp(argv[0], argv);
+        perror(argv[0]);
+        _exit(127);
+    }
+    int status = 0;
+    while (waitpid(pid, &status, 0) < 0) {
+        if (errno == EINTR) continue;
+        return 1;
+    }
+    if (WIFEXITED(status)) {
+        return WEXITSTATUS(status);
+    }
+    if (WIFSIGNALED(status)) {
+        return 128 + WTERMSIG(status);
+    }
+    return 1;
+}
 
 static bool str_ends_with(const char *str, const char *suffix) {
     if (!str || !suffix) return false;
@@ -219,6 +277,10 @@ int main(int argc, char **argv) {
                 "  --emit-object          Emit ELF64 relocatable object (.o) and exit\n"
                 "  --run                  Run binary after compilation\n"
                 "\n"
+                "FFI / Linking options:\n"
+                "  -L<dir>, -L <dir>      Add directory to library search path\n"
+                "  -l<lib>, -l <lib>      Link library lib<lib>.so or lib<lib>.a\n"
+                "\n"
                 "Optimization:\n"
                 "  -O0                    No optimization (default)\n"
                 "  -O1, -O, --opt         Enable IR optimization (constant folding, DCE, etc.)\n"
@@ -300,6 +362,10 @@ int main(int argc, char **argv) {
         for (int i = start_arg; i < argc; i++) {
             if (strcmp(argv[i], "-o") == 0 && i + 1 < argc) {
                 link_out = argv[++i];
+            } else if (argv[i][0] == '-' && (argv[i][1] == 'l' || argv[i][1] == 'L')) {
+                fprintf(stderr, "Error: External library linking (-l, -L) is not supported by the internal freestanding linker.\n"
+                                "       Use '--use-native' to link external libraries with the host linker.\n");
+                return 1;
             } else if (argv[i][0] != '-') {
                 if (obj_count < 256) {
                     obj_files[obj_count++] = argv[i];
@@ -319,9 +385,55 @@ int main(int argc, char **argv) {
         return 0;
     }
 
+    atexit(cleanup_linker_args);
+
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "-o") == 0 && i + 1 < argc) {
+        if (strcmp(argv[i], "-o") == 0) {
+            if (i + 1 >= argc || (argv[i + 1][0] == '-' && argv[i + 1][1] != '\0')) {
+                fprintf(stderr, "Error: Expected output path after '-o'\n");
+                return 1;
+            }
             output_arg = argv[++i];
+        } else if (strcmp(argv[i], "-L") == 0) {
+            if (i + 1 >= argc || (argv[i + 1][0] == '-' && argv[i + 1][1] != '\0')) {
+                fprintf(stderr, "Error: Expected directory argument after '-L'\n");
+                return 1;
+            }
+            const char *dir = argv[++i];
+            if (strlen(dir) == 0) {
+                fprintf(stderr, "Error: Directory argument after '-L' cannot be empty\n");
+                return 1;
+            }
+            char buf[PATH_MAX + 16];
+            snprintf(buf, sizeof(buf), "-L%s", dir);
+            linker_args_push(&g_linker_args, buf);
+        } else if (strncmp(argv[i], "-L", 2) == 0) {
+            const char *dir = argv[i] + 2;
+            if (strlen(dir) == 0) {
+                fprintf(stderr, "Error: Directory argument after '-L' cannot be empty\n");
+                return 1;
+            }
+            linker_args_push(&g_linker_args, argv[i]);
+        } else if (strcmp(argv[i], "-l") == 0) {
+            if (i + 1 >= argc || (argv[i + 1][0] == '-' && argv[i + 1][1] != '\0')) {
+                fprintf(stderr, "Error: Expected library name after '-l'\n");
+                return 1;
+            }
+            const char *lib = argv[++i];
+            if (strlen(lib) == 0) {
+                fprintf(stderr, "Error: Library argument after '-l' cannot be empty\n");
+                return 1;
+            }
+            char buf[PATH_MAX + 16];
+            snprintf(buf, sizeof(buf), "-l%s", lib);
+            linker_args_push(&g_linker_args, buf);
+        } else if (strncmp(argv[i], "-l", 2) == 0) {
+            const char *lib = argv[i] + 2;
+            if (strlen(lib) == 0) {
+                fprintf(stderr, "Error: Library argument after '-l' cannot be empty\n");
+                return 1;
+            }
+            linker_args_push(&g_linker_args, argv[i]);
         } else if (strcmp(argv[i], "-O0") == 0) {
             opt_level = 0;
         } else if (strcmp(argv[i], "-O1") == 0 || strcmp(argv[i], "-O") == 0 || strcmp(argv[i], "--opt") == 0 || strcmp(argv[i], "--optimize") == 0) {
@@ -381,7 +493,7 @@ int main(int argc, char **argv) {
             emit_ir = true;
         } else if (strcmp(argv[i], "--use-ir") == 0) {
             use_ir = true;
-        } else if (strcmp(argv[i], "--use-native") == 0) {
+        } else if (strcmp(argv[i], "--use-native") == 0 || strcmp(argv[i], "--native") == 0) {
             use_native = true;
         } else if (strcmp(argv[i], "--use-internal-linker") == 0 || strcmp(argv[i], "--link-internal") == 0) {
             use_internal_linker = true;
@@ -402,7 +514,16 @@ int main(int argc, char **argv) {
             if (!input_path) {
                 input_path = argv[i];
             }
+        } else {
+            fprintf(stderr, "Error: Unknown option '%s'\n", argv[i]);
+            return 1;
         }
+    }
+
+    if (use_internal_linker && g_linker_args.count > 0) {
+        fprintf(stderr, "Error: External library linking (-l, -L) is not supported by the internal freestanding linker.\n"
+                        "       Use '--use-native' to link external libraries with the host linker.\n");
+        return 1;
     }
 
     if (dump_profile) {
@@ -814,16 +935,31 @@ int main(int argc, char **argv) {
             } else {
                 const char *cc = getenv("CC");
                 if (!cc || strlen(cc) == 0) cc = "gcc";
-                char cmd[PATH_MAX * 4 + 512];
-                snprintf(cmd, sizeof(cmd), "%s -no-pie \"%s\" -o \"%s\" -lm", cc, output_o_path, binary_out_path);
+
+                int total_args = 6 + g_linker_args.count + 1;
+                char **gcc_argv = (char **)malloc(total_args * sizeof(char *));
+                if (!gcc_argv) {
+                    fprintf(stderr, "Out of memory allocating linker arguments\n");
+                    return 1;
+                }
+                int arg_idx = 0;
+                gcc_argv[arg_idx++] = (char *)cc;
+                gcc_argv[arg_idx++] = "-no-pie";
+                gcc_argv[arg_idx++] = output_o_path;
+                gcc_argv[arg_idx++] = "-o";
+                gcc_argv[arg_idx++] = binary_out_path;
+                for (int j = 0; j < g_linker_args.count; j++) {
+                    gcc_argv[arg_idx++] = g_linker_args.items[j];
+                }
+                gcc_argv[arg_idx++] = "-lm";
+                gcc_argv[arg_idx] = NULL;
+
                 double t_link = time_passes ? cco_get_time_ms() : 0.0;
-                int res = system(cmd);
+                int exit_code = run_process_vector(gcc_argv);
                 if (time_passes) pass_timings.link_ms += (cco_get_time_ms() - t_link);
-                if (res != 0) {
-                    int exit_code = 1;
-                    #ifdef WEXITSTATUS
-                    if (WIFEXITED(res)) exit_code = WEXITSTATUS(res);
-                    #endif
+                free(gcc_argv);
+
+                if (exit_code != 0) {
                     return exit_code;
                 }
             }
@@ -838,17 +974,14 @@ int main(int argc, char **argv) {
             }
 
             if (run_binary) {
-                char run_cmd[PATH_MAX * 2 + 64];
+                char target_bin[PATH_MAX * 2 + 64];
                 if (binary_out_path[0] == '/' || (binary_out_path[0] == '.' && binary_out_path[1] == '/')) {
-                    snprintf(run_cmd, sizeof(run_cmd), "\"%s\"", binary_out_path);
+                    snprintf(target_bin, sizeof(target_bin), "%s", binary_out_path);
                 } else {
-                    snprintf(run_cmd, sizeof(run_cmd), "./\"%s\"", binary_out_path);
+                    snprintf(target_bin, sizeof(target_bin), "./%s", binary_out_path);
                 }
-                int run_res = system(run_cmd);
-                int exit_code = 0;
-                #ifdef WEXITSTATUS
-                if (WIFEXITED(run_res)) exit_code = WEXITSTATUS(run_res);
-                #endif
+                char *run_argv[] = { target_bin, NULL };
+                int exit_code = run_process_vector(run_argv);
                 return exit_code;
             }
         } else {
@@ -1004,17 +1137,37 @@ int main(int argc, char **argv) {
 
         ensure_parent_dir(binary_out_path);
 
-        const char *math_flag = needs_libm ? " -lm" : "";
-        char cmd[PATH_MAX * 4 + 512];
-        snprintf(cmd, sizeof(cmd), "%s -O3 -Wall -Wextra -std=c11 -Wno-unused-function -Wno-parentheses-equality \"%s\" -o \"%s\"%s", cc, output_c_path, binary_out_path, math_flag);
+        int total_args = 10 + g_linker_args.count + (needs_libm ? 1 : 0) + 1;
+        char **gcc_argv = (char **)malloc(total_args * sizeof(char *));
+        if (!gcc_argv) {
+            fprintf(stderr, "Out of memory allocating compiler arguments\n");
+            return 1;
+        }
+        int arg_idx = 0;
+        gcc_argv[arg_idx++] = (char *)cc;
+        gcc_argv[arg_idx++] = "-O3";
+        gcc_argv[arg_idx++] = "-Wall";
+        gcc_argv[arg_idx++] = "-Wextra";
+        gcc_argv[arg_idx++] = "-std=c11";
+        gcc_argv[arg_idx++] = "-Wno-unused-function";
+        gcc_argv[arg_idx++] = "-Wno-parentheses-equality";
+        gcc_argv[arg_idx++] = output_c_path;
+        gcc_argv[arg_idx++] = "-o";
+        gcc_argv[arg_idx++] = binary_out_path;
+        for (int j = 0; j < g_linker_args.count; j++) {
+            gcc_argv[arg_idx++] = g_linker_args.items[j];
+        }
+        if (needs_libm) {
+            gcc_argv[arg_idx++] = "-lm";
+        }
+        gcc_argv[arg_idx] = NULL;
+
         double t_link = time_passes ? cco_get_time_ms() : 0.0;
-        int res = system(cmd);
+        int exit_code = run_process_vector(gcc_argv);
         if (time_passes) pass_timings.link_ms += (cco_get_time_ms() - t_link);
-        if (res != 0) {
-            int exit_code = 1;
-            #ifdef WEXITSTATUS
-            if (WIFEXITED(res)) exit_code = WEXITSTATUS(res);
-            #endif
+        free(gcc_argv);
+
+        if (exit_code != 0) {
             return exit_code;
         }
 
@@ -1028,17 +1181,14 @@ int main(int argc, char **argv) {
         }
 
         if (run_binary) {
-            char run_cmd[PATH_MAX * 2 + 64];
+            char target_bin[PATH_MAX * 2 + 64];
             if (binary_out_path[0] == '/' || (binary_out_path[0] == '.' && binary_out_path[1] == '/')) {
-                snprintf(run_cmd, sizeof(run_cmd), "\"%s\"", binary_out_path);
+                snprintf(target_bin, sizeof(target_bin), "%s", binary_out_path);
             } else {
-                snprintf(run_cmd, sizeof(run_cmd), "./\"%s\"", binary_out_path);
+                snprintf(target_bin, sizeof(target_bin), "./%s", binary_out_path);
             }
-            int run_res = system(run_cmd);
-            int exit_code = 0;
-            #ifdef WEXITSTATUS
-            if (WIFEXITED(run_res)) exit_code = WEXITSTATUS(run_res);
-            #endif
+            char *run_argv[] = { target_bin, NULL };
+            int exit_code = run_process_vector(run_argv);
             return exit_code;
         }
 

@@ -212,7 +212,7 @@ The objective is not to replace established languages, but to provide a practica
 | **SSA Optimization Pipeline** | Implemented | Lengauer-Tarjan dominance, SSA $\phi$-construction, SCCP, GVN/CSE, LICM, inlining, and profile-guided block layout. |
 | **Internal ELF64 Linker** | Implemented | Standalone static linker producing executable ELF64 binaries with embedded `_start` syscall runtime (no `ld` or `libc`). |
 | **C11 Transpiler** | Implemented | Source-to-source transpilation targeting ISO C11 (`-std=c11 -pedantic-errors`) for GCC, Clang, TCC, and MSVC. |
-| **In-Source C FFI** | Planned | Explicit `extern "C"` declaration syntax in Cco source code (currently handled via `.o` object-level linkage). |
+| **In-Source C FFI & Linking** | Implemented | `extern "C"` declarations (FFI-1) and custom library linking via `-L` and `-l` options (FFI-2). |
 | **Multithreading / Concurrency** | Planned | Native threading and thread-safe channels (currently network sockets execute sequentially). |
 
 ---
@@ -634,6 +634,73 @@ Cco includes a built-in standard library supporting essential systems tasks:
 
 ---
 
+## In-Source C Interoperability & Library Linking (FFI-1 & FFI-2)
+
+Cco supports direct in-source declarations for calling external C functions (`extern "C"`) and command-line options (`-L` and `-l`) for linking against third-party and custom C libraries.
+
+### 1. In-Source Declarations (`extern "C"`)
+
+External functions can be declared at module scope using single-line or block syntax:
+
+```cco
+# Block declaration
+extern "C" {
+    fn puts(message: string) -> int
+    fn abs(value: int) -> int
+    fn cos(x: float) -> float
+}
+
+# Single-line declaration
+extern "C" fn custom_compute(a: int, b: int) -> int
+
+fn main() -> int {
+    puts("Calling C from Cco!")
+    let val: int = custom_compute(10, 20)
+    print(val)
+    return 0
+}
+```
+
+### 2. Linking Custom C Libraries (`-L` and `-l`)
+
+Link user or third-party native libraries (`.a` or `.so`) via compiler CLI flags:
+
+- `-L<dir>` or `-L <dir>`: Add a directory to the library search path.
+- `-l<lib>` or `-l <lib>`: Link `lib<lib>.so` or `lib<lib>.a`.
+
+```bash
+# Link a custom library located in ./lib
+cco app.cco -L ./lib -l mylib -o app
+
+# Compact syntax with multiple directories and libraries
+cco app.cco -L/opt/custom/lib -L./ext -lsqlite3 -lz -o app
+
+# Compile via native x86-64 backend with custom library linking
+cco app.cco --use-native -L./lib -lmylib -o app
+
+# Compile and run immediately
+cco app.cco -L./lib -lmylib --run
+```
+
+### 3. Backend Compatibility & Linking Semantics
+
+- **C11 & Native Host-Linker Pipelines**: Both the default C11 transpiler and the direct native backend (`--use-native`) pass `-L` and `-l` flags through to the host linker (`gcc`). Dependency ordering among static archives (`.a`) is preserved strictly in user-specified order.
+- **Toolchain Invocation via `execvp`**: The compiler driver invokes GCC or `$CC` directly via argument-vector process execution (`execvp`) rather than shell string concatenation (`system()`), preventing shell injection and preserving paths with spaces. As a consequence, the `CC` environment variable must identify an executable path or binary name (e.g., `CC=clang` or `CC=/usr/bin/gcc-14`) rather than a command with space-separated arguments (e.g., `CC="gcc -m64"`).
+- **Math Library Dependencies (`-lm`)**: The native backend (`--use-native`) automatically includes `-lm`. In the default C11 backend, `-lm` is added automatically only when Cco source code uses built-in math operations. When linking an external C library that depends on `libm` without math calls in Cco source code, pass an explicit `-lm` flag (e.g., `cco app.cco -L ./lib -lmylib -lm`).
+- **Freestanding Internal Linker Limitation**: The standalone internal linker (`--use-internal-linker`) targets self-contained freestanding executables with an embedded syscall runtime and does not support external dynamic libraries. Passing `-l` or `-L` with `--use-internal-linker` is rejected with an explanatory error directing the user to `--use-native`.
+- **Diagnostic Validation**: Omitted values (`-L`, `-l`), empty arguments (`-L ""`, `-l ""`), or unknown options produce immediate diagnostics with non-zero exit codes.
+
+### 4. Known Boundaries and Memory Invariants
+
+- **FFI-1 / FFI-2 Scope**: FFI-2 provides linker argument forwarding only. It does not introduce raw pointer types (`*char`, `*void`), struct-by-value, or variadic functions (`...`).
+- **Parameter Borrowing**: Arguments passed to `extern "C"` functions are borrowed. The caller retains ownership, and parameters are not deallocated by the callee.
+- **String Return Ownership**: Local variables bound to `string` are managed by Cco scope analysis and freed via `free()` upon scope exit. External C functions returning `string` are expected to transfer ownership of a `malloc()`-allocated buffer. Returning static or unowned C strings (such as `getenv()`) into a local `let s: string` binding causes an invalid `free()` abort.
+- **Temporary Expression Lifetime**: Heap-allocating expressions passed directly to borrowed parameters without a local `let` binding are not tracked for scope-exit destruction.
+- **Self-Hosting Parity Gap**: In-source `extern "C"` is currently implemented in the reference C compiler. The self-hosted compiler (`selfhost/cco`) does not yet parse `extern "C"`.
+- **Target Platform**: In-source C FFI is verified on Linux x86-64 under the System V AMD64 calling convention.
+
+---
+
 ## Testing & Validation
 
 The Cco compiler maintains strict verification standards across all components:
@@ -680,7 +747,7 @@ For raw benchmark data and methodology, see [`cco-examples/bench/results`](https
 - **Optimization Pipeline (SSA, LICM, PGO)**: Implemented and passing differential verification.
 
 ### Roadmap & Planned Work:
-- **In-Source C FFI**: Native `extern "C" fn name(...) -> type;` declarations directly in `.cco` source code.
+- **Advanced C FFI (FFI-3+)**: Raw pointer types (`*const T`, `*mut T`), variadic signatures, and self-hosted compiler FFI bootstrap parity.
 - **Cross-Platform Architectures**: Expanding the direct machine-code backend to support ARM64 (AArch64).
 - **Advanced Global Register Allocation**: Iterated register coalescing via graph coloring to reduce spill code in high-pressure loops.
 - **Structured Concurrency**: Native multithreading and message-passing channels integrated with affine ownership semantics.
