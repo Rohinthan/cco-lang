@@ -345,6 +345,50 @@ void test_parse_extern() {
     printf("[PASS] test_parse_extern\n");
 }
 
+void test_parse_pointer() {
+    const char *src =
+        "extern \"C\" {\n"
+        "    fn getenv(name: string) -> *char\n"
+        "    fn fopen(path: string, mode: string) -> *void\n"
+        "}\n"
+        "fn main() -> int {\n"
+        "    let p: *char = null;\n"
+        "    let h: *void = fopen(\"test.txt\", \"r\");\n"
+        "    if (p == null) { return 0; }\n"
+        "    return 1;\n"
+        "}\n";
+    TokenArray tokens = lex_source(src);
+    AstArena *arena = create_ast_arena();
+    Parser parser = create_parser(tokens, arena);
+
+    AstNode *prog = parse_program(&parser);
+    assert(prog != NULL);
+    assert(prog->as.program.count == 3);
+
+    AstNode *fn0 = prog->as.program.functions[0];
+    assert(fn0->as.function.is_extern == true);
+    assert(fn0->as.function.return_type == TY_POINTER);
+    assert(fn0->as.function.return_type_desc != NULL);
+    assert(fn0->as.function.return_type_desc->kind == TYPEDESC_POINTER);
+
+    AstNode *fn1 = prog->as.program.functions[1];
+    assert(fn1->as.function.is_extern == true);
+    assert(fn1->as.function.return_type == TY_POINTER);
+    assert(fn1->as.function.return_type_desc != NULL);
+    assert(fn1->as.function.return_type_desc->kind == TYPEDESC_POINTER);
+
+    AstNode *fn2 = prog->as.program.functions[2];
+    assert(fn2->as.function.is_extern == false);
+    AstNode *let0 = fn2->as.function.body->as.block.stmts[0];
+    assert(let0->as.let.var_type == TY_POINTER);
+    assert(let0->as.let.value->type == NODE_LITERAL);
+    assert(let0->as.let.value->as.literal.lit_type == TY_POINTER);
+
+    free_ast_arena(arena);
+    free_tokens(&tokens);
+    printf("[PASS] test_parse_pointer\n");
+}
+
 int main() {
     printf("Running Parser Unit Tests...\n");
     test_parse_simple_func();
@@ -356,6 +400,7 @@ int main() {
     test_parse_interface();
     test_parse_top_level_script();
     test_parse_extern();
+    test_parse_pointer();
     printf("All Parser tests passed!\n");
     return 0;
 }

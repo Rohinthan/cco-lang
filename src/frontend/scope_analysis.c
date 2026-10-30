@@ -975,6 +975,7 @@ static bool type_desc_needs_cleanup(const TypeDesc *td) {
     if (!td) return false;
     switch (td->kind) {
         case TYPEDESC_PRIMITIVE:
+        case TYPEDESC_POINTER:
             return false;
         case TYPEDESC_CLASS:
         case TYPEDESC_ENUM:

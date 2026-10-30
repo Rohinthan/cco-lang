@@ -52,6 +52,7 @@ static const char *type_to_str(Type t) {
         case TY_CLASS: return "class";
         case TY_MAP: return "map";
         case TY_ENUM: return "enum";
+        case TY_POINTER: return "pointer";
     }
     return "unknown";
 }

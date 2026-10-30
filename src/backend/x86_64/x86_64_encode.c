@@ -509,7 +509,8 @@ static size_t encode_single_instruction_internal(X86Instr *inst,
         case X86_OP_CMP: {
             uint8_t src_hw = reg_hw_id(inst->src.reg);
             uint8_t dst_hw = reg_hw_id(inst->dst.reg);
-            emit_rex_prefix(b, false, src_hw >= 8, false, dst_hw >= 8, &len);
+            bool is_64 = (inst->dst.size == 8 || inst->src.size == 8);
+            emit_rex_prefix(b, is_64, src_hw >= 8, false, dst_hw >= 8, &len);
 
             uint8_t opc = 0x01;
             if (inst->op == X86_OP_SUB) opc = 0x29;

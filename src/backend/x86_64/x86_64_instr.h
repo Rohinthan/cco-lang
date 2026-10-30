@@ -143,6 +143,7 @@ void x86_emit_and(X86InstrList *list, X86Reg src_reg, X86Reg dst_reg);
 void x86_emit_or(X86InstrList *list, X86Reg src_reg, X86Reg dst_reg);
 void x86_emit_xor(X86InstrList *list, X86Reg src_reg, X86Reg dst_reg);
 void x86_emit_cmp(X86InstrList *list, X86Reg src_reg, X86Reg dst_reg);
+void x86_emit_cmp_sized(X86InstrList *list, int size, X86Reg src_reg, X86Reg dst_reg);
 void x86_emit_cmp_imm(X86InstrList *list, int32_t imm, X86Reg dst_reg);
 void x86_emit_setcc(X86InstrList *list, X86CondCode cond, X86Reg dst_reg);
 void x86_emit_andb(X86InstrList *list, X86Reg src_reg, X86Reg dst_reg);

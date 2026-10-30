@@ -212,7 +212,7 @@ The objective is not to replace established languages, but to provide a practica
 | **SSA Optimization Pipeline** | Implemented | Lengauer-Tarjan dominance, SSA $\phi$-construction, SCCP, GVN/CSE, LICM, inlining, and profile-guided block layout. |
 | **Internal ELF64 Linker** | Implemented | Standalone static linker producing executable ELF64 binaries with embedded `_start` syscall runtime (no `ld` or `libc`). |
 | **C11 Transpiler** | Implemented | Source-to-source transpilation targeting ISO C11 (`-std=c11 -pedantic-errors`) for GCC, Clang, TCC, and MSVC. |
-| **In-Source C FFI & Linking** | Implemented | `extern "C"` declarations (FFI-1) and custom library linking via `-L` and `-l` options (FFI-2). |
+| **In-Source C FFI, Linking & Raw Pointers** | Implemented | `extern "C"` declarations (FFI-1), custom library linking via `-L` and `-l` options (FFI-2), and core raw pointers (`*T`, `*char`, `*void`, `**char`, `null`) (FFI-3A). |
 | **Multithreading / Concurrency** | Planned | Native threading and thread-safe channels (currently network sockets execute sequentially). |
 
 ---
@@ -634,9 +634,9 @@ Cco includes a built-in standard library supporting essential systems tasks:
 
 ---
 
-## In-Source C Interoperability & Library Linking (FFI-1 & FFI-2)
+## In-Source C Interoperability, Library Linking & Raw Pointers (FFI-1, FFI-2, FFI-3A)
 
-Cco supports direct in-source declarations for calling external C functions (`extern "C"`) and command-line options (`-L` and `-l`) for linking against third-party and custom C libraries.
+Cco supports direct in-source declarations for calling external C functions (`extern "C"`), command-line options (`-L` and `-l`) for linking against third-party and custom C libraries, and core raw pointer types (`*T`, `*char`, `*void`, `null`) for non-owning C memory address and opaque handle management.
 
 ### 1. In-Source Declarations (`extern "C"`)
 
@@ -648,6 +648,8 @@ extern "C" {
     fn puts(message: string) -> int
     fn abs(value: int) -> int
     fn cos(x: float) -> float
+    fn getenv(name: *char) -> *char
+    fn free(ptr: *void) -> void
 }
 
 # Single-line declaration
@@ -682,7 +684,48 @@ cco app.cco --use-native -L./lib -lmylib -o app
 cco app.cco -L./lib -lmylib --run
 ```
 
-### 3. Backend Compatibility & Linking Semantics
+### 3. Core Raw Pointers (`*T`, `*char`, `*void`, `null`)
+
+Raw pointers provide non-owning, unmanaged memory addresses and opaque handle interoperability across both the C11 and native x86-64 backends:
+
+- **Pointer Type Syntax**: Prefix `*` type syntax declares pointers: `*char`, `*void`, `*int`, or nested pointers like `**char`.
+- **The `null` Literal**: `null` evaluates to a null pointer (`(void *)0` / address `0x0`). It can initialize or be assigned to any pointer variable.
+- **Strict Non-Owning Semantics**: Raw pointers represent unmanaged addresses. Cco scope analysis **never** tags a raw pointer as a heap owner, tracks it for scope destruction, or emits `free()` on scope exit.
+- **Type Safety & No Implicit Conversions**: `string` is an owned, heap-managed Cco type; `*char` is an unmanaged raw pointer. There is **no implicit conversion** between `string` and `*char`, preventing accidental double-free or use-after-free bugs.
+- **Opaque Handle Interoperability**: `*void` serves as a universal pointer compatible with any `*T` pointer type, enabling clean integration with opaque C handles (e.g., database handles, file descriptors, or context pointers).
+- **Pointer Comparisons**: Pointers support equality comparisons (`==`, `!=`, `== null`, `!= null`). On x86-64, pointer comparisons emit full 64-bit comparisons (`cmpq` / REX.W).
+- **Explicit Non-Goals (Rejected Operations in Safe Code)**:
+  - **No Pointer Arithmetic**: Operations such as `p + 1`, `p - 1`, `p * 2`, `p / 2`, `p += 1`, and `p++` are rejected with fatal compile-time errors.
+  - **No Dereference in Safe Code**: Unchecked dereference expressions (`*p`, `*(expr)`) are rejected at parse time (`"raw pointer dereferencing is not supported in safe code"`).
+  - **No Relational Pointer Comparisons**: Expressions such as `p < q` or `p >= q` are rejected.
+  - **No Pointer Indexing**: Expressions such as `p[0]` are rejected.
+
+```cco
+extern "C" {
+    fn getenv(name: *char) -> *char
+    fn puts(s: *char) -> int
+    fn create_context() -> *void
+    fn destroy_context(ctx: *void) -> void
+}
+
+fn check_session(ctx: *void) -> int {
+    if ctx == null {
+        return 1
+    }
+    return 0
+}
+
+fn main() -> int {
+    let ctx: *void = create_context()
+    if ctx != null {
+        check_session(ctx)
+        destroy_context(ctx)
+    }
+    return 0
+}
+```
+
+### 4. Backend Compatibility & Linking Semantics
 
 - **C11 & Native Host-Linker Pipelines**: Both the default C11 transpiler and the direct native backend (`--use-native`) pass `-L` and `-l` flags through to the host linker (`gcc`). Dependency ordering among static archives (`.a`) is preserved strictly in user-specified order.
 - **Toolchain Invocation via `execvp`**: The compiler driver invokes GCC or `$CC` directly via argument-vector process execution (`execvp`) rather than shell string concatenation (`system()`), preventing shell injection and preserving paths with spaces. As a consequence, the `CC` environment variable must identify an executable path or binary name (e.g., `CC=clang` or `CC=/usr/bin/gcc-14`) rather than a command with space-separated arguments (e.g., `CC="gcc -m64"`).
@@ -690,14 +733,15 @@ cco app.cco -L./lib -lmylib --run
 - **Freestanding Internal Linker Limitation**: The standalone internal linker (`--use-internal-linker`) targets self-contained freestanding executables with an embedded syscall runtime and does not support external dynamic libraries. Passing `-l` or `-L` with `--use-internal-linker` is rejected with an explanatory error directing the user to `--use-native`.
 - **Diagnostic Validation**: Omitted values (`-L`, `-l`), empty arguments (`-L ""`, `-l ""`), or unknown options produce immediate diagnostics with non-zero exit codes.
 
-### 4. Known Boundaries and Memory Invariants
+### 5. Known Boundaries and Memory Invariants
 
-- **FFI-1 / FFI-2 Scope**: FFI-2 provides linker argument forwarding only. It does not introduce raw pointer types (`*char`, `*void`), struct-by-value, or variadic functions (`...`).
+- **FFI-1 / FFI-2 / FFI-3A Scope**: FFI-3A introduces non-owning raw pointers (`*T`, `*void`, `*char`, `null`) and pointer equality comparisons. It does not introduce struct-by-value, variadic signatures (`...`), or unsafe dereference blocks.
+- **Resolving External Return Ownership Hazards**: Prior to FFI-3A, external C functions returning static or unowned C strings (such as `getenv()`) could not be safely bound to local variables without triggering an invalid `free()` abort upon scope exit. With FFI-3A, such functions declare return type `*char`, ensuring scope analysis treats the value as non-owning with 0 leaks and no invalid free.
 - **Parameter Borrowing**: Arguments passed to `extern "C"` functions are borrowed. The caller retains ownership, and parameters are not deallocated by the callee.
-- **String Return Ownership**: Local variables bound to `string` are managed by Cco scope analysis and freed via `free()` upon scope exit. External C functions returning `string` are expected to transfer ownership of a `malloc()`-allocated buffer. Returning static or unowned C strings (such as `getenv()`) into a local `let s: string` binding causes an invalid `free()` abort.
+- **String Return Ownership**: Local variables bound to `string` are managed by Cco scope analysis and freed via `free()` upon scope exit. External C functions returning `string` are expected to transfer ownership of a `malloc()`-allocated buffer.
 - **Temporary Expression Lifetime**: Heap-allocating expressions passed directly to borrowed parameters without a local `let` binding are not tracked for scope-exit destruction.
-- **Self-Hosting Parity Gap**: In-source `extern "C"` is currently implemented in the reference C compiler. The self-hosted compiler (`selfhost/cco`) does not yet parse `extern "C"`.
-- **Target Platform**: In-source C FFI is verified on Linux x86-64 under the System V AMD64 calling convention.
+- **Self-Hosting Parity Gap**: In-source `extern "C"` and raw pointer syntax are currently implemented in the reference C compiler. The self-hosted compiler (`selfhost/cco`) does not yet parse `extern "C"` or pointer types.
+- **Target Platform**: In-source C FFI and raw pointer types are verified on Linux x86-64 under the System V AMD64 calling convention (64-bit pointer arguments passed in RDI, RSI, RDX, RCX, R8, R9; return pointer in RAX).
 
 ---
 
@@ -747,7 +791,7 @@ For raw benchmark data and methodology, see [`cco-examples/bench/results`](https
 - **Optimization Pipeline (SSA, LICM, PGO)**: Implemented and passing differential verification.
 
 ### Roadmap & Planned Work:
-- **Advanced C FFI (FFI-3+)**: Raw pointer types (`*const T`, `*mut T`), variadic signatures, and self-hosted compiler FFI bootstrap parity.
+- **Advanced C FFI (FFI-3B+)**: Pointer-to-slice/string conversion helpers, unsafe dereferencing blocks, variadic signatures, and self-hosted compiler FFI bootstrap parity.
 - **Cross-Platform Architectures**: Expanding the direct machine-code backend to support ARM64 (AArch64).
 - **Advanced Global Register Allocation**: Iterated register coalescing via graph coloring to reduce spill code in high-pressure loops.
 - **Structured Concurrency**: Native multithreading and message-passing channels integrated with affine ownership semantics.

@@ -43,6 +43,7 @@ static IrType *map_ast_type(IrArena *arena, Type ast_type, bool is_array, const 
         case TY_CHAR:   return ir_type_char(arena);
         case TY_STRING: return ir_type_ptr(arena, ir_type_char(arena));
         case TY_VOID:   return ir_type_void(arena);
+        case TY_POINTER: return ir_type_ptr(arena, ir_type_void(arena));
         case TY_CLASS:  return ir_type_ptr(arena, ir_type_struct(arena, class_name ? class_name : "Class"));
         case TY_MAP:    return ir_type_ptr(arena, ir_type_void(arena));
         default:        return ir_type_i32(arena);
@@ -124,6 +125,10 @@ static IrValue *lower_expr(LowerCtx *ctx, AstNode *expr) {
                 }
                 case TY_STRING: {
                     IrInstruction *inst = ir_emit_const_string(&ctx->builder, expr->as.literal.val.s);
+                    return inst->result;
+                }
+                case TY_POINTER: {
+                    IrInstruction *inst = ir_emit_const_int(&ctx->builder, ir_type_ptr(arena, ir_type_void(arena)), 0);
                     return inst->result;
                 }
                 default: {

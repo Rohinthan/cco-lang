@@ -126,6 +126,22 @@ void test_extern_tokens() {
     printf("[PASS] test_extern_tokens\n");
 }
 
+void test_null_token() {
+    const char *src = "let p: *void = null;";
+    TokenArray arr = lex_source(src);
+    assert(arr.count >= 6);
+    assert(arr.tokens[0].type == TOKEN_LET);
+    assert(arr.tokens[1].type == TOKEN_IDENT);
+    assert(arr.tokens[2].type == TOKEN_COLON);
+    assert(arr.tokens[3].type == TOKEN_STAR);
+    assert(arr.tokens[4].type == TOKEN_TYPE_VOID);
+    assert(arr.tokens[5].type == TOKEN_ASSIGN);
+    assert(arr.tokens[6].type == TOKEN_NULL);
+    assert(strcmp(arr.tokens[6].lexeme, "null") == 0);
+    free_tokens(&arr);
+    printf("[PASS] test_null_token\n");
+}
+
 int main() {
     printf("Running Lexer Unit Tests...\n");
     test_basic_tokens();
@@ -134,6 +150,7 @@ int main() {
     test_dump_tokens_format();
     test_interface_tokens();
     test_extern_tokens();
+    test_null_token();
     printf("All Lexer tests passed!\n");
     return 0;
 }

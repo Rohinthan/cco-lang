@@ -147,6 +147,7 @@ static const char *c_type_str_full(CodegenCtx *ctx, Type t, const char *class_na
         case TY_BOOL: return is_heap_owner ? "bool *" : "bool";
         case TY_STRING: return "char *";
         case TY_VOID: return "void";
+        case TY_POINTER: return "void *";
         default: return "int";
     }
 }
@@ -211,6 +212,11 @@ static const char *c_type_str_desc(CodegenCtx *ctx, const TypeDesc *td) {
             return "__cco_map *";
         case TYPEDESC_ARRAY: {
             const char *elem_s = c_type_str_desc(ctx, td->as.array_desc.elem_type);
+            snprintf(buf, 256, "%s *", elem_s);
+            return buf;
+        }
+        case TYPEDESC_POINTER: {
+            const char *elem_s = c_type_str_desc(ctx, td->as.pointer_desc.pointee_type);
             snprintf(buf, 256, "%s *", elem_s);
             return buf;
         }
@@ -1639,6 +1645,8 @@ static void gen_expr(CodegenCtx *ctx, AstNode *expr) {
                 sb_appendf(&ctx->sb, "\"%s\"", expr->as.literal.val.s);
             } else if (expr->as.literal.lit_type == TY_BOOL) {
                 sb_append(&ctx->sb, expr->as.literal.val.b ? "true" : "false");
+            } else if (expr->as.literal.lit_type == TY_POINTER) {
+                sb_append(&ctx->sb, "NULL");
             } else if (expr->as.literal.lit_type == TY_CHAR) {
                 char c = expr->as.literal.val.c;
                 if (c == '\n') sb_append(&ctx->sb, "'\\n'");
@@ -4214,6 +4222,8 @@ static void scan_node_usage(AstNode *node, bool *used_chunks, uint32_t *header_f
         case NODE_LITERAL:
             if (node->as.literal.lit_type == TY_BOOL) {
                 *header_flags |= HEADER_STDBOOL;
+            } else if (node->as.literal.lit_type == TY_POINTER) {
+                *header_flags |= HEADER_STDLIB;
             }
             break;
 

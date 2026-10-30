@@ -359,15 +359,19 @@ void x86_emit_xor(X86InstrList *list, X86Reg src_reg, X86Reg dst_reg) {
     x86_instr_list_append(list, inst);
 }
 
-void x86_emit_cmp(X86InstrList *list, X86Reg src_reg, X86Reg dst_reg) {
+void x86_emit_cmp_sized(X86InstrList *list, int size, X86Reg src_reg, X86Reg dst_reg) {
     X86Instr *inst = x86_instr_create(X86_OP_CMP);
     inst->dst.kind = X86_OPERAND_REG;
     inst->dst.reg = dst_reg;
-    inst->dst.size = 4;
+    inst->dst.size = size;
     inst->src.kind = X86_OPERAND_REG;
     inst->src.reg = src_reg;
-    inst->src.size = 4;
+    inst->src.size = size;
     x86_instr_list_append(list, inst);
+}
+
+void x86_emit_cmp(X86InstrList *list, X86Reg src_reg, X86Reg dst_reg) {
+    x86_emit_cmp_sized(list, 4, src_reg, dst_reg);
 }
 
 void x86_emit_cmp_imm(X86InstrList *list, int32_t imm, X86Reg dst_reg) {
@@ -807,7 +811,11 @@ char *x86_instr_list_to_asm(X86InstrList *list) {
                 buf_appendf(&b, "    xorl %s, %s\n", x86_reg_to_str(inst->src.reg, 4), x86_reg_to_str(inst->dst.reg, 4));
                 break;
             case X86_OP_CMP:
-                buf_appendf(&b, "    cmpl %s, %s\n", x86_reg_to_str(inst->src.reg, 4), x86_reg_to_str(inst->dst.reg, 4));
+                if (inst->dst.size == 8 || inst->src.size == 8) {
+                    buf_appendf(&b, "    cmpq %s, %s\n", x86_reg_to_str(inst->src.reg, 8), x86_reg_to_str(inst->dst.reg, 8));
+                } else {
+                    buf_appendf(&b, "    cmpl %s, %s\n", x86_reg_to_str(inst->src.reg, 4), x86_reg_to_str(inst->dst.reg, 4));
+                }
                 break;
             case X86_OP_CMP_IMM:
                 buf_appendf(&b, "    cmpl $%ld, %s\n", (long)inst->src.imm, x86_reg_to_str(inst->dst.reg, 4));

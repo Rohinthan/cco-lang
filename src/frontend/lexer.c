@@ -71,6 +71,7 @@ static TokenType check_keyword(const char *str) {
     if (strcmp(str, "void") == 0) return TOKEN_TYPE_VOID;
     if (strcmp(str, "true") == 0) return TOKEN_TRUE;
     if (strcmp(str, "false") == 0) return TOKEN_FALSE;
+    if (strcmp(str, "null") == 0) return TOKEN_NULL;
     if (strcmp(str, "and") == 0) return TOKEN_KW_AND;
     if (strcmp(str, "or") == 0) return TOKEN_KW_OR;
     if (strcmp(str, "not") == 0) return TOKEN_KW_NOT;
@@ -496,6 +497,7 @@ const char *token_type_to_string(TokenType type) {
         case TOKEN_TYPE_VOID: return "void";
         case TOKEN_TRUE: return "true";
         case TOKEN_FALSE: return "false";
+        case TOKEN_NULL: return "null";
         case TOKEN_IDENT: return "IDENT";
         case TOKEN_INT_LIT: return "INT_LIT";
         case TOKEN_FLOAT_LIT: return "FLOAT_LIT";
@@ -585,6 +587,7 @@ void dump_tokens(const TokenArray *array) {
             case TOKEN_TYPE_VOID:
             case TOKEN_TRUE:
             case TOKEN_FALSE:
+            case TOKEN_NULL:
             case TOKEN_KW_AND:
             case TOKEN_KW_OR:
             case TOKEN_KW_NOT:

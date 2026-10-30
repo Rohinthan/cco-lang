@@ -39,6 +39,7 @@ typedef enum {
     TOKEN_TYPE_VOID,
     TOKEN_TRUE,
     TOKEN_FALSE,
+    TOKEN_NULL,
     TOKEN_KW_AND,
     TOKEN_KW_OR,
     TOKEN_KW_NOT,

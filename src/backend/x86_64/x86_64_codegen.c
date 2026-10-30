@@ -630,7 +630,8 @@ static bool gen_instruction(X86InstrList *list, X86FunctionFrame *frame, IrInstr
 
             emit_load_val(list, frame, inst->lhs, X86_REG_RAX);
             emit_load_val(list, frame, inst->rhs, X86_REG_RDX);
-            x86_emit_cmp(list, X86_REG_RDX, X86_REG_RAX);
+            bool is_64 = is_val_64(inst->lhs) || is_val_64(inst->rhs);
+            x86_emit_cmp_sized(list, is_64 ? 8 : 4, X86_REG_RDX, X86_REG_RAX);
 
             X86CondCode cc = X86_CC_E;
             if (inst->op == IR_OP_NE) cc = X86_CC_NE;

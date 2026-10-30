@@ -94,6 +94,7 @@ const char *type_to_string(Type type) {
         case TY_CLASS: return "class";
         case TY_MAP: return "map";
         case TY_ENUM: return "enum";
+        case TY_POINTER: return "pointer";
         default: return "unknown";
     }
 }
@@ -131,6 +132,14 @@ TypeDesc *type_desc_map(AstArena *arena, TypeDesc *key_type, TypeDesc *val_type)
     return td;
 }
 
+TypeDesc *type_desc_pointer(AstArena *arena, TypeDesc *pointee_type) {
+    if (!arena) return NULL;
+    TypeDesc *td = (TypeDesc *)arena_malloc(arena, sizeof(TypeDesc));
+    td->kind = TYPEDESC_POINTER;
+    td->as.pointer_desc.pointee_type = pointee_type;
+    return td;
+}
+
 bool type_desc_equals(const TypeDesc *a, const TypeDesc *b) {
     if (a == b) return true;
     if (!a || !b) return false;
@@ -148,6 +157,8 @@ bool type_desc_equals(const TypeDesc *a, const TypeDesc *b) {
         case TYPEDESC_MAP:
             return type_desc_equals(a->as.map_desc.key_type, b->as.map_desc.key_type) &&
                    type_desc_equals(a->as.map_desc.val_type, b->as.map_desc.val_type);
+        case TYPEDESC_POINTER:
+            return type_desc_equals(a->as.pointer_desc.pointee_type, b->as.pointer_desc.pointee_type);
         default:
             return false;
     }
@@ -156,6 +167,16 @@ bool type_desc_equals(const TypeDesc *a, const TypeDesc *b) {
 bool type_desc_is_compatible(const TypeDesc *expected, const TypeDesc *actual) {
     if (expected == actual) return true;
     if (!expected || !actual) return true;
+    if (expected->kind == TYPEDESC_POINTER && actual->kind == TYPEDESC_POINTER) {
+        bool exp_is_void = (expected->as.pointer_desc.pointee_type &&
+                            expected->as.pointer_desc.pointee_type->kind == TYPEDESC_PRIMITIVE &&
+                            expected->as.pointer_desc.pointee_type->as.primitive_desc.primitive_kind == TY_VOID);
+        bool act_is_void = (actual->as.pointer_desc.pointee_type &&
+                            actual->as.pointer_desc.pointee_type->kind == TYPEDESC_PRIMITIVE &&
+                            actual->as.pointer_desc.pointee_type->as.primitive_desc.primitive_kind == TY_VOID);
+        if (exp_is_void || act_is_void) return true;
+        return type_desc_equals(expected->as.pointer_desc.pointee_type, actual->as.pointer_desc.pointee_type);
+    }
     if (expected->kind == TYPEDESC_PRIMITIVE && actual->kind == TYPEDESC_PRIMITIVE) {
         Type et = expected->as.primitive_desc.primitive_kind;
         Type at = actual->as.primitive_desc.primitive_kind;
@@ -206,6 +227,11 @@ char *type_desc_to_string(AstArena *arena, const TypeDesc *td) {
             snprintf(buf, sizeof(buf), "map[%s]%s", key_s, val_s);
             return arena_strdup(arena, buf);
         }
+        case TYPEDESC_POINTER: {
+            char *elem_s = type_desc_to_string(arena, td->as.pointer_desc.pointee_type);
+            snprintf(buf, sizeof(buf), "*%s", elem_s);
+            return arena_strdup(arena, buf);
+        }
         default:
             return arena_strdup(arena, "unknown");
     }
@@ -224,6 +250,8 @@ TypeDesc *type_desc_clone(AstArena *arena, const TypeDesc *td) {
             return type_desc_array(arena, type_desc_clone(arena, td->as.array_desc.elem_type));
         case TYPEDESC_MAP:
             return type_desc_map(arena, type_desc_clone(arena, td->as.map_desc.key_type), type_desc_clone(arena, td->as.map_desc.val_type));
+        case TYPEDESC_POINTER:
+            return type_desc_pointer(arena, type_desc_clone(arena, td->as.pointer_desc.pointee_type));
         default:
             return NULL;
     }

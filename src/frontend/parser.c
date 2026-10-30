@@ -193,7 +193,10 @@ static TypeDesc *parse_type_desc(Parser *p, bool *out_is_borrowed, bool *out_is_
 
     TypeDesc *base = NULL;
 
-    if (match(p, TOKEN_MAP)) {
+    if (match(p, TOKEN_STAR)) {
+        TypeDesc *pointee = parse_type_desc(p, NULL, NULL, allow_self, false);
+        base = type_desc_pointer(p->arena, pointee);
+    } else if (match(p, TOKEN_MAP)) {
         consume(p, TOKEN_LBRACKET, "Expected '[' after 'map'");
         TypeDesc *key_desc = NULL;
         if (match(p, TOKEN_TYPE_INT)) {
@@ -314,6 +317,10 @@ static Type type_desc_to_flat(TypeDesc *td, char **out_class_name, bool *out_is_
 
     if (td->kind == TYPEDESC_PRIMITIVE) {
         return td->as.primitive_desc.primitive_kind;
+    }
+
+    if (td->kind == TYPEDESC_POINTER) {
+        return TY_POINTER;
     }
 
     if (td->kind == TYPEDESC_CLASS || td->kind == TYPEDESC_ENUM || td->kind == TYPEDESC_NAMED) {
@@ -535,6 +542,13 @@ static AstNode *parse_primary(Parser *p) {
         AstNode *node = arena_alloc_node(p->arena, NODE_LITERAL, tok.line, tok.col);
         node->as.literal.lit_type = TY_BOOL;
         node->as.literal.val.b = false;
+        return node;
+    }
+
+    if (match(p, TOKEN_NULL)) {
+        AstNode *node = arena_alloc_node(p->arena, NODE_LITERAL, tok.line, tok.col);
+        node->as.literal.lit_type = TY_POINTER;
+        node->as.literal.val.ptr = NULL;
         return node;
     }
 
@@ -835,6 +849,13 @@ static AstNode *parse_call_or_index(Parser *p) {
 }
 
 static AstNode *parse_unary(Parser *p) {
+    if (check(p, TOKEN_STAR)) {
+        Token op = advance(p);
+        if (check(p, TOKEN_IDENT) || check(p, TOKEN_LPAREN)) {
+            fatal_parser_error(op.line, op.col, op.lexeme, "raw pointer dereferencing is not supported in safe code");
+        }
+        error_at(op, "Expected expression");
+    }
     if (check(p, TOKEN_INCREMENT)) {
         Token op = advance(p);
         fatal_parser_error(op.line, op.col, op.lexeme, "'++' can only be used as a statement in this version");
@@ -2739,6 +2760,21 @@ static void check_expr_variables(AstArena *arena, AstNode *program, AstNode *fn,
         case NODE_BINARY:
             check_expr_variables(arena, program, fn, scope, expr->as.binary.left);
             check_expr_variables(arena, program, fn, scope, expr->as.binary.right);
+            {
+                TypeDesc *lt = infer_ast_expr_type_desc(arena, program, fn, scope, expr->as.binary.left);
+                TypeDesc *rt = infer_ast_expr_type_desc(arena, program, fn, scope, expr->as.binary.right);
+                bool left_is_ptr = (lt && lt->kind == TYPEDESC_POINTER);
+                bool right_is_ptr = (rt && rt->kind == TYPEDESC_POINTER);
+                if (left_is_ptr || right_is_ptr) {
+                    if (strcmp(expr->as.binary.op, "==") != 0 && strcmp(expr->as.binary.op, "!=") != 0) {
+                        fatal_parser_error(expr->line, expr->col, expr->as.binary.op, "pointer arithmetic is not supported");
+                    } else if (!left_is_ptr || !right_is_ptr) {
+                        fatal_parser_error(expr->line, expr->col, expr->as.binary.op, "cannot compare pointer with non-pointer type");
+                    } else if (!type_desc_is_compatible(lt, rt) && !type_desc_is_compatible(rt, lt)) {
+                        fatal_parser_error(expr->line, expr->col, expr->as.binary.op, "cannot compare distinct pointer types");
+                    }
+                }
+            }
             break;
         case NODE_UNARY:
             check_expr_variables(arena, program, fn, scope, expr->as.unary.operand);
@@ -2827,6 +2863,10 @@ static void check_expr_variables(AstArena *arena, AstNode *program, AstNode *fn,
         case NODE_INDEX:
             if (expr->as.index.array_expr) {
                 check_expr_variables(arena, program, fn, scope, expr->as.index.array_expr);
+                TypeDesc *arr_td = infer_ast_expr_type_desc(arena, program, fn, scope, expr->as.index.array_expr);
+                if (arr_td && arr_td->kind == TYPEDESC_POINTER) {
+                    fatal_parser_error(expr->line, expr->col, "[]", "pointer indexing is not supported");
+                }
             }
             if (expr->as.index.index) {
                 check_expr_variables(arena, program, fn, scope, expr->as.index.index);
@@ -2891,6 +2931,9 @@ static TypeDesc *infer_ast_expr_type_desc(AstArena *arena, AstNode *program, Ast
 
     switch (expr->type) {
         case NODE_LITERAL:
+            if (expr->as.literal.lit_type == TY_POINTER) {
+                return type_desc_pointer(arena, type_desc_primitive(arena, TY_VOID));
+            }
             return type_desc_primitive(arena, expr->as.literal.lit_type);
 
         case NODE_FSTRING:
@@ -3675,6 +3718,10 @@ static AstNode *desugar_stmt_node(AstArena *arena, AstNode *program, AstNode *fn
 
         Type tt; char *tc = NULL; bool ta = false, tm = false; Type tk = TY_INT;
         infer_ast_expr_type(arena, program, fn, scope, target, &tt, &tc, &ta, &tm, &tk);
+
+        if (tt == TY_POINTER) {
+            fatal_parser_error(stmt->line, stmt->col, op, "pointer arithmetic is not supported");
+        }
 
         if (strcmp(op, "++") == 0) {
             AstNode *lit1 = arena_alloc_node(arena, NODE_LITERAL, stmt->line, stmt->col);

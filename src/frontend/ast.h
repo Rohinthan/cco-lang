@@ -15,7 +15,8 @@ typedef enum {
     TY_VOID,
     TY_CLASS,
     TY_MAP,
-    TY_ENUM
+    TY_ENUM,
+    TY_POINTER
 } Type;
 
 typedef enum {
@@ -24,7 +25,8 @@ typedef enum {
     TYPEDESC_ENUM,
     TYPEDESC_NAMED,
     TYPEDESC_ARRAY,
-    TYPEDESC_MAP
+    TYPEDESC_MAP,
+    TYPEDESC_POINTER
 } TypeDescKind;
 
 typedef struct TypeDesc TypeDesc;
@@ -48,6 +50,10 @@ struct TypeDesc {
         struct {
             Type primitive_kind;
         } primitive_desc;
+
+        struct {
+            TypeDesc *pointee_type;
+        } pointer_desc;
     } as;
 };
 
@@ -454,6 +460,7 @@ struct AstNode {
                 char c;
                 char *s;
                 bool b;
+                void *ptr;
             } val;
         } literal;
 
@@ -498,6 +505,7 @@ TypeDesc *type_desc_primitive(AstArena *arena, Type primitive);
 TypeDesc *type_desc_named(AstArena *arena, const char *name);
 TypeDesc *type_desc_array(AstArena *arena, TypeDesc *elem_type);
 TypeDesc *type_desc_map(AstArena *arena, TypeDesc *key_type, TypeDesc *val_type);
+TypeDesc *type_desc_pointer(AstArena *arena, TypeDesc *pointee_type);
 bool type_desc_equals(const TypeDesc *a, const TypeDesc *b);
 bool type_desc_is_compatible(const TypeDesc *expected, const TypeDesc *actual);
 char *type_desc_to_string(AstArena *arena, const TypeDesc *td);
