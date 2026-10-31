@@ -1459,6 +1459,30 @@ static const PreludeChunk PRELUDE_CHUNKS[] = {
         "    return false;\n"
         "}\n\n",
         NULL
+    },
+    {
+        "str_to_cstr",
+        "static inline char *__cco_str_to_cstr(const char *s) {\n"
+        "    return (char *)(s ? s : \"\");\n"
+        "}\n\n",
+        NULL
+    },
+    {
+        "str_from_cstr",
+        "static inline char *__cco_str_from_cstr(const char *p) {\n"
+        "    if (!p) p = \"\";\n"
+        "    size_t len = strlen(p);\n"
+        "    char *res = (char *)malloc(len + 1);\n"
+        "    if (!res) {\n"
+        "        const char msg[] = \"Fatal Error: Out of memory in str_from_cstr()\\n\";\n"
+        "        ssize_t _w = write(2, msg, sizeof(msg) - 1);\n"
+        "        (void)_w;\n"
+        "        exit(1);\n"
+        "    }\n"
+        "    memcpy(res, p, len + 1);\n"
+        "    return res;\n"
+        "}\n\n",
+        NULL
     }
 };
 

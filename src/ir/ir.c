@@ -156,6 +156,7 @@ bool ir_type_equals(const IrType *a, const IrType *b) {
             return true;
         case IR_TYPE_PTR:
             if (!a->elem_type || !b->elem_type) return true; /* Opaque pointers match */
+            if (a->elem_type->kind == IR_TYPE_VOID || b->elem_type->kind == IR_TYPE_VOID) return true;
             return ir_type_equals(a->elem_type, b->elem_type);
         case IR_TYPE_STRUCT:
             if (!a->name || !b->name) return false;

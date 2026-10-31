@@ -2669,6 +2669,10 @@ static bool is_known_builtin_fn(const char *name) {
            strcmp(name, "is_int") == 0 ||
            strcmp(name, "is_float") == 0 ||
            strcmp(name, "char_at") == 0 ||
+           strcmp(name, "str_to_cstr") == 0 ||
+           strcmp(name, "string_to_cstr") == 0 ||
+           strcmp(name, "str_from_cstr") == 0 ||
+           strcmp(name, "string_from_cstr") == 0 ||
            strcmp(name, "equals") == 0 ||
            strcmp(name, "sleep_ms") == 0 ||
            strcmp(name, "random_seed") == 0 ||
@@ -2788,6 +2792,61 @@ static void check_expr_variables(AstArena *arena, AstNode *program, AstNode *fn,
                     const char *fn_path = expr->source_file ? expr->source_file : get_error_filename();
                     ErrorLocation primary = {fn_path, expr->line, expr->col};
                     print_formatted_error_code("E2002", short_msg, primary, "undefined function", NULL, NULL, NULL, NULL);
+                    exit(1);
+                }
+            }
+            if (callee && (strcmp(callee, "str_to_cstr") == 0 || strcmp(callee, "string_to_cstr") == 0)) {
+                if (expr->as.call.arg_count != 1) {
+                    char short_msg[256];
+                    snprintf(short_msg, sizeof(short_msg), "function '%s' expects 1 argument, got %d", callee, expr->as.call.arg_count);
+                    const char *fn_path = expr->source_file ? expr->source_file : get_error_filename();
+                    ErrorLocation primary = {fn_path, expr->line, expr->col};
+                    print_formatted_error(short_msg, primary, "wrong argument count", NULL, NULL, NULL, NULL);
+                    exit(1);
+                }
+                AstNode *arg = expr->as.call.args[0];
+                TypeDesc *arg_td = infer_ast_expr_type_desc(arena, program, fn, scope, arg);
+                bool is_str = (arg_td && arg_td->kind == TYPEDESC_PRIMITIVE &&
+                               arg_td->as.primitive_desc.primitive_kind == TY_STRING);
+                if (!is_str) {
+                    char short_msg[256];
+                    char *got_str = type_desc_to_string(arena, arg_td);
+                    snprintf(short_msg, sizeof(short_msg), "type mismatch in call to '%s' — argument 1 expected string, got %s", callee, got_str);
+                    const char *fn_path = arg->source_file ? arg->source_file : (expr->source_file ? expr->source_file : get_error_filename());
+                    ErrorLocation primary = {fn_path, arg->line, arg->col};
+                    print_formatted_error(short_msg, primary, "type mismatch", NULL, NULL, NULL, NULL);
+                    exit(1);
+                }
+            } else if (callee && (strcmp(callee, "str_from_cstr") == 0 || strcmp(callee, "string_from_cstr") == 0)) {
+                if (expr->as.call.arg_count != 1) {
+                    char short_msg[256];
+                    snprintf(short_msg, sizeof(short_msg), "function '%s' expects 1 argument, got %d", callee, expr->as.call.arg_count);
+                    const char *fn_path = expr->source_file ? expr->source_file : get_error_filename();
+                    ErrorLocation primary = {fn_path, expr->line, expr->col};
+                    print_formatted_error(short_msg, primary, "wrong argument count", NULL, NULL, NULL, NULL);
+                    exit(1);
+                }
+                AstNode *arg = expr->as.call.args[0];
+                bool is_literal_null = (arg->type == NODE_LITERAL && arg->as.literal.lit_type == TY_POINTER);
+                TypeDesc *arg_td = infer_ast_expr_type_desc(arena, program, fn, scope, arg);
+                bool is_char_ptr = (arg_td && arg_td->kind == TYPEDESC_POINTER &&
+                                    arg_td->as.pointer_desc.pointee_type &&
+                                    arg_td->as.pointer_desc.pointee_type->kind == TYPEDESC_PRIMITIVE &&
+                                    arg_td->as.pointer_desc.pointee_type->as.primitive_desc.primitive_kind == TY_CHAR);
+                if (!is_char_ptr && !is_literal_null) {
+                    char short_msg[256];
+                    char *got_str = type_desc_to_string(arena, arg_td);
+                    if (arg_td && arg_td->kind == TYPEDESC_POINTER &&
+                        arg_td->as.pointer_desc.pointee_type &&
+                        arg_td->as.pointer_desc.pointee_type->kind == TYPEDESC_PRIMITIVE &&
+                        arg_td->as.pointer_desc.pointee_type->as.primitive_desc.primitive_kind == TY_VOID) {
+                        snprintf(short_msg, sizeof(short_msg), "type mismatch in call to '%s' — cannot convert opaque handle '*void' to string; expected '*char'", callee);
+                    } else {
+                        snprintf(short_msg, sizeof(short_msg), "type mismatch in call to '%s' — argument 1 expected *char, got %s", callee, got_str);
+                    }
+                    const char *fn_path = arg->source_file ? arg->source_file : (expr->source_file ? expr->source_file : get_error_filename());
+                    ErrorLocation primary = {fn_path, arg->line, arg->col};
+                    print_formatted_error(short_msg, primary, "type mismatch", NULL, NULL, NULL, NULL);
                     exit(1);
                 }
             }
@@ -3100,11 +3159,15 @@ static TypeDesc *infer_ast_expr_type_desc(AstArena *arena, AstNode *program, Ast
                     return mtd->as.map_desc.val_type;
                 }
             }
+            if (strcmp(callee, "str_to_cstr") == 0 || strcmp(callee, "string_to_cstr") == 0) {
+                return type_desc_pointer(arena, type_desc_primitive(arena, TY_CHAR));
+            }
             if (strcmp(callee, "concat") == 0 || strcmp(callee, "substring") == 0 || strcmp(callee, "char_to_string") == 0 ||
                 strcmp(callee, "to_string") == 0 || strcmp(callee, "read_file") == 0 || strcmp(callee, "read_file_checked") == 0 ||
                 strcmp(callee, "io_last_error") == 0 || strcmp(callee, "net_last_error") == 0 || strcmp(callee, "read_line") == 0 ||
                 strcmp(callee, "input") == 0 || strcmp(callee, "program_name") == 0 || strcmp(callee, "net_recv") == 0 ||
-                strcmp(callee, "net_recv_raw") == 0 || strcmp(callee, "net_recv_http") == 0) {
+                strcmp(callee, "net_recv_raw") == 0 || strcmp(callee, "net_recv_http") == 0 ||
+                strcmp(callee, "str_from_cstr") == 0 || strcmp(callee, "string_from_cstr") == 0) {
                 return type_desc_primitive(arena, TY_STRING);
             }
             if (strcmp(callee, "net_close") == 0 || strcmp(callee, "sleep_ms") == 0 || strcmp(callee, "random_seed") == 0 || strcmp(callee, "exit") == 0) {
@@ -3378,7 +3441,11 @@ static bool infer_ast_expr_type(AstArena *arena, AstNode *program, AstNode *fn, 
     }
     if (expr->type == NODE_CALL) {
         const char *callee = expr->as.call.callee;
-        if (strcmp(callee, "concat") == 0 || strcmp(callee, "substring") == 0 || strcmp(callee, "char_to_string") == 0 || strcmp(callee, "to_string") == 0 || strcmp(callee, "read_file") == 0 || strcmp(callee, "read_file_checked") == 0 || strcmp(callee, "io_last_error") == 0 || strcmp(callee, "net_last_error") == 0 || strcmp(callee, "read_line") == 0 || strcmp(callee, "input") == 0 || strcmp(callee, "program_name") == 0 || strcmp(callee, "net_recv") == 0 || strcmp(callee, "net_recv_raw") == 0 || strcmp(callee, "net_recv_http") == 0) {
+        if (strcmp(callee, "str_to_cstr") == 0 || strcmp(callee, "string_to_cstr") == 0) {
+            *out_type = TY_POINTER;
+            return true;
+        }
+        if (strcmp(callee, "concat") == 0 || strcmp(callee, "substring") == 0 || strcmp(callee, "char_to_string") == 0 || strcmp(callee, "to_string") == 0 || strcmp(callee, "read_file") == 0 || strcmp(callee, "read_file_checked") == 0 || strcmp(callee, "io_last_error") == 0 || strcmp(callee, "net_last_error") == 0 || strcmp(callee, "read_line") == 0 || strcmp(callee, "input") == 0 || strcmp(callee, "program_name") == 0 || strcmp(callee, "net_recv") == 0 || strcmp(callee, "net_recv_raw") == 0 || strcmp(callee, "net_recv_http") == 0 || strcmp(callee, "str_from_cstr") == 0 || strcmp(callee, "string_from_cstr") == 0) {
             *out_type = TY_STRING;
             return true;
         }

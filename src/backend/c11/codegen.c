@@ -678,9 +678,10 @@ static Type infer_expr_type(AstNode *program, AstNode *fn, AstNode *expr) {
         if (strcmp(name, "push") == 0 && expr->as.call.arg_count > 0) {
             return infer_expr_type(program, fn, expr->as.call.args[0]);
         }
+        if (strcmp(name, "str_to_cstr") == 0 || strcmp(name, "string_to_cstr") == 0) return TY_POINTER;
         if (strcmp(name, "len") == 0 || strcmp(name, "abs_int") == 0 || strcmp(name, "min_int") == 0 || strcmp(name, "max_int") == 0 || strcmp(name, "arg_count") == 0 || strcmp(name, "to_int") == 0 || strcmp(name, "random_int") == 0 || strcmp(name, "net_listen") == 0 || strcmp(name, "net_listen_on") == 0 || strcmp(name, "net_connect") == 0 || strcmp(name, "net_accept") == 0 || strcmp(name, "net_send") == 0 || strcmp(name, "net_send_bytes") == 0 || strcmp(name, "net_recv_bytes") == 0 || strcmp(name, "net_shutdown") == 0 || strcmp(name, "net_set_timeouts") == 0 || strcmp(name, "execute_cmd") == 0 || strcmp(name, "system") == 0) return TY_INT;
         if (strcmp(name, "sqrt") == 0 || strcmp(name, "exp") == 0 || strcmp(name, "log") == 0 || strcmp(name, "sin") == 0 || strcmp(name, "cos") == 0 || strcmp(name, "tan") == 0 || strcmp(name, "pow") == 0 || strcmp(name, "abs_float") == 0 || strcmp(name, "floor") == 0 || strcmp(name, "ceil") == 0 || strcmp(name, "min_float") == 0 || strcmp(name, "max_float") == 0 || strcmp(name, "to_float") == 0) return TY_FLOAT;
-        if (strcmp(name, "concat") == 0 || strcmp(name, "substring") == 0 || strcmp(name, "char_to_string") == 0 || strcmp(name, "to_string") == 0 || strcmp(name, "read_file") == 0 || strcmp(name, "read_file_checked") == 0 || strcmp(name, "io_last_error") == 0 || strcmp(name, "net_last_error") == 0 || strcmp(name, "program_name") == 0 || strcmp(name, "args") == 0 || strcmp(name, "read_line") == 0 || strcmp(name, "input") == 0 || strcmp(name, "net_recv") == 0 || strcmp(name, "net_recv_raw") == 0 || strcmp(name, "net_recv_http") == 0) return TY_STRING;
+        if (strcmp(name, "concat") == 0 || strcmp(name, "substring") == 0 || strcmp(name, "char_to_string") == 0 || strcmp(name, "to_string") == 0 || strcmp(name, "read_file") == 0 || strcmp(name, "read_file_checked") == 0 || strcmp(name, "io_last_error") == 0 || strcmp(name, "net_last_error") == 0 || strcmp(name, "program_name") == 0 || strcmp(name, "args") == 0 || strcmp(name, "read_line") == 0 || strcmp(name, "input") == 0 || strcmp(name, "net_recv") == 0 || strcmp(name, "net_recv_raw") == 0 || strcmp(name, "net_recv_http") == 0 || strcmp(name, "str_from_cstr") == 0 || strcmp(name, "string_from_cstr") == 0) return TY_STRING;
         if (strcmp(name, "equals") == 0 || strcmp(name, "write_file") == 0 || strcmp(name, "is_int") == 0 || strcmp(name, "is_float") == 0 || strcmp(name, "file_exists") == 0 || strcmp(name, "write_bytes") == 0) return TY_BOOL;
         if (strcmp(name, "char_at") == 0) return TY_CHAR;
         if (strcmp(name, "random_seed") == 0 || strcmp(name, "net_close") == 0 || strcmp(name, "sleep_ms") == 0 || strcmp(name, "exit") == 0) return TY_VOID;
@@ -2225,6 +2226,14 @@ static void gen_expr(CodegenCtx *ctx, AstNode *expr) {
                 sb_append(&ctx->sb, ")[__cco_arr_len_raw(");
                 gen_expr(ctx, arr_arg);
                 sb_append(&ctx->sb, ")])");
+            } else if (strcmp(callee, "str_to_cstr") == 0 || strcmp(callee, "string_to_cstr") == 0) {
+                sb_append(&ctx->sb, "__cco_str_to_cstr(");
+                gen_expr(ctx, expr->as.call.args[0]);
+                sb_append(&ctx->sb, ")");
+            } else if (strcmp(callee, "str_from_cstr") == 0 || strcmp(callee, "string_from_cstr") == 0) {
+                sb_append(&ctx->sb, "__cco_str_from_cstr(");
+                gen_expr(ctx, expr->as.call.args[0]);
+                sb_append(&ctx->sb, ")");
             } else if (strcmp(callee, "concat") == 0) {
                 sb_append(&ctx->sb, "__cco_concat(");
                 gen_expr(ctx, expr->as.call.args[0]);
@@ -2576,6 +2585,8 @@ static inline bool is_heap_string_returning_call(const char *name) {
             strcmp(name, "net_recv") == 0 ||
             strcmp(name, "net_recv_raw") == 0 ||
             strcmp(name, "net_recv_http") == 0 ||
+            strcmp(name, "str_from_cstr") == 0 ||
+            strcmp(name, "string_from_cstr") == 0 ||
             strcmp(name, "program_name") == 0);
 }
 
@@ -3894,7 +3905,8 @@ bool cco_codegen_needs_libm(void) {
 
 static bool chunk_needs_posix(const char *name) {
     if (!name) return false;
-    return (strcmp(name, "map_put") == 0 ||
+    return (strcmp(name, "str_from_cstr") == 0 ||
+            strcmp(name, "map_put") == 0 ||
             strcmp(name, "map_keys") == 0 ||
             strcmp(name, "get_args") == 0 ||
             strcmp(name, "get_program_name") == 0 ||
@@ -3970,8 +3982,12 @@ static uint32_t get_chunk_header_flags(const char *name) {
     if (strcmp(name, "free_arr") == 0 ||
         strcmp(name, "map_free") == 0 ||
         strcmp(name, "execute_cmd") == 0 ||
+        strcmp(name, "str_to_cstr") == 0 ||
         strcmp(name, "cco_exit") == 0) {
         return HEADER_STDLIB;
+    }
+    if (strcmp(name, "str_from_cstr") == 0) {
+        return HEADER_STRING | HEADER_STDLIB | HEADER_UNISTD;
     }
     if (strcmp(name, "map_hash") == 0) {
         return HEADER_STRING | HEADER_STDBOOL | HEADER_STDINT;
@@ -4365,6 +4381,12 @@ static void scan_node_usage(AstNode *node, bool *used_chunks, uint32_t *header_f
                            strcmp(callee, "ceil") == 0) {
                     *header_flags |= HEADER_MATH;
                     *needs_libm = true;
+                } else if (strcmp(callee, "str_to_cstr") == 0 || strcmp(callee, "string_to_cstr") == 0) {
+                    mark_chunk_used(used_chunks, "str_to_cstr");
+                    *header_flags |= HEADER_STDLIB;
+                } else if (strcmp(callee, "str_from_cstr") == 0 || strcmp(callee, "string_from_cstr") == 0) {
+                    mark_chunk_used(used_chunks, "str_from_cstr");
+                    *header_flags |= HEADER_STRING | HEADER_STDLIB;
                 } else if (strcmp(callee, "concat") == 0) mark_chunk_used(used_chunks, "concat");
                 else if (strcmp(callee, "char_at") == 0) mark_chunk_used(used_chunks, "char_at");
                 else if (strcmp(callee, "substring") == 0) mark_chunk_used(used_chunks, "substring");

@@ -197,6 +197,81 @@ static IrValue *lower_expr(LowerCtx *ctx, AstNode *expr) {
         }
 
         case NODE_CALL: {
+            const char *callee = expr->as.call.callee;
+            if (callee && (strcmp(callee, "str_to_cstr") == 0 || strcmp(callee, "string_to_cstr") == 0)) {
+                if (expr->as.call.arg_count > 0) {
+                    return lower_expr(ctx, expr->as.call.args[0]);
+                }
+                return ir_emit_const_int(&ctx->builder, ir_type_ptr(arena, ir_type_void(arena)), 0)->result;
+            }
+
+            if (callee && (strcmp(callee, "str_from_cstr") == 0 || strcmp(callee, "string_from_cstr") == 0)) {
+                IrValue *p_val = NULL;
+                if (expr->as.call.arg_count > 0) {
+                    p_val = lower_expr(ctx, expr->as.call.args[0]);
+                    if (!p_val) return NULL;
+                } else {
+                    p_val = ir_emit_const_int(&ctx->builder, ir_type_ptr(arena, ir_type_void(arena)), 0)->result;
+                }
+
+                IrType *char_ptr_type = ir_type_ptr(arena, ir_type_char(arena));
+
+                /* 1. Allocate a temporary stack slot in the entry block */
+                IrBasicBlock *saved_bb = ctx->builder.block;
+                ctx->builder.block = ctx->current_fn->entry_block;
+                IrInstruction *res_slot = ir_emit_alloca(&ctx->builder, char_ptr_type, "str_from_cstr.res");
+                ctx->builder.block = saved_bb;
+
+                /* 2. Target basic blocks */
+                IrBasicBlock *null_bb    = ir_block_create(ctx->current_fn, "from_cstr.null");
+                IrBasicBlock *copy_bb    = ir_block_create(ctx->current_fn, "from_cstr.copy");
+                IrBasicBlock *null_ok_bb = ir_block_create(ctx->current_fn, "from_cstr.null_ok");
+                IrBasicBlock *copy_ok_bb = ir_block_create(ctx->current_fn, "from_cstr.copy_ok");
+                IrBasicBlock *abort_bb   = ir_block_create(ctx->current_fn, "from_cstr.abort");
+                IrBasicBlock *merge_bb   = ir_block_create(ctx->current_fn, "from_cstr.merge");
+
+                /* 3. Compare p == null (0) */
+                IrValue *null_ptr = ir_emit_const_int(&ctx->builder, p_val->type, 0)->result;
+                IrInstruction *cmp_null = ir_emit_binary(&ctx->builder, IR_OP_EQ, ir_type_bool(arena), p_val, null_ptr);
+                ir_emit_condbr(&ctx->builder, cmp_null->result, null_bb, copy_bb);
+
+                /* 4. Null path: strdup("") */
+                ir_builder_set_insert_block(&ctx->builder, null_bb);
+                IrValue *empty_str = ir_emit_const_string(&ctx->builder, "")->result;
+                IrInstruction *dup_null = ir_emit_call(&ctx->builder, "strdup", char_ptr_type, &empty_str, 1);
+                IrValue *null_check_0 = ir_emit_const_int(&ctx->builder, char_ptr_type, 0)->result;
+                IrInstruction *cmp_null_fail = ir_emit_binary(&ctx->builder, IR_OP_EQ, ir_type_bool(arena), dup_null->result, null_check_0);
+                ir_emit_condbr(&ctx->builder, cmp_null_fail->result, abort_bb, null_ok_bb);
+
+                /* 5. Null OK path: store and jump to merge */
+                ir_builder_set_insert_block(&ctx->builder, null_ok_bb);
+                ir_emit_store(&ctx->builder, dup_null->result, res_slot->result);
+                ir_emit_br(&ctx->builder, merge_bb);
+
+                /* 6. Non-null path: strdup(p) */
+                ir_builder_set_insert_block(&ctx->builder, copy_bb);
+                IrInstruction *dup_p = ir_emit_call(&ctx->builder, "strdup", char_ptr_type, &p_val, 1);
+                IrValue *null_check_1 = ir_emit_const_int(&ctx->builder, char_ptr_type, 0)->result;
+                IrInstruction *cmp_p_fail = ir_emit_binary(&ctx->builder, IR_OP_EQ, ir_type_bool(arena), dup_p->result, null_check_1);
+                ir_emit_condbr(&ctx->builder, cmp_p_fail->result, abort_bb, copy_ok_bb);
+
+                /* 7. Copy OK path: store and jump to merge */
+                ir_builder_set_insert_block(&ctx->builder, copy_ok_bb);
+                ir_emit_store(&ctx->builder, dup_p->result, res_slot->result);
+                ir_emit_br(&ctx->builder, merge_bb);
+
+                /* 8. Abort path: exit(1) */
+                ir_builder_set_insert_block(&ctx->builder, abort_bb);
+                IrValue *exit_code = ir_emit_const_int(&ctx->builder, ir_type_i32(arena), 1)->result;
+                ir_emit_call(&ctx->builder, "exit", ir_type_void(arena), &exit_code, 1);
+                ir_emit_br(&ctx->builder, merge_bb);
+
+                /* 9. Merge block: load result pointer */
+                ir_builder_set_insert_block(&ctx->builder, merge_bb);
+                IrInstruction *res_load = ir_emit_load(&ctx->builder, char_ptr_type, res_slot->result);
+                return res_load->result;
+            }
+
             int argc = expr->as.call.arg_count;
             IrValue **args = NULL;
             if (argc > 0) {
@@ -211,13 +286,45 @@ static IrValue *lower_expr(LowerCtx *ctx, AstNode *expr) {
             if (callee_fn) {
                 ret_type = callee_fn->return_type;
             } else if (ctx->program && ctx->program->type == NODE_PROGRAM) {
+                bool found = false;
                 for (int i = 0; i < ctx->program->as.program.count; i++) {
                     AstNode *fn_node = ctx->program->as.program.functions[i];
                     if (fn_node && strcmp(fn_node->as.function.name, expr->as.call.callee) == 0) {
                         ret_type = map_ast_type(arena, fn_node->as.function.return_type,
                                                 fn_node->as.function.return_is_array,
                                                 fn_node->as.function.return_class_name);
+                        found = true;
                         break;
+                    }
+                }
+                if (!found) {
+                    const char *callee_name = expr->as.call.callee;
+                    if (strcmp(callee_name, "equals") == 0 ||
+                        strcmp(callee_name, "is_int") == 0 ||
+                        strcmp(callee_name, "is_float") == 0 ||
+                        strcmp(callee_name, "has") == 0 ||
+                        strcmp(callee_name, "write_file") == 0 ||
+                        strcmp(callee_name, "file_exists") == 0 ||
+                        strcmp(callee_name, "write_bytes") == 0) {
+                        ret_type = ir_type_bool(arena);
+                    } else if (strcmp(callee_name, "char_at") == 0) {
+                        ret_type = ir_type_char(arena);
+                    } else if (strcmp(callee_name, "to_float") == 0 ||
+                               strcmp(callee_name, "sqrt") == 0 ||
+                               strcmp(callee_name, "sin") == 0 ||
+                               strcmp(callee_name, "cos") == 0 ||
+                               strcmp(callee_name, "tan") == 0 ||
+                               strcmp(callee_name, "pow") == 0) {
+                        ret_type = ir_type_f64(arena);
+                    } else if (strcmp(callee_name, "concat") == 0 ||
+                               strcmp(callee_name, "substring") == 0 ||
+                               strcmp(callee_name, "char_to_string") == 0 ||
+                               strcmp(callee_name, "to_string") == 0 ||
+                               strcmp(callee_name, "read_file") == 0) {
+                        ret_type = ir_type_ptr(arena, ir_type_char(arena));
+                    } else {
+                        /* Infer default i32 for non-void C functions / other builtins */
+                        ret_type = ir_type_i32(arena);
                     }
                 }
             } else {
@@ -286,6 +393,7 @@ static void lower_stmt(LowerCtx *ctx, AstNode *stmt) {
                     IrInstruction *dup = ir_emit_call(&ctx->builder, "strdup", ir_type_ptr(arena, ir_type_char(arena)), &arg_val, 1);
                     val = dup->result;
                 }
+                emit_cleanups(ctx, stmt);
                 ir_emit_store(&ctx->builder, val, b->slot);
             }
             break;

@@ -142,6 +142,8 @@ static bool is_stdlib_heap_fn(const char *name) {
            strcmp(name, "net_recv") == 0 ||
            strcmp(name, "net_recv_raw") == 0 ||
            strcmp(name, "net_recv_http") == 0 ||
+           strcmp(name, "str_from_cstr") == 0 ||
+           strcmp(name, "string_from_cstr") == 0 ||
            strcmp(name, "program_name") == 0 ||
            strcmp(name, "args") == 0 ||
            strcmp(name, "keys") == 0;
@@ -196,7 +198,7 @@ static void analyze_block(ScopeStack *stack, AstNode *block_node, bool is_loop) 
                 stmt->free_old_on_reassign = true;
                 bool val_is_str = (stmt->as.assign.value->type == NODE_LITERAL && stmt->as.assign.value->as.literal.lit_type == TY_STRING) ||
                                   (stmt->as.assign.value->type == NODE_FSTRING) ||
-                                  (stmt->as.assign.value->type == NODE_CALL && (strcmp(stmt->as.assign.value->as.call.callee, "concat") == 0 || strcmp(stmt->as.assign.value->as.call.callee, "substring") == 0 || strcmp(stmt->as.assign.value->as.call.callee, "char_to_string") == 0 || strcmp(stmt->as.assign.value->as.call.callee, "to_string") == 0 || strcmp(stmt->as.assign.value->as.call.callee, "read_file") == 0 || strcmp(stmt->as.assign.value->as.call.callee, "read_line") == 0 || strcmp(stmt->as.assign.value->as.call.callee, "input") == 0 || strcmp(stmt->as.assign.value->as.call.callee, "program_name") == 0));
+                                  (stmt->as.assign.value->type == NODE_CALL && (strcmp(stmt->as.assign.value->as.call.callee, "concat") == 0 || strcmp(stmt->as.assign.value->as.call.callee, "substring") == 0 || strcmp(stmt->as.assign.value->as.call.callee, "char_to_string") == 0 || strcmp(stmt->as.assign.value->as.call.callee, "to_string") == 0 || strcmp(stmt->as.assign.value->as.call.callee, "read_file") == 0 || strcmp(stmt->as.assign.value->as.call.callee, "read_line") == 0 || strcmp(stmt->as.assign.value->as.call.callee, "input") == 0 || strcmp(stmt->as.assign.value->as.call.callee, "str_from_cstr") == 0 || strcmp(stmt->as.assign.value->as.call.callee, "string_from_cstr") == 0 || strcmp(stmt->as.assign.value->as.call.callee, "program_name") == 0));
                 bool val_is_arr = !val_is_str;
                 add_free_to_node(stack, stmt, stmt->as.assign.name, val_is_arr);
             }
