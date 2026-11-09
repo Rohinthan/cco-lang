@@ -1,4 +1,4 @@
-# Cco — C Class with Objects
+# Cco — C Class and Objects
 
 Cco (C Class with Objects) is a statically typed, compiled programming language designed to combine readable, approachable syntax with systems-level programming capabilities.
 
