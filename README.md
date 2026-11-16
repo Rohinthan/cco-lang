@@ -1,191 +1,77 @@
-# Cco — C Class with Objects
+# Cco — C Class and Objects
 
-Cco (C Class with Objects) is a statically typed, compiled programming language designed to combine readable, approachable syntax with systems-level programming capabilities.
+Cco (C Class and Objects) is a statically typed, compiled programming language and compiler project designed to combine readable, approachable syntax with systems-level programming capabilities and deterministic compile-time memory safety.
 
-Cco's design goals include Python-inspired readability, C-like performance, C++-style classes and objects, and Rust-inspired memory-safety concepts.
-
-Cco currently provides a C11 code-generation pipeline and an evolving native x86-64 backend. Their supported features differ, and development continues toward broader language and standard-library support.
+Cco provides a dual-target compilation model featuring a portable C11 source-to-source backend and an evolving direct native x86-64 machine-code backend.
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Linux%20x86--64-brightgreen.svg)]()
 [![Build](https://img.shields.io/badge/Build-ISO%20C11%20%7C%20Native%20x86--64-blue.svg)]()
 [![Memory Safety](https://img.shields.io/badge/Memory%20Verification-Valgrind%200%20Leaks-success.svg)]()
 
-Cco (pronounced *C-co*, historically designated *C--*) explores a distinctive middle ground in programming language design: the visual clarity and lightweight syntax of high-level scripting languages coupled with the performance, predictable resource usage, and static guarantees of compiled systems languages. 
+---
 
-Cco features a dual-target compilation model:
-1. **Standard C11 Code Generation**: A portable source-to-source backend generating clean, standard ISO C11 (`-std=c11 -pedantic-errors`) for auditing, cross-compilation, or deployment with host C compilers (`gcc`, `clang`, `tcc`).
-2. **Evolving Native x86-64 Backend**: A direct machine-code backend that emits binary machine instructions, constructs standard ELF64 relocatable object files (`.o`), and links standalone Linux executables via an embedded static linker and freestanding syscall runtime (`_start`)—without requiring external toolchains (`gcc`, `as`, `ld`, or `libc.so`). Feature support between the C11 and native backends currently differs, with language evolution actively underway.
+## Table of Contents
+
+1. [Project Introduction](#1-project-introduction)
+2. [What is Cco?](#2-what-is-cco)
+3. [Design Philosophy](#3-design-philosophy)
+4. [Key Language Features](#4-key-language-features)
+5. [Compiler Architecture](#5-compiler-architecture)
+6. [Backend Support](#6-backend-support)
+7. [C Interoperability](#7-c-interoperability)
+8. [Example Program](#8-example-program)
+9. [Build and Usage Instructions](#9-build-and-usage-instructions)
+10. [Current Development Status](#10-current-development-status)
+11. [Roadmap](#11-roadmap)
+12. [Contributing and License Information](#12-contributing-and-license-information)
 
 ---
 
-## Installation & Quick Start
+## 1. Project Introduction
 
-Cco can be compiled and installed with a C11-compatible compiler (`gcc` or `clang`) and `make`.
+Cco (pronounced *C-co*, historically designated *C--*) explores a distinctive middle ground in programming language design: combining the visual clarity and lightweight syntax of high-level scripting languages with the raw performance, predictable resource usage, and static guarantees of compiled systems languages.
 
-### 1. Building from Source
-
-Clone the repository and build the compiler:
-
-```bash
-git clone https://github.com/Rohinthan/cco-lang.git
-cd cco-lang
-make
-```
-
-This compiles the `cco` compiler executable, along with companion aliases `gcco` and `cco-link`.
-*(Note: Running `make install` automatically builds the compiler first if it has not yet been built.)*
-
-### 2. Installing for the Current User (Recommended)
-
-To install Cco for your local user account without requiring root or `sudo` privileges:
-
-```bash
-make install
-```
-
-By default, this installs:
-- Executables (`cco`, `gcco`, `cco-link`) into `~/.local/bin/` (with executable permissions `0755`)
-- Standard library modules (`io.cco`, `net.cco`, `buffer.cco`, `result.cco`, `option.cco`, `string.cco`, `math.cco`, `deque.cco`) into `~/.local/lib/cco/std/` (with permissions `0644`)
-
-To uninstall at any time:
-```bash
-make uninstall
-```
-
-### 3. Installing System-Wide
-
-To install Cco system-wide for all users across the system:
-
-```bash
-sudo make install PREFIX=/usr/local
-```
-
-This installs executables to `/usr/local/bin` and the standard library to `/usr/local/lib/cco/std`.
-
-For packaging workflows, `DESTDIR` staging is supported:
-```bash
-make install PREFIX=/usr/local DESTDIR=/path/to/staging/root
-```
-
-To remove a system-wide installation:
-```bash
-sudo make uninstall PREFIX=/usr/local
-```
-
-### 4. Verifying the Installation
-
-1. Verify that `cco` is accessible from your command line:
-   ```bash
-   cco
-   ```
-   *(Running `cco` without arguments prints the compiler usage help and command-line options.)*
-
-2. Create and run a minimal test program outside the source directory:
-   ```bash
-   echo 'print("Hello from Cco!");' > test_hello.cco
-   cco test_hello.cco --run
-   ```
-   Output:
-   ```text
-   Hello from Cco!
-   ```
-
-3. Verify standard library imports:
-   ```bash
-   echo 'import "std/io.cco"; print(file_exists("test_hello.cco"));' > test_io.cco
-   cco test_io.cco --run
-   ```
-   Output:
-   ```text
-   true
-   ```
-
-### 5. Troubleshooting PATH and Standard-Library Discovery
-
-- **Command not found (`cco: command not found`):**
-  If `make install` succeeded but running `cco` fails, `~/.local/bin` is not currently in your environment `$PATH`. Not all Linux distributions include `~/.local/bin` in `$PATH` by default.
-  Add it to your current session:
-  ```bash
-  export PATH="$HOME/.local/bin:$PATH"
-  ```
-  To make this permanent for Bash users, append the export to your `~/.bashrc`:
-  ```bash
-  echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
-  source ~/.bashrc
-  ```
-
-- **Standard Library Resolution (`cannot find imported file 'std/...'`):**
-  The installed `cco` compiler automatically resolves standard library modules relative to its own binary location using `/proc/self/exe` (resolving to `../lib/cco/std/...`).
-  If you are running the compiler from a non-standard location or custom container layout, you can override the discovery path by setting the `CCO_STD_PATH` environment variable:
-  ```bash
-  export CCO_STD_PATH="$HOME/.local/lib/cco/std"
-  ```
+The project encompasses both the language specification and a complete reference compiler written in modular C11, featuring intermediate representation lowering, an SSA-based optimization pipeline, a direct binary x86-64 machine-code emitter, a freestanding ELF64 static linker, and comprehensive Foreign Function Interface (FFI) support for seamless C library integration.
 
 ---
 
-## Tutorial: Writing Your First Program (`example.cco`)
+## 2. What is Cco?
 
-```cco
-# example.cco
-fn square(x: int) -> int = x * x;
+Cco is a statically typed, compiled systems programming language. It is not an interpreted scripting language, nor does it rely on a virtual machine or a runtime garbage collector.
 
-x = 10;
-y = square(x);
-print(y);
-
-total = 0;
-for i in 0..5 {
-    if i > 0 and i < 4 {
-        total += i;
-    }
-}
-print(total);
-```
-
-### 3. Compile and Run
-
-```bash
-# Compile to a native executable
-cco example.cco -o example
-
-# Run the binary
-./example
-```
-
-Output:
-```text
-100
-6
-```
-
-You can also execute programs directly in one step without producing a persistent binary:
-```bash
-cco example.cco --run
-```
+### Core Attributes
+- **Dual-Target Compilation**:
+  1. **Standard C11 Code Generation**: Transpiles Cco source into clean, standard ISO C11 (`-std=c11 -pedantic-errors`) for auditability, cross-platform portability, or compilation with host C compilers (`gcc`, `clang`, `tcc`).
+  2. **Direct Native x86-64 Backend**: Compiles directly to binary machine instructions, constructs ELF64 relocatable object files (`.o`), and links standalone Linux executables via an embedded static linker and freestanding syscall runtime (`_start`)—without requiring external toolchains.
+- **Deterministic Lifetime Management**: Memory and operating system resources are managed at compile time through affine single-ownership and reverse scope-exit destructor cascades.
+- **Bare-Metal Execution**: Programs execute directly on the hardware with zero runtime garbage-collection pauses.
 
 ---
 
-## Why Cco?
+## 3. Design Philosophy
 
-Systems programming has traditionally required developers to choose between two poles:
+Systems programming has traditionally forced a compromise between extremes:
+- **Low-level languages (C, C++)** provide bare-metal execution speed and fine-grained hardware control, but lack compile-time safety against spatial and temporal memory defects (buffer overflows, use-after-free, double-free).
+- **Managed languages (Python, Go, Java)** provide high developer ergonomics or automated safety through garbage collection or dynamic interpreters, but introduce runtime pauses, elevated memory footprints, and execution overhead unsuitable for latency-sensitive environments.
+- **Modern safe systems languages (Rust)** prove that compile-time memory safety without garbage collection is achievable, but carry high cognitive overhead (complex lifetime annotations, strict syntactic ceremony) and longer compilation cycles.
 
-- **Low-level languages (C, C++)** provide bare-metal execution speed and fine-grained hardware control, but lack compile-time memory safety. Unchecked pointer arithmetic and manual lifecycle management routinely introduce spatial and temporal memory vulnerabilities (buffer overflows, use-after-free, double-free).
-- **Managed languages (Python, Go, Java)** provide high developer ergonomics or automated safety through garbage collection or dynamic interpreters. However, they introduce non-deterministic runtime pauses, elevated memory footprints, and execution overhead that can make them unsuitable for latency-sensitive or resource-constrained environments.
-- **Modern safe systems languages (Rust)** prove that compile-time memory safety without garbage collection is achievable, but often carry high cognitive overhead (complex lifetime annotations, strict syntactic ceremony) and long compilation times.
+Cco explores an alternative balance within this space:
 
-Cco explores an alternative balance within this design space:
+- **Python-Inspired Ergonomics**: Declaration-by-assignment, range loops, unparenthesized control flow, expression-bodied functions, readable boolean keywords (`and`, `or`, `not`), and top-level script execution reduce visual noise and boilerplate.
+- **C-Like Native Performance**: Stack-allocated value structs, zero-overhead function calls, direct machine-code generation, and low-level pointer capabilities enable performance on par with native C.
+- **Rust-Inspired Memory & Resource Safety**: Affine single-ownership, compile-time move tracking, borrowed references (`&T`), and deterministic scope-exit cleanups prevent resource leaks and use-after-free errors without a garbage collector.
+- **Automatic Ownership & Deterministic Cleanup**: Resources are reclaimed immediately and deterministically when their owning binding leaves scope.
+- **Practical Systems Interoperability**: First-class FFI allows direct access to the vast ecosystem of existing C libraries without translation overhead.
 
-- **Concise, readable syntax**: First-class declaration-by-assignment, range loops, unparenthesized control flow, expression-bodied functions, and top-level scripts reduce cognitive overhead.
-- **Static type checking**: Every variable, parameter, and expression has a statically resolved type. Omitting variable keywords does not introduce dynamic typing or runtime type tags.
-- **Rust-inspired memory-safety concepts**: Explores deterministic compile-time memory safety through move semantics, borrowed references (`&T`), and reverse scope-exit destructor cascades without a runtime garbage collector, working toward memory safety without claiming full Rust-equivalent guarantees.
-- **Fast, self-contained compilation**: Direct machine-code encoding and an internal ELF64 static linker compile and link standalone executables in under 15 milliseconds.
-
-The objective is not to replace established languages, but to provide a practical systems language where programs are as concise to write as scripts while executing as bare-metal native binaries.
+> [!NOTE] Non-Replacement Stance
+> Cco does not claim to replace C, C++, or Rust. Rather, it serves as a practical systems language and compiler exploration: offering the ergonomic speed of scripting while producing self-contained, statically checked native binaries.
 
 ---
 
-## Language Features Overview
+## 4. Key Language Features
+
+### Feature Matrix
 
 | Area | Status | Description |
 | :--- | :---: | :--- |
@@ -204,7 +90,7 @@ The objective is not to replace established languages, but to provide a practica
 | **Classes (Reference Types)** | Implemented | Heap-allocated objects with single ownership, encapsulated methods, and automatic scope-exit deallocation cascades. |
 | **Tagged Unions (Enums)** | Implemented | Sum types with unit and payload variants; evaluated via compile-time exhaustiveness-checked `match` statements. |
 | **Dynamic Collections** | Implemented | Typed arrays (`T[]` via `alloc`), growable lists (`list_new`, `push`, `pop`), and open-addressing hash maps (`map[K]V`). |
-| **Recursive Type Descriptors** | Implemented | Arbitrary nested container descriptors (`int[][]`, `map[string]int[]`, `(map[string]int)[]`) with synthesized recursive cleanups. |
+| **Recursive Type Descriptors** | Implemented | Arbitrary nested container descriptors (`int[][]`, `map[string]int[]`) with synthesized recursive cleanups. |
 | **Interfaces (Traits)** | Implemented | Monomorphized at compile time; generic calls generate specialized functions with zero vtable dispatch overhead. |
 | **F-String Interpolation** | Implemented | String interpolation with expression evaluation, automatic type conversion, and brace escaping (`{{`, `}}`). |
 | **POSIX Networking** | Implemented | Core socket primitives (`net_listen`, `net_accept`, `net_recv`, `net_send`, `net_close`, `sleep_ms`) for TCP services. |
@@ -212,235 +98,14 @@ The objective is not to replace established languages, but to provide a practica
 | **SSA Optimization Pipeline** | Implemented | Lengauer-Tarjan dominance, SSA $\phi$-construction, SCCP, GVN/CSE, LICM, inlining, and profile-guided block layout. |
 | **Internal ELF64 Linker** | Implemented | Standalone static linker producing executable ELF64 binaries with embedded `_start` syscall runtime (no `ld` or `libc`). |
 | **C11 Transpiler** | Implemented | Source-to-source transpilation targeting ISO C11 (`-std=c11 -pedantic-errors`) for GCC, Clang, TCC, and MSVC. |
-| **In-Source C FFI, Linking, Pointers & String Interop** | Implemented | `extern "C"` declarations (FFI-1), custom library linking via `-L` and `-l` options (FFI-2), core raw pointers (`*T`, `*char`, `*void`, `**char`, `null`) (FFI-3A), and explicit C string conversion (`str_to_cstr`, `str_from_cstr`) (FFI-3B). |
-| **Multithreading / Concurrency** | Planned | Native threading and thread-safe channels (currently network sockets execute sequentially). |
+| **Comprehensive C FFI** | Implemented | In-source declarations, library linking (`-L`/`-l`), raw pointers, const qualifiers, out-parameters, `unsafe` blocks, pointer difference, and aggregate pass-by-value ABI (FFI-1 through FFI-6). |
+| **Structured Concurrency** | Planned | Native multithreading and thread-safe channels integrated with affine single ownership. |
 
 ---
 
-## Language Syntax & Ergonomics
+## 5. Compiler Architecture
 
-### 1. Variables and Declaration by Assignment
-
-Cco allows variables to be declared upon first assignment without mandatory keywords:
-
-```cco
-# Variable creation via assignment
-count = 42;               # Inferred as int
-pi = 3.14159;             # Inferred as float
-name = "Cco";             # Inferred as string
-active = true;            # Inferred as bool
-```
-
-Subsequent assignments mutate the variable in place:
-
-```cco
-count = 50;
-count += 5;
-```
-
-Explicit type annotations are available whenever desired without requiring `let`:
-
-```cco
-limit: int = 100;
-ratio: float = 0.5;
-```
-
-Classic `let` syntax (`let x = 10;`, `let x: int = 10;`) remains fully supported for backward compatibility.
-
-### 2. Compile-Time Static Type Preservation
-
-Omitting declaration keywords does **not** introduce dynamic typing. The compiler strictly verifies type invariance across reassignments:
-
-```cco
-x = 10;
-x = "text";               # Compile error: cannot reassign int variable to string
-```
-
-Initial values are also checked against explicit annotations:
-
-```cco
-val: int = 3.14;          # Compile error: cannot initialize 'int' with 'float'
-```
-
-### 3. Functions
-
-Cco supports both concise expression-bodied functions and standard multi-statement blocks:
-
-```cco
-# Expression-bodied functions (single expression return)
-fn square(x: int) -> int = x * x;
-fn add(a: int, b: int) -> int = a + b;
-fn is_positive(x: int) -> bool = x > 0;
-
-# Standard block-bodied function
-fn clamp(val: int, low: int, high: int) -> int {
-    if val < low {
-        return low;
-    }
-    if val > high {
-        return high;
-    }
-    return val;
-}
-```
-
-### 4. Control Flow and Range Iteration
-
-Parentheses around conditions are optional, and readable boolean keywords are supported:
-
-```cco
-running = true;
-paused = false;
-
-if running and not paused {
-    print("System active");
-} else if paused {
-    print("System suspended");
-} else {
-    print("System stopped");
-}
-```
-
-Range loops iterate cleanly over half-open integer intervals `[start, end)`:
-
-```cco
-total = 0;
-for i in 0..10 {
-    total += i;
-}
-print(total);             # 45
-```
-
-Traditional C-style loops and while loops remain supported:
-
-```cco
-while total > 0 {
-    total -= 10;
-}
-```
-
-### 5. Structs and Operator Overloading
-
-Structs are stack-allocated value types with zero heap allocation overhead. They support compile-time operator overloading:
-
-```cco
-struct Vec2 {
-    x: float;
-    y: float;
-}
-
-fn operator+(a: Vec2, b: Vec2) -> Vec2 {
-    return Vec2 { x: a.x + b.x, y: a.y + b.y };
-}
-
-fn operator==(a: Vec2, b: Vec2) -> bool {
-    return a.x == b.x and a.y == b.y;
-}
-
-p = Vec2 { x: 1.0, y: 2.0 };
-q = Vec2 { x: 3.0, y: 4.0 };
-sum = p + q;
-print(sum.x);             # 4.0
-print(p == q);            # false
-```
-
-### 6. Tagged Unions (Enums) and Pattern Matching
-
-Enums support unit and payload variants, verified with compile-time exhaustiveness checking:
-
-```cco
-enum Shape {
-    Circle { radius: float },
-    Rect { width: float, height: float },
-    Point,
-}
-
-fn area(s: &Shape) -> float {
-    match s {
-        Shape.Circle { radius } => {
-            return 3.14159 * radius * radius;
-        }
-        Shape.Rect { width, height } => {
-            return width * height;
-        }
-        Shape.Point => {
-            return 0.0;
-        }
-    }
-}
-
-s = Shape.Rect { width: 4.0, height: 5.0 };
-print(area(&s));          # 20.0
-```
-
-### 7. Interactive Input & Multi-Argument Print
-
-Cco provides built-in Python-inspired interactive input and flexible console output ergonomics:
-
-#### Example 1: Read User Input
-```cco
-name = input("Enter your name: ");
-print("Hello", name);
-```
-
-Example interaction:
-```text
-Enter your name: Rohinthan
-Hello Rohinthan
-```
-
-#### Example 2: Multiple Print Arguments
-```cco
-language = "Cco";
-print("Welcome to", language);
-```
-
-Expected output:
-```text
-Welcome to Cco
-```
-
-#### Key Characteristics & Semantics:
-- **`input([prompt])`**: Reads a line of user input from standard input and returns a heap-allocated managed `string`. If an optional prompt string is provided, it is printed and standard output is flushed (`fflush(stdout)`) immediately before awaiting user input.
-- **Affine Ownership of Input**: The returned string is governed by Cco's affine single-ownership model; it is automatically freed upon scope exit with 0 leaks under Valgrind.
-- **Multi-Argument `print(arg1, arg2, ...)`**: Accepts multiple comma-separated expressions of any supported type (`string`, `int`, `float`, `bool`, `char`). Arguments are formatted sequentially separated by single spaces and terminated by a trailing newline.
-- **Backward Compatibility**: Existing single-argument `print(value);` invocations retain 100% backward compatibility.
-- *Note*: These ergonomics provide convenient I/O primitives (`input()` and multi-argument `print()`), not full Python runtime compatibility or dynamic f-string expressions.
-
----
-
-## Memory Safety & Ownership Model
-
-Cco achieves memory safety through **compile-time affine single-ownership and scope-based deallocation**, avoiding runtime garbage collection:
-
-### What the Compiler Enforces:
-
-1. **Unique Ownership**: Every heap-allocated resource (class instances, dynamic arrays, hash tables) has a single owning binding at any point in execution.
-2. **Move Semantics**: Transferring an owned variable via assignment or function parameter transfer moves ownership. The compiler's scope analyzer marks the source variable as moved and invalidates subsequent reads:
-   ```cco
-   class Buffer { size: int; }
-
-   fn consume(b: Buffer) -> void {
-       # b is owned and will be deallocated at the end of consume()
-   }
-
-   buf = Buffer { size: 1024 };
-   consume(buf);          # Ownership transferred
-   # print(buf.size);     <- Compile error: use of moved variable 'buf'
-   ```
-3. **Borrowed References (`&T`)**: Functions can inspect owned instances without taking ownership via borrowed references (`&T`). Borrowed references cannot outlive the owning scope and cannot be returned from functions.
-4. **Automated Scope-Exit Cascades**: When an owned resource leaves its defining lexical block without having been moved, the compiler automatically injects destructor and `free()` calls in reverse declaration order.
-5. **Collection Ownership Integrity**: Moving elements out of arrays or hash maps without replacement is rejected at compile time to prevent dangling slots. When an array or map leaves scope, all contained objects are deallocated recursively.
-
-### Scope and Limitations:
-
-Cco's current ownership model enforces single ownership, moves, and non-escaping borrowed references. It does not currently implement arbitrary lifetime parameters or non-lexical lifetimes for nested pointers across complex reference graphs.
-
----
-
-## Compiler Architecture
-
-The Cco compiler operates as an integrated multi-pass pipeline supporting two distinct compilation paths:
+The Cco reference compiler operates as an integrated multi-pass pipeline supporting two distinct compilation paths:
 
 ```
                       Cco Source Code (.cco)
@@ -480,32 +145,9 @@ The Cco compiler operates as an integrated multi-pass pipeline supporting two di
    (gcc / GNU ld)             (No external dependencies)
 ```
 
-> [!NOTE] Architecture & Portability
-> Cco retains its standard ISO C11 transpilation backend as a dependable portability route while the direct native x86-64 machine-code backend and register allocator continue to evolve. Not all CPU architectures are natively supported; the C11 backend guarantees cross-platform compilation wherever an ISO C11 compiler (such as GCC, Clang, or TCC) is present.
+### Intermediate Representation & Optimization Pipeline
 
----
-
-## Native Compilation & Linker
-
-Cco includes a fully self-contained native code generation backend:
-
-- **Target Architecture**: x86-64 (AMD64).
-- **Calling Convention**: System V AMD64 ABI subset:
-  - Integer/pointer arguments passed in `%rdi`, `%rsi`, `%rdx`, `%rcx`, `%r8`, `%r9`.
-  - Floating-point arguments passed in `%xmm0`–`%xmm7`.
-  - Return values passed in `%rax` and `%xmm0`.
-  - Standard 16-byte stack frame alignment.
-  - Callee-saved registers (`%rbx`, `%rsp`, `%rbp`, `%r12`–`%r15`) preserved across calls.
-- **Register Allocation**: Linear scan register allocator with automatic stack frame spill-slot assignment.
-- **Machine Code Encoder**: Direct binary instruction encoding (REX prefixes, ModR/M, SIB) without invoking an external assembler.
-- **ELF64 Object Writer**: Generates valid relocatable ELF64 object files (`.o`) containing `.text`, `.rodata`, `.symtab`, `.strtab`, and `.rela.text` sections.
-- **Internal Static Linker (`--use-internal-linker`)**: Directly resolves relocations (`R_X86_64_64`, `R_X86_64_32S`, `R_X86_64_PC32`) and synthesizes an executable ELF header and `PT_LOAD` program headers. It embeds a minimal assembly runtime (`src/runtime/runtime_start.s`) utilizing direct Linux kernel syscalls (`sys_write`, `sys_mmap`, `sys_munmap`, `sys_exit`), generating standalone binaries without glibc or GNU `ld`.
-
----
-
-## Optimization Pipeline
-
-Cco provides a staged optimization pipeline operating on its Static Single Assignment (SSA) intermediate representation:
+Cco lowers AST nodes into a linear quadruples Intermediate Representation (Cco-IR) before constructing Static Single Assignment (SSA) form.
 
 | Optimization Level | CLI Flag | Passes Included |
 | :--- | :---: | :--- |
@@ -514,7 +156,7 @@ Cco provides a staged optimization pipeline operating on its Static Single Assig
 | **SSA & Interprocedural** | `-O2` | Dominance analysis, SSA $\phi$-placement, SCCP, GVN/CSE, natural loop analysis, LICM, call graph analysis, function purity classification (`PURE`, `READONLY`), interprocedural inlining, dead function elimination (DFE), and critical edge splitting. |
 | **Profile-Guided (PGO)** | `--profile-generate`<br>`--profile-use=<file>` | Runtime edge profiling, profile serialization, basic block layout reordering for biased branches, and hot-path inlining budget expansion. |
 
-### Diagnostic & Inspection Flags:
+### Diagnostic & Inspection Flags
 
 ```bash
 cco source.cco --emit-ir              # Dump textual Cco-IR representation
@@ -528,277 +170,170 @@ cco source.cco --dump-code-stats      # Dump instruction count statistics
 
 ---
 
-## Building & Installing from Source
+## 6. Backend Support
 
-### System Requirements:
-- **Operating System**: Linux x86-64 (kernel 3.2+)
-- **C Compiler**: GCC 9+ or Clang 10+ (supporting ISO C11)
-- **Build System**: GNU Make
-- **Optional**: Valgrind 3.15+ (for running memory leak test suites)
+Cco provides two production-grade compilation backends:
 
-### 1. Build the Compiler
+### 1. Portable ISO C11 Transpiler (Default)
+- Emits clean, standard ISO C11 source code (`-std=c11 -pedantic-errors`).
+- Serves as a dependable portability route for cross-compiling or deploying to targets where host C compilers (GCC, Clang, TCC, MSVC) exist.
+- Emits zero external runtime dependencies beyond standard libc.
 
-```bash
-# Clone the repository
-git clone https://github.com/Rohinthan/cco-lang.git
-cd cco-lang
+### 2. Direct Native x86-64 Backend (`--use-native` / `--use-internal-linker`)
+- **Direct Machine Codegen**: Emits binary x86-64 machine instructions directly without invoking an external assembler (`as`).
+- **System V AMD64 Calling Convention**: Standard parameter registers (`%rdi`, `%rsi`, `%rdx`, `%rcx`, `%r8`, `%r9`), vector registers (`%xmm0`–`%xmm7`), 16-byte stack frame alignment, and callee-saved register preservation.
+- **Register Allocation**: Fast linear scan register allocator with automatic stack frame spill-slot assignment.
+- **Relocatable Object Writer**: Generates valid ELF64 relocatable object files (`.o`) containing `.text`, `.rodata`, `.symtab`, `.strtab`, and `.rela.text` sections.
+- **Internal Static Linker (`--use-internal-linker`)**: Directly resolves relocations (`R_X86_64_64`, `R_X86_64_32S`, `R_X86_64_PC32`) and produces standalone executable ELF64 binaries using an embedded freestanding assembly runtime (`src/runtime/runtime_start.s`) with direct Linux syscalls (`sys_write`, `sys_mmap`, `sys_munmap`, `sys_exit`), requiring neither `gcc`, GNU `ld`, nor `libc.so`.
 
-# Build the compiler executable (cco)
-make cco
+---
 
-# Verify local binary
-./cco --help
+## 7. C Interoperability
+
+Cco features a comprehensive Foreign Function Interface (FFI) for direct, type-checked communication with C libraries:
+
+- **In-Source Declarations**: Declare external functions using `extern "C" fn name(...) -> ret;` or block syntax `extern "C" { ... }`.
+- **Library Linking**: Link system or third-party libraries using `-L<dir>` and `-l<lib>` flags.
+- **Raw Pointers**: First-class raw pointer types (`*const T`, `*mut T`, `*const void`, `*mut void`, `null`) with strict const-correctness and non-owning invariants.
+- **Safe C String Interop**: Explicit built-in conversion functions `str_to_cstr(s)` (borrows Cco string buffer) and `str_from_cstr(p)` (defensively copies foreign C string into Cco managed memory).
+- **Out Parameters**: Pass mutable addresses of lvalues via `&var` to satisfy C out-parameter patterns.
+- **Quarantined Unsafe Blocks**: Operations that cannot be proven memory-safe at compile time (pointer dereferencing `*p`, `*p = val`, pointer arithmetic `p + n`, pointer casts `p as *mut T`) are strictly quarantined inside `unsafe { ... }` blocks.
+- **Pointer Difference**: Signed element-scaled pointer subtraction `p1 - p2` inside `unsafe` blocks.
+- **Aggregate Pass-by-Value ABI (System V AMD64)**: Pass and return Plain-Old-Data (POD) structs by value in foreign function calls. Supports recursive eightbyte classification, GPR/XMM register allocation, atomic stack rollback upon register exhaustion, and hidden return pointers (`sret`) for structures exceeding 16 bytes.
+
+> [!TIP] Complete FFI Specification
+> For complete documentation, detailed ABI classification rules, and code examples, see the [Cco FFI Specification & Guide](docs/FFI.md).
+
+---
+
+## 8. Example Program
+
+The following program demonstrates Cco's syntax ergonomics, value structs, range loops, and C interoperability:
+
+```cco
+# example.cco
+extern "C" {
+    fn puts(s: *const char) -> int;
+    fn abs(x: int) -> int;
+}
+
+struct Point {
+    x: int;
+    y: int;
+}
+
+fn square(n: int) -> int = n * n;
+
+fn manhattan_distance(p1: Point, p2: Point) -> int {
+    dx = p1.x - p2.x;
+    dy = p1.y - p2.y;
+    return abs(dx) + abs(dy);
+}
+
+fn main() -> int {
+    # Call foreign C function
+    puts(str_to_cstr("Starting Cco demonstration..."));
+
+    # Value structs and functions
+    p1 = Point { x: 10, y: 20 };
+    p2 = Point { x: 4,  y: 12 };
+    dist = manhattan_distance(p1, p2);
+    print("Manhattan distance:", dist);
+
+    # Range loop with boolean keywords
+    total = 0;
+    for i in 0..10 {
+        if i > 2 and i < 8 {
+            total += square(i);
+        }
+    }
+    print("Computed total:", total);
+
+    return 0;
+}
 ```
 
-### 2. Install to System
+### Compiling and Running
 
-#### Option A: User Installation (Recommended)
-Installs `cco`, `gcco`, and `cco-link` to `$HOME/.local/bin` and the standard library to `$HOME/.local/lib/cco/std`:
+```bash
+# 1. Compile using default C11 pipeline
+cco example.cco -o example
+./example
+
+# 2. Compile using direct native x86-64 backend
+cco example.cco --use-native -o example
+./example
+
+# 3. Compile and execute immediately in one step
+cco example.cco --run
+```
+
+Output:
+```text
+Starting Cco demonstration...
+Manhattan distance: 14
+Computed total: 135
+```
+
+---
+
+## 9. Build and Usage Instructions
+
+### System Requirements
+- **Operating System**: Linux x86-64 (kernel 3.2+)
+- **Host C Compiler**: GCC 9+ or Clang 10+ (supporting ISO C11)
+- **Build System**: GNU Make
+- **Optional**: Valgrind 3.15+ (for running memory verification suites)
+
+### 1. Building from Source
+
+```bash
+git clone https://github.com/Rohinthan/cco-lang.git
+cd cco-lang
+make cco
+```
+
+This compiles the `cco` compiler executable.
+
+### 2. Installing for the Current User (Recommended)
+
+To install Cco for your local user account without requiring `sudo` privileges:
 
 ```bash
 make install
 ```
 
-Ensure `~/.local/bin` is in your shell `PATH` (typically default on modern Linux, or append to `~/.bashrc`):
+By default, this installs:
+- Executables (`cco`, `gcco`, `cco-link`) into `~/.local/bin/`
+- Standard library modules (`io.cco`, `net.cco`, `math.cco`, `string.cco`, `buffer.cco`, `deque.cco`, `result.cco`, `option.cco`) into `~/.local/lib/cco/std/`
+
+Ensure `~/.local/bin` is in your shell `PATH`:
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-#### Option B: System-Wide Installation
-Installs binaries to `/usr/local/bin` and standard libraries to `/usr/local/lib/cco/std` across all users:
+To uninstall at any time:
+```bash
+make uninstall
+```
+
+### 3. Installing System-Wide
+
+To install system-wide across all users:
 
 ```bash
 sudo make install PREFIX=/usr/local
 ```
 
-### 3. Uninstall
-
-To remove Cco binaries and the standard library from your system:
-
+To uninstall:
 ```bash
-# For user-level installation:
-make uninstall
-
-# For system-wide installation:
 sudo make uninstall PREFIX=/usr/local
 ```
 
----
-
-## Basic CLI Usage
-
-Once installed, use `cco` directly from any directory *(or `./cco` if running locally inside the cloned repository)*:
+### 4. Running Verification Test Suites
 
 ```bash
-# 1. Compile to a native binary using the default C11 pipeline
-cco program.cco -o program
-./program
-
-# 2. Compile directly to an executable and run immediately
-cco program.cco --run
-
-# 3. Compile via native x86-64 backend and external linker
-cco program.cco --use-native -o program
-
-# 4. Compile and link completely standalone without gcc or ld
-cco program.cco --use-internal-linker -o program
-
-# 5. Compile with SSA optimizations (-O2)
-cco program.cco --ssa -O2 -o program
-
-# 6. Profile-Guided Optimization (two-phase compilation)
-cco program.cco --profile-generate -o program_instr && ./program_instr
-cco program.cco --profile-use cco.profile -O2 -o program_opt
-
-# 7. Output pure ISO C11 source code
-cco program.cco -o output.c
-```
-
----
-
-## Standard Library API Overview
-
-Cco includes a built-in standard library supporting essential systems tasks:
-
-- **Strings (`std/string.cco`)**: `len`, `concat`, `equals`, `char_at`, `substring`.
-- **Math (`std/math.cco`)**: `sqrt`, `pow`, `abs_int`, `abs_float`, `floor`, `ceil`, `min_int`, `max_int`, `min_float`, `max_float`.
-- **File I/O (`std/io.cco`)**: `read_file`, `write_file`, `read_line`.
-- **System**: `args`, `arg_count`, `program_name`, `to_int`, `to_float`, `random_int`, `random_seed`.
-- **POSIX Networking (`std/net.cco`)**:
-  - `net_listen(port: int) -> int`: Binds TCP socket with `SO_REUSEADDR` and listens with 128 backlog.
-  - `net_accept(server_fd: int) -> int`: Accepts incoming client connection.
-  - `net_recv(client_fd: int, max_bytes: int) -> string`: Reads data into managed string with HTTP framing detection.
-  - `net_send(client_fd: int, data: string) -> int`: Transmits response bytes.
-  - `net_close(fd: int) -> void`: Closes socket descriptor.
-  - `sleep_ms(ms: int) -> void`: High-resolution sleep via `nanosleep`.
-
----
-
-## In-Source C Interoperability, Library Linking, Raw Pointers & String Conversion (FFI-1, FFI-2, FFI-3A, FFI-3B)
-
-Cco supports direct in-source declarations for calling external C functions (`extern "C"`), command-line options (`-L` and `-l`) for linking against third-party and custom C libraries, core raw pointer types (`*T`, `*char`, `*void`, `null`) for non-owning C memory address and opaque handle management, and explicit conversion built-ins (`str_to_cstr`, `str_from_cstr`) for safe string interoperability across foreign boundaries.
-
-### 1. In-Source Declarations (`extern "C"`)
-
-External functions can be declared at module scope using single-line or block syntax:
-
-```cco
-# Block declaration
-extern "C" {
-    fn puts(message: string) -> int
-    fn abs(value: int) -> int
-    fn cos(x: float) -> float
-    fn getenv(name: *char) -> *char
-    fn free(ptr: *void) -> void
-}
-
-# Single-line declaration
-extern "C" fn custom_compute(a: int, b: int) -> int
-
-fn main() -> int {
-    puts("Calling C from Cco!")
-    let val: int = custom_compute(10, 20)
-    print(val)
-    return 0
-}
-```
-
-### 2. Linking Custom C Libraries (`-L` and `-l`)
-
-Link user or third-party native libraries (`.a` or `.so`) via compiler CLI flags:
-
-- `-L<dir>` or `-L <dir>`: Add a directory to the library search path.
-- `-l<lib>` or `-l <lib>`: Link `lib<lib>.so` or `lib<lib>.a`.
-
-```bash
-# Link a custom library located in ./lib
-cco app.cco -L ./lib -l mylib -o app
-
-# Compact syntax with multiple directories and libraries
-cco app.cco -L/opt/custom/lib -L./ext -lsqlite3 -lz -o app
-
-# Compile via native x86-64 backend with custom library linking
-cco app.cco --use-native -L./lib -lmylib -o app
-
-# Compile and run immediately
-cco app.cco -L./lib -lmylib --run
-```
-
-### 3. Core Raw Pointers (`*T`, `*char`, `*void`, `null`)
-
-Raw pointers provide non-owning, unmanaged memory addresses and opaque handle interoperability across both the C11 and native x86-64 backends:
-
-- **Pointer Type Syntax**: Prefix `*` type syntax declares pointers: `*char`, `*void`, `*int`, or nested pointers like `**char`.
-- **The `null` Literal**: `null` evaluates to a null pointer (`(void *)0` / address `0x0`). It can initialize or be assigned to any pointer variable.
-- **Strict Non-Owning Semantics**: Raw pointers represent unmanaged addresses. Cco scope analysis **never** tags a raw pointer as a heap owner, tracks it for scope destruction, or emits `free()` on scope exit.
-- **Type Safety & No Implicit Conversions**: `string` is an owned, heap-managed Cco type; `*char` is an unmanaged raw pointer. There is **no implicit conversion** between `string` and `*char`, preventing accidental double-free or use-after-free bugs.
-- **Opaque Handle Interoperability**: `*void` serves as a universal pointer compatible with any `*T` pointer type, enabling clean integration with opaque C handles (e.g., database handles, file descriptors, or context pointers).
-- **Pointer Comparisons**: Pointers support equality comparisons (`==`, `!=`, `== null`, `!= null`). On x86-64, pointer comparisons emit full 64-bit comparisons (`cmpq` / REX.W).
-- **Explicit Non-Goals (Rejected Operations in Safe Code)**:
-  - **No Pointer Arithmetic**: Operations such as `p + 1`, `p - 1`, `p * 2`, `p / 2`, `p += 1`, and `p++` are rejected with fatal compile-time errors.
-  - **No Dereference in Safe Code**: Unchecked dereference expressions (`*p`, `*(expr)`) are rejected at parse time (`"raw pointer dereferencing is not supported in safe code"`).
-  - **No Relational Pointer Comparisons**: Expressions such as `p < q` or `p >= q` are rejected.
-  - **No Pointer Indexing**: Expressions such as `p[0]` are rejected.
-
-```cco
-extern "C" {
-    fn getenv(name: *char) -> *char
-    fn puts(s: *char) -> int
-    fn create_context() -> *void
-    fn destroy_context(ctx: *void) -> void
-}
-
-fn check_session(ctx: *void) -> int {
-    if ctx == null {
-        return 1
-    }
-    return 0
-}
-
-fn main() -> int {
-    let ctx: *void = create_context()
-    if ctx != null {
-        check_session(ctx)
-        destroy_context(ctx)
-    }
-    return 0
-}
-```
-
-### 4. Explicit C String Conversion & Interoperability (FFI-3B)
-
-Cco provides explicit built-in conversion functions between heap-managed Cco `string` values and foreign C character pointers (`*char`):
-
-- **`str_to_cstr(s: string) -> *char`** (Canonical alias: **`string_to_cstr`**):
-  - Returns a borrowed, non-owning pointer to the underlying NUL-terminated byte buffer of `s`.
-  - The returned pointer inherits the lifetime of the owning `string`. It introduces no new ownership and emits no deallocations upon scope exit.
-  - If `s` is empty, it returns a pointer to a valid static empty string buffer (`""`).
-  - Passing anything other than a `string` expression is rejected at compile time with a fatal type diagnostic.
-
-- **`str_from_cstr(p: *char) -> string`** (Canonical alias: **`string_from_cstr`**):
-  - Ingests a foreign C character pointer and produces an independent, heap-owned Cco `string`.
-  - The input buffer is defensively copied via `memcpy`/`strdup`. Subsequent mutations or deallocations of the foreign buffer have zero effect on the Cco string.
-  - Scope analysis tracks the resulting `string` as a local heap owner and guarantees automatic cleanup via `free()` upon scope exit or variable reassignment.
-  - Accepts only `*char` pointers and literal `null`. Arbitrary opaque handles (`*void`) and non-character pointers (`*int`, `**char`) are strictly rejected at compile time.
-  - Passing `null` safely produces an owned empty string (`""`) with zero memory leaks.
-  - Allocation failure adheres to a fail-fast abort policy (`exit(1)`), preventing partially initialized or corrupted owned strings.
-
-```cco
-extern "C" {
-    fn puts(s: *char) -> int
-    fn get_c_string() -> *char
-}
-
-fn main() -> int {
-    # 1. Borrow Cco string as *char to pass to C
-    let greeting: string = "Hello from Cco"
-    let p: *char = str_to_cstr(greeting)
-    puts(p)
-
-    # 2. Ingest foreign *char as an independent owned string
-    let foreign_p: *char = get_c_string()
-    let local_s: string = str_from_cstr(foreign_p)
-    puts(str_to_cstr(local_s))
-
-    # local_s is cleanly deallocated upon scope exit; foreign_p is not touched
-    return 0
-}
-```
-
-### 5. Backend Compatibility & Linking Semantics
-
-- **C11 & Native Host-Linker Pipelines**: Both the default C11 transpiler and the direct native backend (`--use-native`) pass `-L` and `-l` flags through to the host linker (`gcc`). Dependency ordering among static archives (`.a`) is preserved strictly in user-specified order.
-- **Toolchain Invocation via `execvp`**: The compiler driver invokes GCC or `$CC` directly via argument-vector process execution (`execvp`) rather than shell string concatenation (`system()`), preventing shell injection and preserving paths with spaces. As a consequence, the `CC` environment variable must identify an executable path or binary name (e.g., `CC=clang` or `CC=/usr/bin/gcc-14`) rather than a command with space-separated arguments (e.g., `CC="gcc -m64"`).
-- **Math Library Dependencies (`-lm`)**: The native backend (`--use-native`) automatically includes `-lm`. In the default C11 backend, `-lm` is added automatically only when Cco source code uses built-in math operations. When linking an external C library that depends on `libm` without math calls in Cco source code, pass an explicit `-lm` flag (e.g., `cco app.cco -L ./lib -lmylib -lm`).
-- **Freestanding Internal Linker Limitation**: The standalone internal linker (`--use-internal-linker`) targets self-contained freestanding executables with an embedded syscall runtime and does not support external dynamic libraries. Passing `-l` or `-L` with `--use-internal-linker` is rejected with an explanatory error directing the user to `--use-native`.
-- **Diagnostic Validation**: Omitted values (`-L`, `-l`), empty arguments (`-L ""`, `-l ""`), or unknown options produce immediate diagnostics with non-zero exit codes.
-
-### 6. Known Boundaries and Memory Invariants
-
-- **FFI-1 / FFI-2 / FFI-3A / FFI-3B Scope**: FFI-3A and FFI-3B introduce non-owning raw pointers (`*T`, `*void`, `*char`, `null`), pointer equality comparisons, and explicit safe string conversions (`str_to_cstr`, `str_from_cstr`). They do not introduce struct-by-value, variadic signatures (`...`), or unsafe dereference blocks.
-- **Resolving External Return Ownership Hazards**: External C functions returning static or unowned C strings (such as `getenv()`) declare return type `*char`, ensuring scope analysis treats the value as non-owning with 0 leaks and no invalid free. To ingest them safely into Cco's affine ownership system, use `str_from_cstr()` to create an independent heap-owned copy.
-- **Parameter Borrowing**: Arguments passed to `extern "C"` functions are borrowed. The caller retains ownership, and parameters are not deallocated by the callee.
-- **String Return Ownership**: Local variables bound to `string` are managed by Cco scope analysis and freed via `free()` upon scope exit. External C functions returning `string` are expected to transfer ownership of a `malloc()`-allocated buffer.
-- **Temporary Expression Lifetime**: Heap-allocating expressions passed directly to borrowed parameters without a local `let` binding are not tracked for scope-exit destruction.
-- **Self-Hosting Parity Gap**: In-source `extern "C"`, raw pointer syntax, and C string conversion built-ins are currently implemented in the reference C compiler. The self-hosted compiler (`selfhost/cco`) does not yet parse `extern "C"`, pointer types, or conversion built-ins.
-- **Target Platform**: In-source C FFI, raw pointer types, and string conversion built-ins are verified on Linux x86-64 under the System V AMD64 calling convention (64-bit pointer arguments passed in RDI, RSI, RDX, RCX, R8, R9; return pointer in RAX).
-
----
-
-## Testing & Validation
-
-The Cco compiler maintains strict verification standards across all components:
-
-- **100% Memory Verification under Valgrind**: Every integration test program is executed under `valgrind --leak-check=full --error-exitcode=1`. Any memory leak or file descriptor leak immediately fails the test runner.
-- **Integration Test Matrix**: **121 / 121 tests passing** across scalar arithmetic, branching, loops, memory moves, borrowed references, structs, classes, maps, enums, POSIX networking, and modern syntax ergonomics.
-- **Self-Hosted Lexer Comparison Harness**: **123 / 123 tests passing** via `tests/compare_lexers.sh`. A lexer written in Cco (`selfhost/lexer.cco`) produces token streams 100% byte-identical to the C reference lexer across all test programs.
-- **Compiler Bootstrap Validation**: Self-hosted parser, typechecker, and code generator verify pipeline bootstrap parity.
-- **Differential Optimization Verification**: Tests confirm that `-O0`, `-O1`, `-O2`, and PGO builds produce bitwise identical stdout results across differential program suites.
-
-Run the test suites locally:
-
-```bash
-# Run unit tests (optimizer, SSA, linker, syntax) under Valgrind
+# Run unit tests under Valgrind Memcheck
 make unit_tests
 
 # Run full integration test suite, bootstrap checks, and network tests
@@ -807,87 +342,67 @@ make test
 
 ---
 
-## Performance & Benchmarking
+## 10. Current Development Status
 
-Cco includes a reproducible benchmarking harness located in the companion repository [`cco-examples/bench`](https://github.com/Rohinthan/cco-examples/tree/main/bench). The harness compares execution runtimes, compilation latencies, and binary sizes across equivalent implementations in C (`gcc -O3`), C++, Rust (`--release`), Python 3.12, and Cco.
+The Cco compiler has achieved the following verified milestones:
 
-### Empirical Characteristics:
-
-- **Compilation Speed**: The native x86-64 backend processes, optimizes, and links standalone executables in **under 15 milliseconds** on modern x86-64 hardware.
-- **Linker Latency**: The internal static linker resolves relocations and writes ELF binaries in **0.09 to 0.15 ms**, compared to 15.0 to 25.0 ms when invoking external linkers.
-- **Runtime Execution**: In numerical loops and arithmetic kernels, Cco native code executes with throughput comparable to GCC `-O1` out-of-the-box, with SSA optimizations (LICM, GVN/CSE) and inlining providing significant instruction count reductions.
-
-For raw benchmark data and methodology, see [`cco-examples/bench/results`](https://github.com/Rohinthan/cco-examples/tree/main/bench/results).
-
----
-
-## Project Status & Roadmap
-
-### Current Status:
-- **Core Language & Type System**: Stable and verified across 121 integration test suites.
-- **Python-Inspired Surface Syntax**: Implemented and verified (declaration by assignment, range loops, boolean keywords, expression bodies).
-- **Affine Ownership & Memory Safety**: Implemented and verified (0 leaks under Valgrind Memcheck).
-- **Native x86-64 Backend & Internal Linker**: Implemented for the supported System V AMD64 ABI subset.
-- **Optimization Pipeline (SSA, LICM, PGO)**: Implemented and passing differential verification.
-
-### Roadmap & Planned Work:
-- **Advanced C FFI (FFI-3C+)**: Unsafe dereferencing blocks, pointer-to-slice conversions, variadic signatures, and self-hosted compiler FFI bootstrap parity.
-- **Cross-Platform Architectures**: Expanding the direct machine-code backend to support ARM64 (AArch64).
-- **Advanced Global Register Allocation**: Iterated register coalescing via graph coloring to reduce spill code in high-pressure loops.
-- **Structured Concurrency**: Native multithreading and message-passing channels integrated with affine ownership semantics.
+- **Core Language & Type System**: Fully verified across 121 integration test suites with 0 memory leaks under Valgrind Memcheck.
+- **Surface Syntax Ergonomics**: Declaration by assignment, range loops, boolean keywords, expression-bodied functions, and optional semicolons fully implemented.
+- **Affine Single-Ownership**: Compile-time move analysis and automated reverse-order scope-exit deallocation cascades fully verified.
+- **Dual-Backend Code Generation**: Portable C11 transpilation and native direct x86-64 machine-code generation passing differential parity suites.
+- **Foreign Function Interface (FFI-1 through FFI-6)**:
+  - In-source `extern "C"` declarations and custom library linking (`-L`/`-l`).
+  - Raw pointers (`*const T`, `*mut T`, `*void`, `null`) with const-subtyping.
+  - Safe C string conversions (`str_to_cstr`, `str_from_cstr`).
+  - Out parameters via address-taking (`&var`).
+  - Quarantined `unsafe { ... }` blocks with dereferencing, scaled pointer arithmetic, and casts.
+  - Pointer difference semantics (`p1 - p2`).
+  - System V AMD64 aggregate pass-by-value ABI (POD structs passed in GPR/XMM registers, atomic stack rollback, struct returns, and hidden `sret` pointers).
+- **Optimization Pipeline**: SSA construction, Dominance analysis, SCCP, GVN/CSE, LICM, inlining, and Profile-Guided Optimization (PGO) passing differential checks.
+- **Self-Hosting Parity**: Self-hosted bootstrap pipeline verified with bitwise-identical Stage 2 $\equiv$ Stage 3 fixpoint verification (`make test_selfhost_fixpoint`).
 
 ---
 
-## Technical Documentation Index
+## 11. Roadmap
 
-Detailed architectural specifications and engineering reports are available in [`docs/`](docs/):
+Future development directions include:
 
-- [`docs/CCO_LANGUAGE_REFERENCE.md`](docs/CCO_LANGUAGE_REFERENCE.md) — Comprehensive language grammar and semantic reference.
-- [`docs/CCO_IR_ARCHITECTURE.md`](docs/CCO_IR_ARCHITECTURE.md) — Design of the quadruples intermediate representation.
-- [`docs/CCO_X86_64_BACKEND.md`](docs/CCO_X86_64_BACKEND.md) — Native machine code generation and instruction encoding.
-- [`docs/CCO_PHASE3B_INTERNAL_ELF64_LINKER.md`](docs/CCO_PHASE3B_INTERNAL_ELF64_LINKER.md) — Internal ELF64 static linker architecture and `_start` syscall runtime.
-- [`docs/CCO_PHASE6_ADVANCED_SSA_OPTIMIZATION.md`](docs/CCO_PHASE6_ADVANCED_SSA_OPTIMIZATION.md) — SSA construction, dominance analysis, SCCP, GVN/CSE, and LICM.
-- [`docs/CCO_PHASE8_PROFILE_GUIDED_OPTIMIZATION.md`](docs/CCO_PHASE8_PROFILE_GUIDED_OPTIMIZATION.md) — Profile-guided optimization and branch layout reordering.
-- [`docs/CCO_PHASE10_LANGUAGE_SYNTAX_DESIGN.md`](docs/CCO_PHASE10_LANGUAGE_SYNTAX_DESIGN.md) & [`docs/CCO_PHASE11_LANGUAGE_SYNTAX_DESIGN.md`](docs/CCO_PHASE11_LANGUAGE_SYNTAX_DESIGN.md) — Python-inspired surface syntax design rationale.
-- [`docs/NETWORKING_AUDIT.md`](docs/NETWORKING_AUDIT.md) — POSIX socket runtime architecture and leak-free verification.
+- **Self-Hosted FFI Bootstrap Parity**: Updating the self-hosted compiler frontend (`selfhost/`) to parse and lower `extern "C"`, raw pointers, and aggregate ABI constructs.
+- **Advanced Global Register Allocation**: Iterated register coalescing via graph coloring to minimize spill slots in tight numerical loops.
+- **Structured Concurrency**: Native multithreading and message-passing channels integrated with affine single-ownership semantics.
+- **Cross-Platform Architectures**: Expanding the direct machine-code backend and calling convention implementation to support ARM64 (AArch64).
+- **Extended FFI Capabilities**: Exploring variadic foreign functions (`...`) and direct slice interop across foreign boundaries.
 
 ---
 
-## Companion Repository: `cco-examples`
+## 12. Contributing and License Information
 
-Standalone tests, practical application examples, algorithm implementations, and benchmark artifacts are curated in the companion repository [**Rohinthan/cco-examples**](https://github.com/Rohinthan/cco-examples):
-
-- **`codebase/`**: 251+ comprehensive example programs demonstrating language features from basics to advanced server architectures.
-- **`examples/`**: Tutorial programs, interactive I/O demos (`input()`, multi-argument `print()`), and multi-file module imports.
-- **`tests/`**: Standalone regression test cases and phase validation suites.
-- **`algorithms/`**: 65 machine learning and scientific computing implementations (linear regression, k-means, MLP, DBSCAN, decision trees, A* search, etc.) verified against NumPy and scikit-learn.
-- **`bench/`**: Multi-language performance benchmark suite, measurement harness, and empirical execution reports.
-
----
-
-## Contributing
-
-Contributions to the Cco compiler are welcome.
-
-### Repository Organization:
-- `src/`: Modular C11 reference compiler implementation organized into clean subsystems:
+### Repository Structure
+- `src/`: Reference compiler implementation in ISO C11:
   - `src/common/`: Shared diagnostics, source error formatting, and timing instrumentation.
-  - `src/frontend/`: Lexer, recursive-descent parser, AST definitions, module resolver, trait resolver, and ownership scope analysis.
+  - `src/frontend/`: Lexer, recursive-descent parser, AST structures, module resolver, trait resolver, and ownership scope analysis.
   - `src/ir/`: Quadruples IR, SSA dominance frontiers, optimization passes (SCCP, GVN/CSE, LICM, inlining, PGO), and IR verifier.
-  - `src/backend/c11/`: ISO C11 code generator, hash map runtime, and standard library preludes.
+  - `src/backend/c11/`: ISO C11 code generator, runtime headers, and standard library preludes.
   - `src/backend/x86_64/`: Native machine code generator, linear scan register allocator, instruction encoder, and ELF64 object emitter.
   - `src/runtime/`: Freestanding assembly runtime (`runtime_start.s`) for standalone Linux executables.
   - `src/main.c`: Top-level CLI driver and compiler entry point.
 - `selfhost/`: Self-hosted compiler sources written in Cco (`lexer.cco`, `parser.cco`, `typechecker.cco`, `codegen.cco`, `elf_core.cco`, `x86_64_core.cco`).
 - `std/`: Cco standard library modules (`net.cco`, `math.cco`, `io.cco`, `string.cco`, `buffer.cco`, `deque.cco`, `result.cco`, `option.cco`).
-- `tests/`: Extensive regression, unit, and adversarial test suites:
+- `tests/`: Comprehensive regression, unit, and adversarial test suites:
   - `tests/programs/`: Core integration test programs executed under Valgrind Memcheck.
   - `tests/unit/`: Unit tests for compiler subsystems (lexer, parser, scope analysis, map runtime).
-  - `tests/diagnostics/`: Phase 17 compiler error diagnostic fixtures and runner.
-  - `tests/phase15/`, `tests/phase16/`, `tests/phase17/`: Native backend differential verification suites.
-- `docs/`: Technical specifications and architectural design documents.
+  - `tests/diagnostics/`: Compiler error diagnostic fixtures and runner.
+  - `tests/ffi_3c1/`, `tests/ffi_3c2/`, `tests/ffi_4/`, `tests/ffi_5/`, `tests/ffi_6/`: FFI acceptance test suites.
+- `docs/`: Technical specifications, architectural decision records, and language reference documents:
+  - [`docs/FFI.md`](docs/FFI.md) — Comprehensive Foreign Function Interface specification.
+  - [`docs/CCO_LANGUAGE_REFERENCE.md`](docs/CCO_LANGUAGE_REFERENCE.md) — Language grammar and semantic reference.
+  - [`docs/CCO_IR_ARCHITECTURE.md`](docs/CCO_IR_ARCHITECTURE.md) — Intermediate representation design.
+  - [`docs/CCO_X86_64_BACKEND.md`](docs/CCO_X86_64_BACKEND.md) — Native machine code generation and instruction encoding.
 
-### Development Workflow:
+### Companion Repository: `cco-examples`
+Practical examples, benchmarks, and algorithms are curated in the companion repository [**Rohinthan/cco-examples**](https://github.com/Rohinthan/cco-examples).
+
+### Development Workflow
 1. Ensure all code compiles cleanly under `-Wall -Wextra -Werror -pedantic-errors -std=c11`:
    ```bash
    make clean && make cco
@@ -897,11 +412,11 @@ Contributions to the Cco compiler are welcome.
    make unit_tests
    make test
    ```
-3. Open an issue or pull request describing the proposed enhancement or bug fix.
+3. Submit pull requests or open issues describing enhancements or defect remediation.
 
 ---
 
 ## License
 
-Cco is open source software distributed under the terms of the **Apache License 2.0** (`Apache-2.0`).
-See the [`LICENSE`](LICENSE) file for details.
+Cco is open-source software distributed under the terms of the **Apache License 2.0** (`Apache-2.0`).
+See the [LICENSE](LICENSE) file for complete details.
